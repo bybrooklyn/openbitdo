@@ -39,7 +39,7 @@ jobs:
 
   hardware-smoke:
     runs-on: [self-hosted, linux, hid-lab]
-    if: github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
+    if: (github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch') && vars.HARDWARE_SMOKE_ENABLED == '1'
     continue-on-error: true
     needs: test
     defaults:
