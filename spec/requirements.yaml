@@ -1,0 +1,52 @@
+metadata:
+  version: 1
+  owner: cleanroom-sdk
+  status: draft
+requirements:
+  - id: REQ-PROT-001
+    title: CommandFrame model
+    description: SDK shall expose CommandFrame with command id, payload, report id, and expected response metadata.
+    acceptance: Unit tests validate frame creation for all CommandId values.
+  - id: REQ-PROT-002
+    title: Response validation
+    description: SDK shall validate responses using command-specific byte signatures.
+    acceptance: Parser rejection tests fail malformed responses and accept matching responses.
+  - id: REQ-PROT-003
+    title: Deterministic retries
+    description: SDK shall retry reads on timeout/malformed responses using configured retry count.
+    acceptance: Retry tests cover delayed and partial responses.
+  - id: REQ-PROT-004
+    title: Report width support
+    description: SDK shall support both 64-byte reports and variable-length boot/firmware frames.
+    acceptance: Encode/decode tests cover Report64 and variable report wrappers.
+
+  - id: REQ-PID-001
+    title: PID registry completeness
+    description: SDK shall include all PIDs present in sanitized pid_matrix.csv.
+    acceptance: pid registry coverage test count equals pid_matrix.csv row count.
+  - id: REQ-PID-002
+    title: Support-level gating
+    description: detect-only devices shall reject unsupported operations with UnsupportedForPid.
+    acceptance: Capability gating tests verify rejection for unsafe operations on detect-only PIDs.
+
+  - id: REQ-SAFE-001
+    title: Unsafe command dual confirmation
+    description: Unsafe commands shall require both unsafe and brick-risk acknowledgement flags.
+    acceptance: Boot safety tests verify command denial without both flags.
+  - id: REQ-SAFE-002
+    title: Experimental command policy
+    description: Inferred commands shall require experimental mode.
+    acceptance: Inferred-command tests verify denial without experimental flag.
+
+  - id: REQ-TEST-001
+    title: Golden profile fixture
+    description: SDK shall parse and serialize profile blobs compatible with golden binary fixture.
+    acceptance: Profile serialization test round-trips fixture payload.
+  - id: REQ-TEST-002
+    title: CLI structured output
+    description: CLI shall provide JSON output for automation.
+    acceptance: CLI tests assert stable JSON keys and command responses.
+  - id: REQ-TEST-003
+    title: Clean-room guard
+    description: CI shall fail if cleanroom/sdk references forbidden dirty-room locations or tokens.
+    acceptance: cleanroom guard script is executed in CI and by integration test.

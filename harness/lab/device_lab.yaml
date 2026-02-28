@@ -1,0 +1,26 @@
+version: 1
+devices:
+  - name: Pro3
+    vid: 0x2dc8
+    pid: 0x6009
+    capability:
+      supports_mode: true
+      supports_profile_rw: true
+      supports_boot: true
+      supports_firmware: true
+    protocol_family: DInput
+    evidence: confirmed
+  - name: UltimateBT2
+    vid: 0x2dc8
+    pid: 0x600f
+    capability:
+      supports_mode: true
+      supports_profile_rw: true
+      supports_boot: true
+      supports_firmware: true
+    protocol_family: DInput
+    evidence: confirmed
+policies:
+  require_mock_suite: true
+  hardware_jobs_non_blocking: true
+  promote_after_stable_weeks: 2
