@@ -1,0 +1,73 @@
+name: Release Blocker
+description: Report a problem that must be resolved before public RC release.
+title: "[release-blocker] <short summary>"
+labels:
+  - release-blocker
+  - severity:p1
+body:
+  - type: dropdown
+    id: severity
+    attributes:
+      label: Severity
+      description: Select the impact level for this blocker.
+      options:
+        - severity:p0 (critical)
+        - severity:p1 (high)
+        - severity:p2 (medium)
+    validations:
+      required: true
+  - type: input
+    id: vidpid
+    attributes:
+      label: VID/PID
+      description: Required for triage. Use format `0xVVVV:0xPPPP`.
+      placeholder: 0x2dc8:0x6012
+    validations:
+      required: true
+  - type: input
+    id: firmware_version
+    attributes:
+      label: Firmware version
+      description: Required for triage.
+      placeholder: 1.02
+    validations:
+      required: true
+  - type: input
+    id: openbitdo_version
+    attributes:
+      label: OpenBitdo version
+      placeholder: v0.0.1-rc.1
+    validations:
+      required: true
+  - type: textarea
+    id: summary
+    attributes:
+      label: What is broken?
+      description: One concise paragraph describing the blocker.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction steps
+      description: Provide deterministic steps from app launch to failure.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+  - type: textarea
+    id: attachments
+    attributes:
+      label: Attachments (optional but strongly recommended)
+      description: Attach TOML report/logs/screenshots if available to speed up triage.
+      placeholder: "Attach report TOML and logs if possible."

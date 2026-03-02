@@ -1,0 +1,4 @@
+operation = "u2_write_core_profile"
+pid = "0x6013"
+status = "sanitized-placeholder"
+notes = "Trace placeholder for clean-room replay harness"

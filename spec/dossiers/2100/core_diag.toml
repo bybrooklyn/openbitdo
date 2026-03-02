@@ -1,0 +1,30 @@
+# Sanitized static dirty-room dossier
+
+dossier_id = "DOS-2100-CORE-DIAG-W2"
+pid_hex = "0x2100"
+operation_group = "CoreDiag"
+command_id = ["GetPid", "GetReportRevision", "GetControllerVersion", "Version", "Idle"]
+request_shape = "64-byte HID report; command opcode in request[1], pid-specific capability gating outside payload"
+response_shape = "status header (byte0/byte1) + optional payload bytes for pid/version/revision"
+validator_rules = ["byte0 == 0x02", "response_len >= 4", "signature bytes match command expectation"]
+retry_behavior = "retry timeout or malformed responses up to configured max attempts with bounded backoff"
+failure_signatures = ["timeout", "malformed_frame", "unsupported_for_pid"]
+evidence_source = "static"
+confidence = "inferred"
+requirement_ids = ["REQ-DR-001", "REQ-DR-W2-001", "REQ-PROM-001", "REQ-PROM-W2-001", "REQ-PID-002"]
+class_family = "Standard64"
+notes = "Wave 2 static dossier for PID_Xcloud; support tier remains candidate-readonly"
+
+[state_machine]
+pre_state = "DeviceConnected"
+action = "Run core diagnostics read sequence"
+post_state = "DeviceIdentified"
+invalid_transitions = ["NoDevice", "TransportClosed", "BootloaderOnly"]
+
+[runtime_placeholder]
+required = true
+evidence_needed = ["runtime request/response traces for core diagnostics", "command-level status validation examples"]
+
+[hardware_placeholder]
+required = true
+evidence_needed = ["identify + diag run on physical device", "repeatable read success across reconnects"]

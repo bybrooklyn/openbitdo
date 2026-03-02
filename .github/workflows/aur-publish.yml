@@ -1,0 +1,130 @@
+name: AUR Publish
+
+on:
+  workflow_call:
+    inputs:
+      tag:
+        description: "Release tag to publish (for example: v0.0.1-rc.1)"
+        required: true
+        type: string
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to publish (for example: v0.0.1-rc.1)"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  publish-aur:
+    if: vars.AUR_PUBLISH_ENABLED == '1'
+    runs-on: ubuntu-latest
+    container: archlinux:base
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      TAG: ${{ inputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install AUR packaging dependencies
+        run: |
+          pacman -Sy --noconfirm --needed base-devel git openssh curl github-cli
+
+      - name: Wait for release assets
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 30); do
+            if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+              echo "release ${TAG} is available"
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "release ${TAG} was not found after waiting" >&2
+          exit 1
+
+      - name: Render AUR metadata from released assets
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/release-input /tmp/release-metadata
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" \
+            --pattern "openbitdo-${TAG}-linux-x86_64.tar.gz" \
+            --pattern "openbitdo-${TAG}-linux-aarch64.tar.gz" \
+            --pattern "openbitdo-${TAG}-macos-arm64.tar.gz" \
+            --dir /tmp/release-input
+          gh api -H "Accept: application/octet-stream" "repos/${GITHUB_REPOSITORY}/tarball/${TAG}" \
+            > "/tmp/release-input/openbitdo-${TAG}-source.tar.gz"
+          bash packaging/scripts/render_release_metadata.sh \
+            "$TAG" \
+            "$GITHUB_REPOSITORY" \
+            /tmp/release-input \
+            /tmp/release-metadata
+          useradd -m builder
+          chown -R builder:builder /tmp/release-metadata
+          su builder -s /bin/bash -c "set -euo pipefail; \
+            cd /tmp/release-metadata/aur/openbitdo; \
+            makepkg --printsrcinfo > .SRCINFO; \
+            cd /tmp/release-metadata/aur/openbitdo-bin; \
+            makepkg --printsrcinfo > .SRCINFO"
+
+      - name: Upload rendered metadata (audit)
+        uses: actions/upload-artifact@v4
+        with:
+          name: aur-rendered-metadata-${{ inputs.tag }}
+          path: |
+            /tmp/release-metadata/aur/openbitdo/PKGBUILD
+            /tmp/release-metadata/aur/openbitdo/.SRCINFO
+            /tmp/release-metadata/aur/openbitdo-bin/PKGBUILD
+            /tmp/release-metadata/aur/openbitdo-bin/.SRCINFO
+            /tmp/release-metadata/checksums.env
+
+      - name: Configure SSH for AUR
+        run: |
+          if [[ -z "${{ secrets.AUR_USERNAME }}" ]]; then
+            echo "missing required secret: AUR_USERNAME" >&2
+            exit 1
+          fi
+          if [[ -z "${{ secrets.AUR_SSH_PRIVATE_KEY }}" ]]; then
+            echo "missing required secret: AUR_SSH_PRIVATE_KEY" >&2
+            exit 1
+          fi
+          mkdir -p ~/.ssh
+          echo "${{ secrets.AUR_SSH_PRIVATE_KEY }}" > ~/.ssh/aur
+          chmod 600 ~/.ssh/aur
+          ssh-keyscan -H aur.archlinux.org >> ~/.ssh/known_hosts
+
+      - name: Publish openbitdo
+        env:
+          GIT_SSH_COMMAND: ssh -i ~/.ssh/aur
+          AUR_USER: ${{ secrets.AUR_USERNAME }}
+        run: |
+          set -euo pipefail
+          TMP="$(mktemp -d)"
+          git clone "ssh://${AUR_USER}@aur.archlinux.org/openbitdo.git" "$TMP/openbitdo"
+          cp /tmp/release-metadata/aur/openbitdo/PKGBUILD "$TMP/openbitdo/PKGBUILD"
+          cp /tmp/release-metadata/aur/openbitdo/.SRCINFO "$TMP/openbitdo/.SRCINFO"
+          cd "$TMP/openbitdo"
+          git config user.name "openbitdo-ci"
+          git config user.email "actions@users.noreply.github.com"
+          git add PKGBUILD .SRCINFO
+          git commit -m "Update openbitdo package for ${TAG}" || exit 0
+          git push
+
+      - name: Publish openbitdo-bin
+        env:
+          GIT_SSH_COMMAND: ssh -i ~/.ssh/aur
+          AUR_USER: ${{ secrets.AUR_USERNAME }}
+        run: |
+          set -euo pipefail
+          TMP="$(mktemp -d)"
+          git clone "ssh://${AUR_USER}@aur.archlinux.org/openbitdo-bin.git" "$TMP/openbitdo-bin"
+          cp /tmp/release-metadata/aur/openbitdo-bin/PKGBUILD "$TMP/openbitdo-bin/PKGBUILD"
+          cp /tmp/release-metadata/aur/openbitdo-bin/.SRCINFO "$TMP/openbitdo-bin/.SRCINFO"
+          cd "$TMP/openbitdo-bin"
+          git config user.name "openbitdo-ci"
+          git config user.email "actions@users.noreply.github.com"
+          git add PKGBUILD .SRCINFO
+          git commit -m "Update openbitdo-bin package for ${TAG}" || exit 0
+          git push

@@ -1,0 +1,30 @@
+# Sanitized static dirty-room dossier
+
+dossier_id = "DOS-901A-FW-PREFLIGHT-W2"
+pid_hex = "0x901a"
+operation_group = "FirmwarePreflight"
+command_id = ["GetReportRevision", "GetControllerVersion", "Version"]
+request_shape = "64-byte HID read commands used for firmware readiness and metadata preflight"
+response_shape = "status bytes + firmware/version metadata bytes when present"
+validator_rules = ["byte0 == 0x02", "metadata bytes pass bounds checks", "device remains in application mode"]
+retry_behavior = "safe-read retries only; firmware transfer/write commands stay blocked for candidate-readonly"
+failure_signatures = ["timeout", "metadata_mismatch", "unsupported_for_pid"]
+evidence_source = "static"
+confidence = "inferred"
+requirement_ids = ["REQ-DR-001", "REQ-DR-W2-001", "REQ-PROM-001", "REQ-PROM-W2-001", "REQ-PROM-W2-002"]
+class_family = "Standard64"
+notes = "Preflight-only dossier for PID_ArcadeStick; no bootloader entry/chunk/commit enablement"
+
+[state_machine]
+pre_state = "DeviceIdentified"
+action = "Read firmware preflight metadata"
+post_state = "FirmwarePreflightReady"
+invalid_transitions = ["NoDevice", "BootloaderActive", "TransferInProgress"]
+
+[runtime_placeholder]
+required = true
+evidence_needed = ["runtime preflight metadata traces", "error signature samples for invalid firmware path"]
+
+[hardware_placeholder]
+required = true
+evidence_needed = ["hardware preflight check success", "metadata stability across reconnects"]

@@ -43,10 +43,86 @@ requirements:
     description: SDK shall parse and serialize profile blobs compatible with golden binary fixture.
     acceptance: Profile serialization test round-trips fixture payload.
   - id: REQ-TEST-002
-    title: CLI structured output
-    description: CLI shall provide JSON output for automation.
-    acceptance: CLI tests assert stable JSON keys and command responses.
+    title: Beginner-first report output
+    description: User-facing reports shall be TOML-only and hidden on happy path.
+    acceptance: Report tests assert TOML persistence for diagnostics/failure flows and no JSON output path.
   - id: REQ-TEST-003
     title: Clean-room guard
     description: CI shall fail if cleanroom/sdk references forbidden dirty-room locations or tokens.
     acceptance: cleanroom guard script is executed in CI and by integration test.
+  - id: REQ-JP108-001
+    title: JP108 dedicated mapping read/write
+    description: SDK shall support reading and writing JP108 dedicated button mappings for A/B/K1-K8.
+    acceptance: Unit and hardware tests verify read/write/readback for A, B, and at least one K button.
+  - id: REQ-JP108-002
+    title: JP108 firmware path
+    description: SDK shall support JP108 firmware preflight and transfer with existing unsafe gates.
+    acceptance: Hardware smoke validates JP108 firmware preflight and guarded transfer path.
+  - id: REQ-U2-001
+    title: Ultimate2 core profile support
+    description: SDK shall support Ultimate2 mode, slot, and core button-map operations.
+    acceptance: Unit and hardware tests verify mode read/set/readback and slot/profile read/write/readback.
+  - id: REQ-U2-002
+    title: Ultimate2 firmware path
+    description: SDK shall support Ultimate2 firmware preflight and transfer with existing unsafe gates.
+    acceptance: Hardware smoke validates Ultimate2 firmware preflight and guarded transfer path.
+  - id: REQ-WIZ-001
+    title: Beginner guided configuration flows
+    description: TUI wizard shall provide dedicated JP108 and Ultimate2 configuration paths with mouse support.
+    acceptance: TUI tests verify end-to-end wizard transitions for mapping/profile apply and guided button test.
+  - id: REQ-WIZ-002
+    title: Backup and rollback safety
+    description: Mapping/profile writes shall create rollback snapshots and auto-rollback on failure.
+    acceptance: App-core tests verify backup creation, rollback on failure, and deterministic retry guidance.
+  - id: REQ-HW-001
+    title: Required hardware gates for target lines
+    description: CI shall enforce required blocking hardware jobs for Ultimate2 and JP108 targets.
+    acceptance: workflow includes required jobs that fail deterministically on missing fixture or command failure.
+  - id: REQ-DR-001
+    title: Dossier completeness
+    description: Every wave target PID shall have sanitized dossier files for each scoped operation group.
+    acceptance: `spec/dossiers/<pid_hex>/*.toml` exists and includes all required schema fields.
+  - id: REQ-DR-002
+    title: Dossier traceability
+    description: Dossiers and command matrix rows shall be linked by stable dossier IDs.
+    acceptance: command matrix `dossier_id` references an existing dossier artifact.
+  - id: REQ-DR-W2-001
+    title: Wave 2 dossier minimum per PID
+    description: Each Wave 2 target PID shall include `core_diag`, `mode_or_profile_read`, and `firmware_preflight` dossiers.
+    acceptance: lint check confirms all three required dossier files exist for every Wave 2 PID.
+  - id: REQ-DR-W2-002
+    title: Wave 2 dossier state model and placeholders
+    description: Every Wave 2 dossier shall include state machine, runtime placeholder, and hardware placeholder sections.
+    acceptance: dossier lint rejects files missing `state_machine`, `runtime_placeholder`, or `hardware_placeholder`.
+  - id: REQ-PROM-001
+    title: Strict promotion gate
+    description: Promotion to full support requires static evidence plus runtime traces and hardware read/write/readback.
+    acceptance: no PID is promoted without all three evidence signals marked complete.
+  - id: REQ-PROM-002
+    title: Candidate read-only enforcement
+    description: candidate-readonly devices shall permit detect/diag reads but reject safe writes and unsafe operations.
+    acceptance: command gating tests reject write/firmware commands for candidate-readonly PIDs.
+  - id: REQ-PROM-W2-001
+    title: Wave 2 promotion block
+    description: Wave 2 target devices shall remain candidate-readonly until runtime and hardware placeholders are satisfied.
+    acceptance: Wave 2 command matrix rows set `promotion_gate=blocked/no_runtime` and evidence runtime/hardware set to `no`.
+  - id: REQ-PROM-W2-002
+    title: Firmware preflight only for Wave 2
+    description: Wave 2 firmware coverage shall remain metadata/preflight only with no transfer/write enablement.
+    acceptance: firmware transfer commands remain blocked for Wave 2 candidate-readonly PIDs.
+  - id: REQ-COMM-001
+    title: Structured community intake
+    description: Community evidence submissions shall follow a structured sanitized template.
+    acceptance: issue templates collect VID/PID, operation group, sanitized request/response structure, and repro notes.
+  - id: REQ-COMM-002
+    title: Clean-room intake boundary
+    description: Community submissions must forbid raw vendor/decompiled snippet carryover.
+    acceptance: template and docs explicitly prohibit raw snippet submission.
+  - id: REQ-GH-001
+    title: Release-governance variables
+    description: Repository variables for AUR/Homebrew publication gates shall be configured through GitHub settings.
+    acceptance: variables `AUR_PUBLISH_ENABLED`, `HOMEBREW_PUBLISH_ENABLED`, and `HOMEBREW_TAP_REPO` are present.
+  - id: REQ-GH-002
+    title: Hardware-constrained required checks
+    description: Branch protection required checks shall reflect currently available hardware fixtures.
+    acceptance: required checks include `hardware-108jp` and `hardware-ultimate2`, excluding unavailable hardware families.

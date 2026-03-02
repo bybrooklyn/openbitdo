@@ -1,5 +1,3 @@
-#![cfg(feature = "hidapi-backend")]
-
 use crate::error::{BitdoError, Result};
 use crate::transport::Transport;
 use crate::types::VidPid;

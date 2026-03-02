@@ -1,60 +1,58 @@
-pid_name,pid_decimal,pid_hex,vid_decimal,vid_hex,support_level,protocol_family,notes
-PID_None,0,0x0,11720,0x2dc8,detect-only,Unknown,Sentinel value
-PID_IDLE,12553,0x3109,11720,0x2dc8,detect-only,Standard64,Baseline from sanitized dirty-room analysis
-PID_SN30Plus,24578,0x6002,11720,0x2dc8,detect-only,Standard64,Baseline from sanitized dirty-room analysis
-PID_USB_Ultimate,12544,0x3100,11720,0x2dc8,detect-only,Standard64,Baseline from sanitized dirty-room analysis
-PID_USB_Ultimate2,12549,0x3105,11720,0x2dc8,detect-only,Standard64,Baseline from sanitized dirty-room analysis
-PID_USB_UltimateClasses,12548,0x3104,11720,0x2dc8,detect-only,Standard64,Baseline from sanitized dirty-room analysis
-PID_Xcloud,8448,0x2100,11720,0x2dc8,detect-only,Standard64,Baseline from sanitized dirty-room analysis
-PID_Xcloud2,8449,0x2101,11720,0x2dc8,detect-only,Standard64,Baseline from sanitized dirty-room analysis
-PID_ArcadeStick,36890,0x901a,11720,0x2dc8,detect-only,Standard64,Baseline from sanitized dirty-room analysis
-PID_Pro2,24579,0x6003,11720,0x2dc8,detect-only,Standard64,Baseline from sanitized dirty-room analysis
-PID_Pro2_CY,24582,0x6006,11720,0x2dc8,detect-only,Standard64,Baseline from sanitized dirty-room analysis
-PID_Pro2_OLD,24579,0x6003,11720,0x2dc8,detect-only,Standard64,Baseline from sanitized dirty-room analysis
-PID_Pro2_Wired,12304,0x3010,11720,0x2dc8,detect-only,Standard64,Baseline from sanitized dirty-room analysis
-PID_Ultimate_PC,12305,0x3011,11720,0x2dc8,detect-only,Standard64,Baseline from sanitized dirty-room analysis
-PID_Ultimate2_4,12306,0x3012,11720,0x2dc8,detect-only,Standard64,Baseline from sanitized dirty-room analysis
-PID_Ultimate2_4RR,12307,0x3013,11720,0x2dc8,detect-only,Standard64,Baseline from sanitized dirty-room analysis
-PID_UltimateBT,24583,0x6007,11720,0x2dc8,full,Standard64,Baseline from sanitized dirty-room analysis
-PID_UltimateBTRR,12550,0x3106,11720,0x2dc8,full,Standard64,Baseline from sanitized dirty-room analysis
-PID_JP,20992,0x5200,11720,0x2dc8,detect-only,JpHandshake,Baseline from sanitized dirty-room analysis
-PID_JPUSB,20993,0x5201,11720,0x2dc8,detect-only,JpHandshake,Baseline from sanitized dirty-room analysis
-PID_NUMPAD,20995,0x5203,11720,0x2dc8,detect-only,Standard64,Baseline from sanitized dirty-room analysis
-PID_NUMPADRR,20996,0x5204,11720,0x2dc8,detect-only,Standard64,Baseline from sanitized dirty-room analysis
-PID_QINGCHUN2,12554,0x310a,11720,0x2dc8,full,DInput,Baseline from sanitized dirty-room analysis
-PID_QINGCHUN2RR,12316,0x301c,11720,0x2dc8,full,DInput,Baseline from sanitized dirty-room analysis
-PID_Xinput,12555,0x310b,11720,0x2dc8,detect-only,DInput,Baseline from sanitized dirty-room analysis
-PID_Pro3,24585,0x6009,11720,0x2dc8,full,DInput,Baseline from sanitized dirty-room analysis
-PID_Pro3USB,24586,0x600a,11720,0x2dc8,full,DInput,Baseline from sanitized dirty-room analysis
-PID_Pro3DOCK,24589,0x600d,11720,0x2dc8,detect-only,Standard64,Baseline from sanitized dirty-room analysis
-PID_108JP,21001,0x5209,11720,0x2dc8,detect-only,JpHandshake,Baseline from sanitized dirty-room analysis
-PID_108JPUSB,21002,0x520a,11720,0x2dc8,detect-only,JpHandshake,Baseline from sanitized dirty-room analysis
-PID_XBOXJP,8232,0x2028,11720,0x2dc8,detect-only,JpHandshake,Baseline from sanitized dirty-room analysis
-PID_XBOXJPUSB,8238,0x202e,11720,0x2dc8,detect-only,JpHandshake,Baseline from sanitized dirty-room analysis
-PID_NGCDIY,22352,0x5750,11720,0x2dc8,detect-only,Standard64,Baseline from sanitized dirty-room analysis
-PID_NGCRR,36906,0x902a,11720,0x2dc8,detect-only,Standard64,Baseline from sanitized dirty-room analysis
-PID_Ultimate2,24594,0x6012,11720,0x2dc8,full,DInput,Baseline from sanitized dirty-room analysis
-PID_Ultimate2RR,24595,0x6013,11720,0x2dc8,full,DInput,Baseline from sanitized dirty-room analysis
-PID_UltimateBT2,24591,0x600f,11720,0x2dc8,full,DInput,Baseline from sanitized dirty-room analysis
-PID_UltimateBT2RR,24593,0x6011,11720,0x2dc8,full,DInput,Baseline from sanitized dirty-room analysis
-PID_Mouse,20997,0x5205,11720,0x2dc8,detect-only,Standard64,Baseline from sanitized dirty-room analysis
-PID_MouseRR,20998,0x5206,11720,0x2dc8,detect-only,Standard64,Baseline from sanitized dirty-room analysis
-PID_SaturnRR,36907,0x902b,11720,0x2dc8,detect-only,Standard64,Baseline from sanitized dirty-room analysis
-PID_UltimateBT2C,12314,0x301a,11720,0x2dc8,detect-only,Standard64,Baseline from sanitized dirty-room analysis
-PID_Lashen,12318,0x301e,11720,0x2dc8,detect-only,Standard64,Baseline from sanitized dirty-room analysis
-PID_HitBox,24587,0x600b,11720,0x2dc8,full,DInput,Baseline from sanitized dirty-room analysis
-PID_HitBoxRR,24588,0x600c,11720,0x2dc8,full,DInput,Baseline from sanitized dirty-room analysis
-PID_N64BT,12313,0x3019,11720,0x2dc8,detect-only,Standard64,Baseline from sanitized dirty-room analysis
-PID_N64,12292,0x3004,11720,0x2dc8,detect-only,Standard64,Baseline from sanitized dirty-room analysis
-PID_N64RR,36904,0x9028,11720,0x2dc8,detect-only,Standard64,Baseline from sanitized dirty-room analysis
-PID_XBOXUK,12326,0x3026,11720,0x2dc8,detect-only,Standard64,Baseline from sanitized dirty-room analysis
-PID_XBOXUKUSB,12327,0x3027,11720,0x2dc8,detect-only,Standard64,Baseline from sanitized dirty-room analysis
-PID_LashenX,8203,0x200b,11720,0x2dc8,detect-only,Standard64,Baseline from sanitized dirty-room analysis
-PID_68JP,8250,0x203a,11720,0x2dc8,detect-only,JpHandshake,Baseline from sanitized dirty-room analysis
-PID_68JPUSB,8265,0x2049,11720,0x2dc8,detect-only,JpHandshake,Baseline from sanitized dirty-room analysis
-PID_N64JoySticks,12321,0x3021,11720,0x2dc8,detect-only,Standard64,Baseline from sanitized dirty-room analysis
-PID_DoubleSuper,8254,0x203e,11720,0x2dc8,detect-only,Standard64,Baseline from sanitized dirty-room analysis
-PID_Cube2RR,8278,0x2056,11720,0x2dc8,detect-only,Standard64,Baseline from sanitized dirty-room analysis
-PID_Cube2,8249,0x2039,11720,0x2dc8,detect-only,Standard64,Baseline from sanitized dirty-room analysis
-PID_ASLGJP,8282,0x205a,11720,0x2dc8,detect-only,JpHandshake,Baseline from sanitized dirty-room analysis
-PID_ASLGMouse,20997,0x5205,11720,0x2dc8,detect-only,Standard64,Baseline from sanitized dirty-room analysis
+pid_name,pid_decimal,pid_hex,vid_decimal,vid_hex,support_level,protocol_family,notes,support_tier
+PID_None,0,0x0,11720,0x2dc8,detect-only,Unknown,Sentinel value,detect-only
+PID_IDLE,12553,0x3109,11720,0x2dc8,detect-only,Standard64,Baseline from sanitized dirty-room analysis,detect-only
+PID_SN30Plus,24578,0x6002,11720,0x2dc8,detect-only,Standard64,Baseline from sanitized dirty-room analysis,candidate-readonly
+PID_USB_Ultimate,12544,0x3100,11720,0x2dc8,detect-only,Standard64,Baseline from sanitized dirty-room analysis Wave 2 candidate-readonly expansion (static dossiers complete; runtime/hardware pending).,candidate-readonly
+PID_USB_Ultimate2,12549,0x3105,11720,0x2dc8,detect-only,Standard64,Baseline from sanitized dirty-room analysis Wave 2 candidate-readonly expansion (static dossiers complete; runtime/hardware pending).,candidate-readonly
+PID_USB_UltimateClasses,12548,0x3104,11720,0x2dc8,detect-only,Standard64,Baseline from sanitized dirty-room analysis,detect-only
+PID_Xcloud,8448,0x2100,11720,0x2dc8,detect-only,Standard64,Baseline from sanitized dirty-room analysis Wave 2 candidate-readonly expansion (static dossiers complete; runtime/hardware pending).,candidate-readonly
+PID_Xcloud2,8449,0x2101,11720,0x2dc8,detect-only,Standard64,Baseline from sanitized dirty-room analysis Wave 2 candidate-readonly expansion (static dossiers complete; runtime/hardware pending).,candidate-readonly
+PID_ArcadeStick,36890,0x901a,11720,0x2dc8,detect-only,Standard64,Baseline from sanitized dirty-room analysis Wave 2 candidate-readonly expansion (static dossiers complete; runtime/hardware pending).,candidate-readonly
+PID_Pro2,24579,0x6003,11720,0x2dc8,detect-only,Standard64,Baseline from sanitized dirty-room analysis,candidate-readonly
+PID_Pro2_CY,24582,0x6006,11720,0x2dc8,detect-only,Standard64,Baseline from sanitized dirty-room analysis Wave 2 candidate-readonly expansion (static dossiers complete; runtime/hardware pending).,candidate-readonly
+PID_Pro2_Wired,12304,0x3010,11720,0x2dc8,detect-only,Standard64,Baseline from sanitized dirty-room analysis,candidate-readonly
+PID_Ultimate_PC,12305,0x3011,11720,0x2dc8,detect-only,Standard64,Baseline from sanitized dirty-room analysis,candidate-readonly
+PID_Ultimate2_4,12306,0x3012,11720,0x2dc8,detect-only,Standard64,Baseline from sanitized dirty-room analysis,candidate-readonly
+PID_Ultimate2_4RR,12307,0x3013,11720,0x2dc8,detect-only,Standard64,Baseline from sanitized dirty-room analysis,candidate-readonly
+PID_UltimateBT,24583,0x6007,11720,0x2dc8,full,Standard64,Baseline from sanitized dirty-room analysis,full
+PID_UltimateBTRR,12550,0x3106,11720,0x2dc8,full,Standard64,Baseline from sanitized dirty-room analysis,full
+PID_JP,20992,0x5200,11720,0x2dc8,detect-only,JpHandshake,Baseline from sanitized dirty-room analysis,candidate-readonly
+PID_JPUSB,20993,0x5201,11720,0x2dc8,detect-only,JpHandshake,Baseline from sanitized dirty-room analysis,candidate-readonly
+PID_NUMPAD,20995,0x5203,11720,0x2dc8,detect-only,Standard64,Baseline from sanitized dirty-room analysis Wave 2 candidate-readonly expansion (static dossiers complete; runtime/hardware pending).,candidate-readonly
+PID_NUMPADRR,20996,0x5204,11720,0x2dc8,detect-only,Standard64,Baseline from sanitized dirty-room analysis Wave 2 candidate-readonly expansion (static dossiers complete; runtime/hardware pending).,candidate-readonly
+PID_QINGCHUN2,12554,0x310a,11720,0x2dc8,full,DInput,Baseline from sanitized dirty-room analysis,full
+PID_QINGCHUN2RR,12316,0x301c,11720,0x2dc8,full,DInput,Baseline from sanitized dirty-room analysis,full
+PID_Xinput,12555,0x310b,11720,0x2dc8,detect-only,DInput,Baseline from sanitized dirty-room analysis,detect-only
+PID_Pro3,24585,0x6009,11720,0x2dc8,full,DInput,Baseline from sanitized dirty-room analysis,full
+PID_Pro3USB,24586,0x600a,11720,0x2dc8,full,DInput,Baseline from sanitized dirty-room analysis,full
+PID_Pro3DOCK,24589,0x600d,11720,0x2dc8,detect-only,Standard64,Baseline from sanitized dirty-room analysis,detect-only
+PID_108JP,21001,0x5209,11720,0x2dc8,full,JpHandshake,Promoted to full after sanitized JP108 dedicated mapping + firmware evidence,full
+PID_108JPUSB,21002,0x520a,11720,0x2dc8,full,JpHandshake,Promoted to full after sanitized JP108 dedicated mapping + firmware evidence,full
+PID_XBOXJP,8232,0x2028,11720,0x2dc8,detect-only,JpHandshake,Baseline from sanitized dirty-room analysis,candidate-readonly
+PID_XBOXJPUSB,8238,0x202e,11720,0x2dc8,detect-only,JpHandshake,Baseline from sanitized dirty-room analysis,candidate-readonly
+PID_NGCDIY,22352,0x5750,11720,0x2dc8,detect-only,Standard64,Baseline from sanitized dirty-room analysis,detect-only
+PID_NGCRR,36906,0x902a,11720,0x2dc8,detect-only,Standard64,Baseline from sanitized dirty-room analysis,detect-only
+PID_Ultimate2,24594,0x6012,11720,0x2dc8,full,DInput,Baseline from sanitized dirty-room analysis,full
+PID_Ultimate2RR,24595,0x6013,11720,0x2dc8,full,DInput,Baseline from sanitized dirty-room analysis,full
+PID_UltimateBT2,24591,0x600f,11720,0x2dc8,full,DInput,Baseline from sanitized dirty-room analysis,full
+PID_UltimateBT2RR,24593,0x6011,11720,0x2dc8,full,DInput,Baseline from sanitized dirty-room analysis,full
+PID_Mouse,20997,0x5205,11720,0x2dc8,detect-only,Standard64,Baseline from sanitized dirty-room analysis,detect-only
+PID_MouseRR,20998,0x5206,11720,0x2dc8,detect-only,Standard64,Baseline from sanitized dirty-room analysis,detect-only
+PID_SaturnRR,36907,0x902b,11720,0x2dc8,detect-only,Standard64,Baseline from sanitized dirty-room analysis,detect-only
+PID_UltimateBT2C,12314,0x301a,11720,0x2dc8,detect-only,Standard64,Baseline from sanitized dirty-room analysis Wave 2 candidate-readonly expansion (static dossiers complete; runtime/hardware pending).,candidate-readonly
+PID_Lashen,12318,0x301e,11720,0x2dc8,detect-only,Standard64,Baseline from sanitized dirty-room analysis,detect-only
+PID_HitBox,24587,0x600b,11720,0x2dc8,full,DInput,Baseline from sanitized dirty-room analysis,full
+PID_HitBoxRR,24588,0x600c,11720,0x2dc8,full,DInput,Baseline from sanitized dirty-room analysis,full
+PID_N64BT,12313,0x3019,11720,0x2dc8,detect-only,Standard64,Baseline from sanitized dirty-room analysis,candidate-readonly
+PID_N64,12292,0x3004,11720,0x2dc8,detect-only,Standard64,Baseline from sanitized dirty-room analysis,candidate-readonly
+PID_N64RR,36904,0x9028,11720,0x2dc8,detect-only,Standard64,Baseline from sanitized dirty-room analysis Wave 2 candidate-readonly expansion (static dossiers complete; runtime/hardware pending).,candidate-readonly
+PID_XBOXUK,12326,0x3026,11720,0x2dc8,detect-only,Standard64,Baseline from sanitized dirty-room analysis Wave 2 candidate-readonly expansion (static dossiers complete; runtime/hardware pending).,candidate-readonly
+PID_XBOXUKUSB,12327,0x3027,11720,0x2dc8,detect-only,Standard64,Baseline from sanitized dirty-room analysis Wave 2 candidate-readonly expansion (static dossiers complete; runtime/hardware pending).,candidate-readonly
+PID_LashenX,8203,0x200b,11720,0x2dc8,detect-only,Standard64,Baseline from sanitized dirty-room analysis,detect-only
+PID_68JP,8250,0x203a,11720,0x2dc8,detect-only,JpHandshake,Baseline from sanitized dirty-room analysis,candidate-readonly
+PID_68JPUSB,8265,0x2049,11720,0x2dc8,detect-only,JpHandshake,Baseline from sanitized dirty-room analysis,candidate-readonly
+PID_N64JoySticks,12321,0x3021,11720,0x2dc8,detect-only,Standard64,Baseline from sanitized dirty-room analysis,detect-only
+PID_DoubleSuper,8254,0x203e,11720,0x2dc8,detect-only,Standard64,Baseline from sanitized dirty-room analysis,detect-only
+PID_Cube2RR,8278,0x2056,11720,0x2dc8,detect-only,Standard64,Baseline from sanitized dirty-room analysis,detect-only
+PID_Cube2,8249,0x2039,11720,0x2dc8,detect-only,Standard64,Baseline from sanitized dirty-room analysis,detect-only
+PID_ASLGJP,8282,0x205a,11720,0x2dc8,detect-only,JpHandshake,Baseline from sanitized dirty-room analysis,detect-only

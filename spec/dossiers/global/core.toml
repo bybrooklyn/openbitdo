@@ -1,0 +1,16 @@
+# Sanitized static dirty-room dossier
+
+dossier_id = "DOS-CORE-GLOBAL"
+pid_hex = "*"
+operation_group = "Core"
+command_id = ["GetPid", "GetReportRevision", "GetMode", "GetModeAlt", "GetControllerVersion", "Version", "Idle", "ReadProfile", "WriteProfile", "SetModeDInput"]
+request_shape = "64-byte HID commands with command selector and optional payload bytes"
+response_shape = "status header plus command-dependent payload"
+validator_rules = ["byte0 == 0x02", "response length >= 4", "command-specific signature checks"]
+retry_behavior = "deterministic retries on timeout and malformed responses"
+failure_signatures = ["timeout", "malformed response", "invalid response signature", "unsupported for pid"]
+evidence_source = "static"
+confidence = "inferred"
+requirement_ids = ["REQ-PROT-001", "REQ-PROT-002", "REQ-DR-001", "REQ-DR-002"]
+class_family = "Core transport and command dispatch"
+notes = "Global core command dossier linked from command matrix rows"

@@ -1,0 +1,54 @@
+name: Hardware Report
+description: Report tested device behavior for OpenBitdo compatibility.
+title: "[hardware] <device> <vid:pid>"
+labels:
+  - hardware
+body:
+  - type: input
+    id: device_name
+    attributes:
+      label: Device name
+      placeholder: Ultimate2 / JP108 / etc.
+    validations:
+      required: true
+  - type: input
+    id: vidpid
+    attributes:
+      label: VID/PID
+      description: Use hex format `0xVVVV:0xPPPP`
+      placeholder: 0x2dc8:0x6012
+    validations:
+      required: true
+  - type: input
+    id: firmware
+    attributes:
+      label: Firmware version
+      placeholder: 1.02
+  - type: textarea
+    id: operations
+    attributes:
+      label: Operations tested
+      description: identify, diag probe, mode read, profile read/write, firmware preflight, etc.
+    validations:
+      required: true
+  - type: textarea
+    id: sanitized_structure
+    attributes:
+      label: Sanitized request/response structure
+      description: Structural shape only. Do not paste vendor/decompiled snippets.
+    validations:
+      required: true
+  - type: textarea
+    id: behavior
+    attributes:
+      label: Observed behavior
+      description: Include expected vs actual.
+    validations:
+      required: true
+  - type: textarea
+    id: env
+    attributes:
+      label: Environment
+      description: OS, transport (USB/BT), and reproducibility notes.
+    validations:
+      required: true

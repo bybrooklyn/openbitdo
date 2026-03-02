@@ -1,8 +1,14 @@
 use bitdo_proto::{command_registry, CommandFrame, CommandId, Report64};
+use std::collections::HashSet;
 
 #[test]
 fn frame_encode_decode_roundtrip_for_all_commands() {
-    assert_eq!(command_registry().len(), CommandId::all().len());
+    let unique = command_registry()
+        .iter()
+        .map(|row| row.id)
+        .collect::<HashSet<_>>();
+    assert_eq!(unique.len(), CommandId::all().len());
+    assert!(command_registry().len() >= unique.len());
 
     for row in command_registry() {
         let frame = CommandFrame {

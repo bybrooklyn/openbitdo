@@ -1,0 +1,6 @@
+[rc_scope]
+# Set to true once full 108-key mapping coverage is implemented and validated.
+jp108_full_keyboard_mapping = false
+
+# Set to true once expanded Ultimate2 mapping coverage is implemented and validated.
+ultimate2_expanded_mapping = false

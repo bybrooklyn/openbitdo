@@ -1,8 +1,20 @@
 # Rust
 sdk/target/
+sdk/dist/
+target/
+dist/
 
 # Reports
 harness/reports/*.json
+
+# Release/build artifacts
+*.tar.gz
+*.sha256
+*.pkg
+release-assets/
+packaging/tmp/
+packaging/**/tmp/
+packaging/**/.cache/
 
 # OS/editor
 .DS_Store

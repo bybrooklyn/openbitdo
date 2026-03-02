@@ -1,0 +1,4 @@
+operation = "jp108_read_dedicated_mapping"
+pid = "0x5209"
+status = "sanitized-placeholder"
+notes = "Trace placeholder for clean-room replay harness"

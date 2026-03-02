@@ -1,0 +1,16 @@
+# Sanitized static dirty-room dossier
+
+dossier_id = "DOS-5209-JP108-Dedicated"
+pid_hex = "0x5209"
+operation_group = "JP108Dedicated"
+command_id = ["Jp108ReadDedicatedMappings", "Jp108WriteDedicatedMapping", "Jp108ReadFeatureFlags", "Jp108WriteFeatureFlags", "Jp108ReadVoice", "Jp108WriteVoice"]
+request_shape = "64-byte JP108 command frames with dedicated index/value payloads"
+response_shape = "status header plus dedicated mapping/flag payload bytes"
+validator_rules = ["byte0 == 0x02", "byte1 indicates command family", "payload length meets command minimum"]
+retry_behavior = "bounded retries for read/ack operations"
+failure_signatures = ["timeout", "malformed response", "unsupported for pid"]
+evidence_source = "static"
+confidence = "inferred"
+requirement_ids = ["REQ-JP108-001", "REQ-DR-001", "REQ-DR-002"]
+class_family = "JP108Advance / JP108AdvanceUI dispatch"
+notes = "Dedicated mapping scope remains A/B/K1-K8 in current product milestone"

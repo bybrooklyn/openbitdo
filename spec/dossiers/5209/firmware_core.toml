@@ -1,0 +1,16 @@
+# Sanitized static dirty-room dossier
+
+dossier_id = "DOS-5209-Firmware"
+pid_hex = "0x5209"
+operation_group = "Firmware"
+command_id = ["Jp108EnterBootloader", "Jp108FirmwareChunk", "Jp108FirmwareCommit", "Jp108ExitBootloader"]
+request_shape = "boot transition frames followed by chunked firmware transfer frames"
+response_shape = "ack/status and completion indicators"
+validator_rules = ["boot transition acknowledged", "chunk ack observed", "commit response accepted"]
+retry_behavior = "firmware retries are bounded and guarded by unsafe flags"
+failure_signatures = ["boot transition failure", "chunk ack mismatch", "commit timeout"]
+evidence_source = "static"
+confidence = "inferred"
+requirement_ids = ["REQ-JP108-002", "REQ-DR-001", "REQ-DR-002"]
+class_family = "JP firmware update dispatch"
+notes = "Unsafe flow remains runtime-gated with dual acknowledgement"

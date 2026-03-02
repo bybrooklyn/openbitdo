@@ -1,0 +1,4 @@
+operation = "jp108_write_dedicated_mapping"
+pid = "0x520a"
+status = "sanitized-placeholder"
+notes = "Trace placeholder for clean-room replay harness"

@@ -51,6 +51,13 @@ pub enum SupportLevel {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub enum SupportTier {
+    DetectOnly,
+    CandidateReadOnly,
+    Full,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub enum SafetyClass {
     SafeRead,
     SafeWrite,
@@ -70,6 +77,24 @@ pub enum CommandConfidence {
     Inferred,
 }
 
+/// Runtime execution policy for a declared command path.
+///
+/// This allows us to hardcode every evidenced command in the registry while
+/// still keeping unsafe or low-confidence paths blocked by default.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub enum CommandRuntimePolicy {
+    EnabledDefault,
+    ExperimentalGate,
+    BlockedUntilConfirmed,
+}
+
+/// Evidence confidence used by policy/reporting surfaces.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub enum EvidenceConfidence {
+    Confirmed,
+    Inferred,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub enum SupportEvidence {
     Confirmed,
@@ -83,6 +108,9 @@ pub struct PidCapability {
     pub supports_profile_rw: bool,
     pub supports_boot: bool,
     pub supports_firmware: bool,
+    pub supports_jp108_dedicated_map: bool,
+    pub supports_u2_slot_config: bool,
+    pub supports_u2_button_map: bool,
 }
 
 impl PidCapability {
@@ -92,6 +120,9 @@ impl PidCapability {
             supports_profile_rw: true,
             supports_boot: true,
             supports_firmware: true,
+            supports_jp108_dedicated_map: true,
+            supports_u2_slot_config: true,
+            supports_u2_button_map: true,
         }
     }
 
@@ -101,6 +132,9 @@ impl PidCapability {
             supports_profile_rw: false,
             supports_boot: false,
             supports_firmware: false,
+            supports_jp108_dedicated_map: false,
+            supports_u2_slot_config: false,
+            supports_u2_button_map: false,
         }
     }
 }
@@ -110,6 +144,7 @@ pub struct DeviceProfile {
     pub vid_pid: VidPid,
     pub name: String,
     pub support_level: SupportLevel,
+    pub support_tier: SupportTier,
     pub protocol_family: ProtocolFamily,
     pub capability: PidCapability,
     pub evidence: SupportEvidence,

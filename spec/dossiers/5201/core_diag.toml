@@ -1,0 +1,16 @@
+# Sanitized static dirty-room dossier
+
+dossier_id = "DOS-5201-CORE"
+pid_hex = "0x5201"
+operation_group = "CoreDiag"
+command_id = ["GetPid", "GetReportRevision", "GetControllerVersion", "Version", "Idle"]
+request_shape = "64-byte HID report with fixed command marker bytes and JP handshake gating"
+response_shape = "status header plus minimal payload"
+validator_rules = ["byte0 == 0x02", "response length >= 4", "status byte must indicate success"]
+retry_behavior = "retry timeout/malformed response up to configured attempts with bounded backoff"
+failure_signatures = ["timeout", "malformed response", "unsupported for pid"]
+evidence_source = "static"
+confidence = "inferred"
+requirement_ids = ["REQ-DR-001", "REQ-DR-002", "REQ-PROM-001", "REQ-PROM-002", "REQ-PID-002"]
+class_family = "JpHandshake dispatch"
+notes = "Wave 1 candidate-readonly dossier; no runtime trace or hardware write confirmation yet"

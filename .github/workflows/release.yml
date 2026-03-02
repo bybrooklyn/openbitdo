@@ -1,0 +1,287 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+  checks: read
+  issues: read
+
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: sdk
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Ensure tag commit is on main
+        working-directory: ${{ github.workspace }}
+        run: |
+          set -euo pipefail
+          git fetch origin main
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "Tag commit is not reachable from origin/main" >&2
+            exit 1
+          fi
+
+      - name: Ensure no open release blockers
+        working-directory: ${{ github.workspace }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          blocker_count="$(gh api "repos/${GITHUB_REPOSITORY}/issues?state=open&labels=release-blocker&per_page=100" \
+            --jq '[.[] | select(.pull_request == null)] | length')"
+          if [[ "$blocker_count" != "0" ]]; then
+            echo "Open release-blocker issues detected: ${blocker_count}" >&2
+            gh issue list --repo "$GITHUB_REPOSITORY" --state open --label release-blocker
+            exit 1
+          fi
+
+      - name: Preflight required publish secrets
+        working-directory: ${{ github.workspace }}
+        env:
+          AUR_USERNAME: ${{ secrets.AUR_USERNAME }}
+          AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          set -euo pipefail
+          [[ -n "${AUR_USERNAME:-}" ]] || { echo "missing required secret: AUR_USERNAME" >&2; exit 1; }
+          [[ -n "${AUR_SSH_PRIVATE_KEY:-}" ]] || { echo "missing required secret: AUR_SSH_PRIVATE_KEY" >&2; exit 1; }
+          [[ -n "${HOMEBREW_TAP_TOKEN:-}" ]] || { echo "missing required secret: HOMEBREW_TAP_TOKEN" >&2; exit 1; }
+
+      - name: Require successful CI and hardware checks on tagged commit
+        working-directory: ${{ github.workspace }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          required_checks=(
+            guard
+            aur-validate
+            tui-smoke-test
+            build-macos-arm64
+            test
+            hardware-ultimate2
+            hardware-108jp
+          )
+          check_runs_json="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${GITHUB_SHA}/check-runs")"
+          failed=0
+          for check in "${required_checks[@]}"; do
+            conclusion="$(jq -r --arg name "$check" '[.check_runs[] | select(.name == $name) | .conclusion] | first // "missing"' <<<"$check_runs_json")"
+            if [[ "$conclusion" != "success" ]]; then
+              echo "required check '${check}' is not successful on ${GITHUB_SHA} (got: ${conclusion})" >&2
+              failed=1
+            fi
+          done
+          if [[ "$failed" -ne 0 ]]; then
+            exit 1
+          fi
+
+      - name: Install system deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libudev-dev pkg-config
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Guard
+        run: ./scripts/cleanroom_guard.sh
+
+      - name: Tests
+        run: cargo test --workspace --all-targets
+
+  build-linux-x86_64:
+    runs-on: ubuntu-latest
+    needs: preflight
+    defaults:
+      run:
+        working-directory: sdk
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install system deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libudev-dev pkg-config
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Package linux x86_64
+        run: ./scripts/package-linux.sh "${GITHUB_REF_NAME}" x86_64
+
+      - name: Upload linux x86_64 assets
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-linux-x86_64
+          path: sdk/dist/openbitdo-${{ github.ref_name }}-linux-x86_64*
+
+  build-linux-aarch64:
+    runs-on: ubuntu-24.04-arm
+    needs: preflight
+    defaults:
+      run:
+        working-directory: sdk
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install system deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libudev-dev pkg-config
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Package linux aarch64
+        run: ./scripts/package-linux.sh "${GITHUB_REF_NAME}" aarch64
+
+      - name: Upload linux aarch64 assets
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-linux-aarch64
+          path: sdk/dist/openbitdo-${{ github.ref_name }}-linux-aarch64*
+
+  build-macos-arm64:
+    runs-on: macos-14
+    needs: preflight
+    defaults:
+      run:
+        working-directory: sdk
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin
+
+      - name: Package macOS arm64
+        run: ./scripts/package-macos.sh "${GITHUB_REF_NAME}" arm64 aarch64-apple-darwin
+
+      - name: Upload macOS arm64 assets
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-macos-arm64
+          path: sdk/dist/openbitdo-${{ github.ref_name }}-macos-arm64*
+
+  publish:
+    runs-on: ubuntu-latest
+    needs:
+      - build-linux-x86_64
+      - build-linux-aarch64
+      - build-macos-arm64
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download packaged assets
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+
+      - name: Determine prerelease flag
+        id: prerelease
+        run: |
+          if [[ "${GITHUB_REF_NAME}" == *"-rc."* ]]; then
+            echo "value=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "value=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          prerelease: ${{ steps.prerelease.outputs.value }}
+          body_path: CHANGELOG.md
+          files: |
+            release-assets/**/openbitdo-${{ github.ref_name }}-linux-x86_64
+            release-assets/**/openbitdo-${{ github.ref_name }}-linux-x86_64.sha256
+            release-assets/**/openbitdo-${{ github.ref_name }}-linux-x86_64.tar.gz
+            release-assets/**/openbitdo-${{ github.ref_name }}-linux-x86_64.tar.gz.sha256
+            release-assets/**/openbitdo-${{ github.ref_name }}-linux-aarch64
+            release-assets/**/openbitdo-${{ github.ref_name }}-linux-aarch64.sha256
+            release-assets/**/openbitdo-${{ github.ref_name }}-linux-aarch64.tar.gz
+            release-assets/**/openbitdo-${{ github.ref_name }}-linux-aarch64.tar.gz.sha256
+            release-assets/**/openbitdo-${{ github.ref_name }}-macos-arm64
+            release-assets/**/openbitdo-${{ github.ref_name }}-macos-arm64.sha256
+            release-assets/**/openbitdo-${{ github.ref_name }}-macos-arm64.tar.gz
+            release-assets/**/openbitdo-${{ github.ref_name }}-macos-arm64.tar.gz.sha256
+            release-assets/**/openbitdo-${{ github.ref_name }}-macos-arm64.pkg
+            release-assets/**/openbitdo-${{ github.ref_name }}-macos-arm64.pkg.sha256
+
+  publish-homebrew:
+    if: vars.HOMEBREW_PUBLISH_ENABLED == '1'
+    runs-on: ubuntu-latest
+    needs: publish
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Wait for release assets
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 30); do
+            if gh release view "${GITHUB_REF_NAME}" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "release ${GITHUB_REF_NAME} was not found after waiting" >&2
+          exit 1
+
+      - name: Render Homebrew formula with release checksums
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/release-input /tmp/release-metadata
+          gh release download "${GITHUB_REF_NAME}" --repo "$GITHUB_REPOSITORY" \
+            --pattern "openbitdo-${GITHUB_REF_NAME}-linux-x86_64.tar.gz" \
+            --pattern "openbitdo-${GITHUB_REF_NAME}-linux-aarch64.tar.gz" \
+            --pattern "openbitdo-${GITHUB_REF_NAME}-macos-arm64.tar.gz" \
+            --dir /tmp/release-input
+          gh api -H "Accept: application/octet-stream" "repos/${GITHUB_REPOSITORY}/tarball/${GITHUB_REF_NAME}" \
+            > "/tmp/release-input/openbitdo-${GITHUB_REF_NAME}-source.tar.gz"
+          bash packaging/scripts/render_release_metadata.sh \
+            "${GITHUB_REF_NAME}" \
+            "$GITHUB_REPOSITORY" \
+            /tmp/release-input \
+            /tmp/release-metadata
+
+      - name: Upload rendered Homebrew formula (audit)
+        uses: actions/upload-artifact@v4
+        with:
+          name: homebrew-rendered-formula-${{ github.ref_name }}
+          path: |
+            /tmp/release-metadata/homebrew/Formula/openbitdo.rb
+            /tmp/release-metadata/checksums.env
+
+      - name: Sync Homebrew tap
+        env:
+          HOMEBREW_PUBLISH_ENABLED: "1"
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          HOMEBREW_TAP_REPO: ${{ vars.HOMEBREW_TAP_REPO }}
+          FORMULA_SOURCE: /tmp/release-metadata/homebrew/Formula/openbitdo.rb
+        run: |
+          set -euo pipefail
+          if [[ -z "${HOMEBREW_TAP_TOKEN:-}" ]]; then
+            echo "missing required secret: HOMEBREW_TAP_TOKEN" >&2
+            exit 1
+          fi
+          bash packaging/homebrew/sync_tap.sh
+
+  publish-aur:
+    if: vars.AUR_PUBLISH_ENABLED == '1'
+    needs: publish
+    uses: ./.github/workflows/aur-publish.yml
+    with:
+      tag: ${{ github.ref_name }}
+    secrets: inherit

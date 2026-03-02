@@ -1,0 +1,16 @@
+# Sanitized static dirty-room dossier
+
+dossier_id = "DOS-6012-U2-Core"
+pid_hex = "0x6012"
+operation_group = "Ultimate2Core"
+command_id = ["U2GetCurrentSlot", "U2ReadConfigSlot", "U2WriteConfigSlot", "U2ReadButtonMap", "U2WriteButtonMap", "U2SetMode"]
+request_shape = "64-byte Ultimate2 command frames with slot/mode/map payload sections"
+response_shape = "status header plus slot/config/map payload bytes"
+validator_rules = ["byte0 == 0x02", "payload length meets command minimum", "slot readback value is bounded"]
+retry_behavior = "bounded retries for slot/map reads and write acknowledgements"
+failure_signatures = ["timeout", "malformed response", "unsupported for pid"]
+evidence_source = "static"
+confidence = "inferred"
+requirement_ids = ["REQ-U2-001", "REQ-DR-001", "REQ-DR-002"]
+class_family = "Ultimate2_4Advance2 / Ultimate2_4Advance2UI dispatch"
+notes = "Advanced theme/sixaxis/deep macro controls remain intentionally hidden"

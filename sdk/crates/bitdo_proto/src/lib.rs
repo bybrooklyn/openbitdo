@@ -21,10 +21,11 @@ pub use registry::{
 };
 pub use session::{
     validate_response, CommandExecutionReport, DeviceSession, DiagCommandStatus, DiagProbeResult,
-    FirmwareTransferReport, IdentifyResult, ModeState, RetryPolicy, SessionConfig, TimeoutProfile,
+    DiagSeverity, FirmwareTransferReport, IdentifyResult, ModeState, RetryPolicy, SessionConfig,
+    TimeoutProfile,
 };
 pub use transport::{MockTransport, Transport};
 pub use types::{
-    CommandConfidence, DeviceProfile, PidCapability, ProtocolFamily, SafetyClass, SupportEvidence,
-    SupportLevel, VidPid,
+    CommandConfidence, CommandRuntimePolicy, DeviceProfile, EvidenceConfidence, PidCapability,
+    ProtocolFamily, SafetyClass, SupportEvidence, SupportLevel, SupportTier, VidPid,
 };

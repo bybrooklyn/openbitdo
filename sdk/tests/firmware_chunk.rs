@@ -1,7 +1,7 @@
-use bitdo_proto::{DeviceSession, MockTransport, SessionConfig, VidPid};
+use bitdo_proto::{BitdoError, DeviceSession, MockTransport, SessionConfig, VidPid};
 
 #[test]
-fn firmware_transfer_chunks_and_commit() {
+fn inferred_firmware_transfer_is_blocked_until_confirmed() {
     let mut transport = MockTransport::default();
     for _ in 0..4 {
         transport.push_read_data(vec![0x02, 0x10, 0x00, 0x00]);
@@ -20,11 +20,11 @@ fn firmware_transfer_chunks_and_commit() {
     .expect("session init");
 
     let image = vec![0xAB; 120];
-    let report = session
+    let err = session
         .firmware_transfer(&image, 50, false)
-        .expect("fw transfer");
-    assert_eq!(report.chunks_sent, 3);
+        .expect_err("inferred firmware chunk/commit must remain blocked");
+    assert!(matches!(err, BitdoError::UnsupportedForPid { .. }));
 
     let transport = session.into_transport();
-    assert_eq!(transport.writes().len(), 4);
+    assert_eq!(transport.writes().len(), 0);
 }

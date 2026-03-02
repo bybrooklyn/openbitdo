@@ -1,0 +1,59 @@
+name: Dirty-Room Evidence (Sanitized)
+description: Submit sanitized protocol evidence for unconfirmed devices/operations.
+title: "[dirtyroom] <vid:pid> <operation-group>"
+labels:
+  - protocol
+body:
+  - type: input
+    id: vidpid
+    attributes:
+      label: VID/PID
+      placeholder: 0x2dc8:0x5200
+    validations:
+      required: true
+  - type: input
+    id: firmware
+    attributes:
+      label: Firmware version
+      placeholder: 1.00
+    validations:
+      required: true
+  - type: input
+    id: operation_group
+    attributes:
+      label: Operation group
+      placeholder: CoreDiag / Firmware / Mapping
+    validations:
+      required: true
+  - type: textarea
+    id: request_shape
+    attributes:
+      label: Sanitized request shape
+      description: Structural description only. No copied vendor/decompiled snippets.
+    validations:
+      required: true
+  - type: textarea
+    id: response_shape
+    attributes:
+      label: Sanitized response shape
+      description: Structural description and validator cues.
+    validations:
+      required: true
+  - type: textarea
+    id: failure_signatures
+    attributes:
+      label: Failure signatures
+      description: Timeout/malformed/invalid signatures observed.
+  - type: textarea
+    id: reproducibility
+    attributes:
+      label: Reproducibility notes
+      description: Steps, environment, and confidence.
+    validations:
+      required: true
+  - type: markdown
+    attributes:
+      value: |
+        **Clean-room reminder**
+        - Do not include raw decompiled code.
+        - Submit sanitized protocol structure only.

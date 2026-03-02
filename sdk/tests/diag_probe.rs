@@ -32,14 +32,27 @@ fn diag_probe_returns_command_checks() {
     ver[4] = 1;
     transport.push_read_data(ver);
 
+    let mut super_button = vec![0u8; 64];
+    super_button[0] = 0x02;
+    super_button[1] = 0x05;
+    transport.push_read_data(super_button);
+
+    let mut profile = vec![0u8; 64];
+    profile[0] = 0x02;
+    profile[1] = 0x05;
+    transport.push_read_data(profile);
+
     let mut session = DeviceSession::new(
         transport,
         VidPid::new(0x2dc8, 24585),
-        SessionConfig::default(),
+        SessionConfig {
+            experimental: true,
+            ..Default::default()
+        },
     )
     .expect("session init");
 
     let diag = session.diag_probe();
-    assert_eq!(diag.command_checks.len(), 4);
+    assert_eq!(diag.command_checks.len(), 6);
     assert!(diag.command_checks.iter().all(|c| c.ok));
 }

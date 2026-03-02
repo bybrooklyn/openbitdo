@@ -1,0 +1,30 @@
+# Sanitized static dirty-room dossier
+
+dossier_id = "DOS-2101-MODEPROFILE-W2"
+pid_hex = "0x2101"
+operation_group = "ModeProfileRead"
+command_id = ["GetMode", "GetModeAlt", "ReadProfile"]
+request_shape = "64-byte HID report; mode/profile selector byte in command payload"
+response_shape = "status header + mode/profile bytes when available"
+validator_rules = ["byte0 == 0x02", "mode/profile payload length is bounded", "fallback command path is defined"]
+retry_behavior = "use standard safe-read retry policy; fallback between mode-read command variants when defined"
+failure_signatures = ["timeout", "unsupported_for_pid", "invalid_signature"]
+evidence_source = "static"
+confidence = "inferred"
+requirement_ids = ["REQ-DR-001", "REQ-DR-W2-001", "REQ-PROM-001", "REQ-PROM-W2-002", "REQ-PID-002"]
+class_family = "Standard64"
+notes = "Read-only mode/profile snapshot for PID_Xcloud2; no write enablement in this wave"
+
+[state_machine]
+pre_state = "DeviceIdentified"
+action = "Read mode/profile snapshot"
+post_state = "ModeProfileSnapshotReady"
+invalid_transitions = ["NoDevice", "WritePending", "BootloaderActive"]
+
+[runtime_placeholder]
+required = true
+evidence_needed = ["runtime traces for mode/profile read commands", "read consistency across repeated probes"]
+
+[hardware_placeholder]
+required = true
+evidence_needed = ["hardware readback for mode/profile snapshot", "cross-slot/read variant sanity checks where applicable"]

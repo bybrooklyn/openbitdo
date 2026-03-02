@@ -1,0 +1,16 @@
+# Sanitized static dirty-room dossier
+
+dossier_id = "DOS-6002-FIRMWARE"
+pid_hex = "0x6002"
+operation_group = "Firmware"
+command_id = ["EnterBootloaderA", "EnterBootloaderB", "EnterBootloaderC", "FirmwareChunk", "FirmwareCommit", "ExitBootloader"]
+request_shape = "bootloader entry sequence followed by chunked firmware transfer frames"
+response_shape = "ack/status oriented responses with transfer progression"
+validator_rules = ["boot transition acknowledged", "chunk response indicates acceptance", "commit response indicates completion"]
+retry_behavior = "firmware retries are bounded; unsafe flows remain blocked for candidate-readonly"
+failure_signatures = ["boot transition failure", "chunk ack mismatch", "commit timeout"]
+evidence_source = "static"
+confidence = "inferred"
+requirement_ids = ["REQ-DR-001", "REQ-DR-002", "REQ-PROM-001", "REQ-PROM-002"]
+class_family = "Firmware update dispatch"
+notes = "Firmware path is intentionally blocked for candidate-readonly support tier in this wave"

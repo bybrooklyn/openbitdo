@@ -1,0 +1,31 @@
+class Openbitdo < Formula
+  desc "Beginner-first clean-room 8BitDo TUI utility"
+  homepage "https://github.com/@REPOSITORY@"
+  license "BSD-3-Clause"
+  version "@VERSION@"
+
+  on_macos do
+    if Hardware::CPU.arm?
+      url "https://github.com/@REPOSITORY@/releases/download/@UPSTREAM_TAG@/openbitdo-@UPSTREAM_TAG@-macos-arm64.tar.gz"
+      sha256 "@MACOS_ARM64_SHA256@"
+    end
+  end
+
+  on_linux do
+    if Hardware::CPU.intel?
+      url "https://github.com/@REPOSITORY@/releases/download/@UPSTREAM_TAG@/openbitdo-@UPSTREAM_TAG@-linux-x86_64.tar.gz"
+      sha256 "@LINUX_X86_64_SHA256@"
+    elsif Hardware::CPU.arm?
+      url "https://github.com/@REPOSITORY@/releases/download/@UPSTREAM_TAG@/openbitdo-@UPSTREAM_TAG@-linux-aarch64.tar.gz"
+      sha256 "@LINUX_AARCH64_SHA256@"
+    end
+  end
+
+  def install
+    bin.install "bin/openbitdo"
+  end
+
+  test do
+    assert_match "openbitdo", shell_output("#{bin}/openbitdo --help")
+  end
+end
