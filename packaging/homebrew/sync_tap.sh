@@ -11,8 +11,12 @@ if [[ -z "${HOMEBREW_TAP_TOKEN:-}" ]]; then
   exit 1
 fi
 
+# Trim accidental newline/CR characters from copied secrets.
+HOMEBREW_TAP_TOKEN="$(printf '%s' "${HOMEBREW_TAP_TOKEN}" | tr -d '\r\n')"
+
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 TAP_REPO="${HOMEBREW_TAP_REPO:-bybrooklyn/homebrew-openbitdo}"
+TAP_USER="${HOMEBREW_TAP_USERNAME:-${GITHUB_ACTOR:-x-access-token}}"
 FORMULA_SOURCE="${FORMULA_SOURCE:-$ROOT/packaging/homebrew/Formula/openbitdo.rb}"
 TMP="$(mktemp -d)"
 
@@ -21,7 +25,7 @@ if [[ ! -f "$FORMULA_SOURCE" ]]; then
   exit 1
 fi
 
-git clone "https://x-access-token:${HOMEBREW_TAP_TOKEN}@github.com/${TAP_REPO}.git" "$TMP/tap"
+git clone "https://${TAP_USER}:${HOMEBREW_TAP_TOKEN}@github.com/${TAP_REPO}.git" "$TMP/tap"
 mkdir -p "$TMP/tap/Formula"
 cp "$FORMULA_SOURCE" "$TMP/tap/Formula/openbitdo.rb"
 

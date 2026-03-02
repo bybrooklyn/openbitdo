@@ -97,13 +97,12 @@ jobs:
 
       - name: Publish openbitdo and openbitdo-bin
         env:
-          GIT_SSH_COMMAND: ssh -i ~/.ssh/aur
-          AUR_USER: ${{ secrets.AUR_USERNAME }}
+          GIT_SSH_COMMAND: ssh -i ~/.ssh/aur -o IdentitiesOnly=yes
         run: |
           set -euo pipefail
           publish_pkg() {
             local pkg="$1"
-            local remote="ssh://${AUR_USER}@aur.archlinux.org/${pkg}.git"
+            local remote="aur@aur.archlinux.org:${pkg}.git"
             local tmp_root
             local workdir
 
