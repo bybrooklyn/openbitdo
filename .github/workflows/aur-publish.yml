@@ -90,14 +90,15 @@ jobs:
             echo "missing required secret: AUR_SSH_PRIVATE_KEY" >&2
             exit 1
           fi
-          mkdir -p ~/.ssh
-          echo "${{ secrets.AUR_SSH_PRIVATE_KEY }}" > ~/.ssh/aur
-          chmod 600 ~/.ssh/aur
-          ssh-keyscan -H aur.archlinux.org >> ~/.ssh/known_hosts
+          mkdir -p "$HOME/.ssh"
+          printf '%s\n' "${{ secrets.AUR_SSH_PRIVATE_KEY }}" > "$HOME/.ssh/aur"
+          chmod 600 "$HOME/.ssh/aur"
+          ssh-keyscan -H aur.archlinux.org >> "$HOME/.ssh/known_hosts"
+          chmod 644 "$HOME/.ssh/known_hosts"
 
       - name: Publish openbitdo and openbitdo-bin
         env:
-          GIT_SSH_COMMAND: ssh -i ~/.ssh/aur -o IdentitiesOnly=yes
+          GIT_SSH_COMMAND: ssh -i $HOME/.ssh/aur -o IdentitiesOnly=yes -o UserKnownHostsFile=$HOME/.ssh/known_hosts -o StrictHostKeyChecking=accept-new
         run: |
           set -euo pipefail
           publish_pkg() {

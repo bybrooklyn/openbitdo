@@ -16,7 +16,8 @@ HOMEBREW_TAP_TOKEN="$(printf '%s' "${HOMEBREW_TAP_TOKEN}" | tr -d '\r\n')"
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 TAP_REPO="${HOMEBREW_TAP_REPO:-bybrooklyn/homebrew-openbitdo}"
-TAP_USER="${HOMEBREW_TAP_USERNAME:-${GITHUB_ACTOR:-x-access-token}}"
+TAP_OWNER="${TAP_REPO%%/*}"
+TAP_USER="${HOMEBREW_TAP_USERNAME:-$TAP_OWNER}"
 FORMULA_SOURCE="${FORMULA_SOURCE:-$ROOT/packaging/homebrew/Formula/openbitdo.rb}"
 TMP="$(mktemp -d)"
 
@@ -25,7 +26,24 @@ if [[ ! -f "$FORMULA_SOURCE" ]]; then
   exit 1
 fi
 
-git clone "https://${TAP_USER}:${HOMEBREW_TAP_TOKEN}@github.com/${TAP_REPO}.git" "$TMP/tap"
+clone_url() {
+  local user="$1"
+  echo "attempting tap clone using token auth as '${user}'"
+  git clone "https://${user}:${HOMEBREW_TAP_TOKEN}@github.com/${TAP_REPO}.git" "$TMP/tap"
+}
+
+if ! clone_url "$TAP_USER"; then
+  # Some token types (for example GitHub App tokens) require x-access-token.
+  if [[ "$TAP_USER" != "x-access-token" ]]; then
+    rm -rf "$TMP/tap"
+    clone_url "x-access-token"
+    TAP_USER="x-access-token"
+  else
+    echo "failed to clone tap repo with HOMEBREW_TAP_TOKEN" >&2
+    exit 1
+  fi
+fi
+
 mkdir -p "$TMP/tap/Formula"
 cp "$FORMULA_SOURCE" "$TMP/tap/Formula/openbitdo.rb"
 
@@ -37,4 +55,5 @@ git commit -m "Update openbitdo formula" || {
   echo "no formula changes to push"
   exit 0
 }
+git remote set-url origin "https://${TAP_USER}:${HOMEBREW_TAP_TOKEN}@github.com/${TAP_REPO}.git"
 git push
