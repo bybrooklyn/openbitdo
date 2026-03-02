@@ -80,18 +80,58 @@ jobs:
             build-macos-arm64
             test
           )
-          check_runs_json="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${GITHUB_SHA}/check-runs")"
-          failed=0
-          for check in "${required_checks[@]}"; do
-            conclusion="$(jq -r --arg name "$check" '[.check_runs[] | select(.name == $name) | .conclusion] | first // "missing"' <<<"$check_runs_json")"
-            if [[ "$conclusion" != "success" ]]; then
-              echo "required check '${check}' is not successful on ${GITHUB_SHA} (got: ${conclusion})" >&2
-              failed=1
+          max_attempts=120
+          sleep_seconds=10
+          declare -A final_state
+
+          for attempt in $(seq 1 "${max_attempts}"); do
+            if ! check_runs_json="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${GITHUB_SHA}/check-runs")"; then
+              echo "attempt ${attempt}/${max_attempts}: unable to fetch check-runs; retrying in ${sleep_seconds}s"
+              if [[ "${attempt}" -lt "${max_attempts}" ]]; then
+                sleep "${sleep_seconds}"
+              fi
+              continue
+            fi
+
+            all_success=1
+            echo "check-run preflight attempt ${attempt}/${max_attempts}"
+            for check in "${required_checks[@]}"; do
+              state="$(
+                jq -r --arg name "$check" '
+                  [.check_runs[] | select(.name == $name)] as $runs
+                  | if ($runs | length) == 0 then
+                      "missing"
+                    elif any($runs[]; .conclusion == "success") then
+                      "success"
+                    elif any($runs[]; .conclusion == "failure" or .conclusion == "timed_out" or .conclusion == "action_required" or .conclusion == "startup_failure" or .conclusion == "stale") then
+                      "failing"
+                    else
+                      "pending"
+                    end
+                ' <<<"$check_runs_json"
+              )"
+              final_state["$check"]="$state"
+              echo " - ${check}: ${state}"
+              if [[ "${state}" != "success" ]]; then
+                all_success=0
+              fi
+            done
+
+            if [[ "${all_success}" -eq 1 ]]; then
+              echo "all required CI checks are successful on ${GITHUB_SHA}"
+              exit 0
+            fi
+
+            if [[ "${attempt}" -lt "${max_attempts}" ]]; then
+              sleep "${sleep_seconds}"
             fi
           done
-          if [[ "$failed" -ne 0 ]]; then
-            exit 1
-          fi
+
+          echo "timed out waiting for required CI checks on ${GITHUB_SHA}" >&2
+          for check in "${required_checks[@]}"; do
+            echo " - ${check}: ${final_state[$check]:-missing}" >&2
+          done
+          exit 1
 
       - name: Install system deps
         run: |
