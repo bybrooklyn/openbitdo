@@ -57,6 +57,16 @@ jobs:
           [[ -n "${AUR_SSH_PRIVATE_KEY:-}" ]] || { echo "missing required secret: AUR_SSH_PRIVATE_KEY" >&2; exit 1; }
           [[ -n "${HOMEBREW_TAP_TOKEN:-}" ]] || { echo "missing required secret: HOMEBREW_TAP_TOKEN" >&2; exit 1; }
 
+      - name: Preflight Homebrew tap repository access
+        working-directory: ${{ github.workspace }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HOMEBREW_TAP_REPO: ${{ vars.HOMEBREW_TAP_REPO }}
+        run: |
+          set -euo pipefail
+          [[ -n "${HOMEBREW_TAP_REPO:-}" ]] || { echo "missing required variable: HOMEBREW_TAP_REPO" >&2; exit 1; }
+          gh repo view "${HOMEBREW_TAP_REPO}" >/dev/null
+
       - name: Require successful CI and hardware checks on tagged commit
         working-directory: ${{ github.workspace }}
         env:

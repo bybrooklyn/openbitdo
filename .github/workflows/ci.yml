@@ -97,6 +97,52 @@ jobs:
           name: ci-macos-arm64-package
           path: sdk/dist/openbitdo-v0.0.0-ci-macos-arm64*
 
+  build-linux-x86_64:
+    runs-on: ubuntu-latest
+    needs: guard
+    defaults:
+      run:
+        working-directory: sdk
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install system deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libudev-dev pkg-config
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+      - name: Build/package linux x86_64 artifacts
+        run: ./scripts/package-linux.sh v0.0.0-ci x86_64
+      - name: Upload linux x86_64 artifact sample
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-linux-x86_64-package
+          path: sdk/dist/openbitdo-v0.0.0-ci-linux-x86_64*
+
+  build-linux-aarch64:
+    runs-on: ubuntu-24.04-arm
+    needs: guard
+    defaults:
+      run:
+        working-directory: sdk
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install system deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libudev-dev pkg-config
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+      - name: Build/package linux aarch64 artifacts
+        run: ./scripts/package-linux.sh v0.0.0-ci aarch64
+      - name: Upload linux aarch64 artifact sample
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-linux-aarch64-package
+          path: sdk/dist/openbitdo-v0.0.0-ci-linux-aarch64*
+
   hardware-paths:
     runs-on: ubuntu-latest
     outputs:
@@ -125,6 +171,8 @@ jobs:
       - tui-smoke-test
       - aur-validate
       - build-macos-arm64
+      - build-linux-x86_64
+      - build-linux-aarch64
     defaults:
       run:
         working-directory: sdk

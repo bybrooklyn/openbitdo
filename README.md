@@ -18,6 +18,25 @@ cargo run -p openbitdo -- --mock
 
 Beginner flow is always `openbitdo` only. No extra command surface is required.
 
+## Install (Public RC)
+
+Homebrew tap install path for RC:
+
+```bash
+brew tap bybrooklyn/openbitdo
+brew install openbitdo
+```
+
+Homebrew Core inclusion (`brew install openbitdo` without tapping) is not an RC blocker and may land later.
+
+AUR package names:
+- `openbitdo` (source build)
+- `openbitdo-bin` (prebuilt binary)
+
+macOS RC caveat:
+- `.pkg` installers are unsigned/ad-hoc for `v0.0.1-rc.1`.
+- notarization is required starting with `v0.1.0`.
+
 ## UI Language Support
 
 | Language | Status | Notes |

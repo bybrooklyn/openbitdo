@@ -99,12 +99,19 @@ Packaging outputs use:
 - Clean-tree requirement from `/Users/brooklyn/data/8bitdo/cleanroom/RC_CHECKLIST.md` must be satisfied before tagging.
 
 ## Distribution Prep
+- Homebrew install path for public RC:
+  - `brew tap bybrooklyn/openbitdo`
+  - `brew install openbitdo`
+- Homebrew Core inclusion is not required for `v0.0.1-rc.1`.
 - Homebrew formula scaffold: `/Users/brooklyn/data/8bitdo/cleanroom/packaging/homebrew/Formula/openbitdo.rb`
 - Homebrew tap sync script (disabled by default): `/Users/brooklyn/data/8bitdo/cleanroom/packaging/homebrew/sync_tap.sh`
-- Planned tap repository: `bybrooklyn/homebrew-openbitdo`
+- Tap repository: `bybrooklyn/homebrew-openbitdo`
 - AUR package sources:
   - `/Users/brooklyn/data/8bitdo/cleanroom/packaging/aur/openbitdo`
   - `/Users/brooklyn/data/8bitdo/cleanroom/packaging/aur/openbitdo-bin`
+- AUR package names:
+  - `openbitdo`
+  - `openbitdo-bin`
 - Release metadata renderer:
   - `/Users/brooklyn/data/8bitdo/cleanroom/packaging/scripts/render_release_metadata.sh`
 - AUR publish workflow:
@@ -113,6 +120,9 @@ Packaging outputs use:
 - Homebrew publish path:
   - `release.yml` renders checksum-pinned formula and runs `sync_tap.sh`
   - gated by `HOMEBREW_PUBLISH_ENABLED=1`
+- macOS `.pkg` caveat:
+  - unsigned/ad-hoc is accepted for RC
+  - notarization required for `v0.1.0`
 
 ## Hardware CI gates
 - required:

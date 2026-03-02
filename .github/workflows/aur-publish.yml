@@ -95,36 +95,51 @@ jobs:
           chmod 600 ~/.ssh/aur
           ssh-keyscan -H aur.archlinux.org >> ~/.ssh/known_hosts
 
-      - name: Publish openbitdo
+      - name: Publish openbitdo and openbitdo-bin
         env:
           GIT_SSH_COMMAND: ssh -i ~/.ssh/aur
           AUR_USER: ${{ secrets.AUR_USERNAME }}
         run: |
           set -euo pipefail
-          TMP="$(mktemp -d)"
-          git clone "ssh://${AUR_USER}@aur.archlinux.org/openbitdo.git" "$TMP/openbitdo"
-          cp /tmp/release-metadata/aur/openbitdo/PKGBUILD "$TMP/openbitdo/PKGBUILD"
-          cp /tmp/release-metadata/aur/openbitdo/.SRCINFO "$TMP/openbitdo/.SRCINFO"
-          cd "$TMP/openbitdo"
-          git config user.name "openbitdo-ci"
-          git config user.email "actions@users.noreply.github.com"
-          git add PKGBUILD .SRCINFO
-          git commit -m "Update openbitdo package for ${TAG}" || exit 0
-          git push
+          publish_pkg() {
+            local pkg="$1"
+            local remote="ssh://${AUR_USER}@aur.archlinux.org/${pkg}.git"
+            local tmp_root
+            local workdir
 
-      - name: Publish openbitdo-bin
-        env:
-          GIT_SSH_COMMAND: ssh -i ~/.ssh/aur
-          AUR_USER: ${{ secrets.AUR_USERNAME }}
-        run: |
-          set -euo pipefail
-          TMP="$(mktemp -d)"
-          git clone "ssh://${AUR_USER}@aur.archlinux.org/openbitdo-bin.git" "$TMP/openbitdo-bin"
-          cp /tmp/release-metadata/aur/openbitdo-bin/PKGBUILD "$TMP/openbitdo-bin/PKGBUILD"
-          cp /tmp/release-metadata/aur/openbitdo-bin/.SRCINFO "$TMP/openbitdo-bin/.SRCINFO"
-          cd "$TMP/openbitdo-bin"
-          git config user.name "openbitdo-ci"
-          git config user.email "actions@users.noreply.github.com"
-          git add PKGBUILD .SRCINFO
-          git commit -m "Update openbitdo-bin package for ${TAG}" || exit 0
-          git push
+            tmp_root="$(mktemp -d)"
+            workdir="${tmp_root}/${pkg}"
+
+            if git clone "$remote" "$workdir"; then
+              echo "${pkg}: updated-existing"
+            else
+              echo "${pkg}: bootstrap-created"
+              mkdir -p "$workdir"
+              cd "$workdir"
+              git init
+              git remote add origin "$remote"
+            fi
+
+            cp "/tmp/release-metadata/aur/${pkg}/PKGBUILD" "${workdir}/PKGBUILD"
+            cp "/tmp/release-metadata/aur/${pkg}/.SRCINFO" "${workdir}/.SRCINFO"
+
+            cd "$workdir"
+            git config user.name "openbitdo-ci"
+            git config user.email "actions@users.noreply.github.com"
+            git add PKGBUILD .SRCINFO
+
+            if git diff --cached --quiet; then
+              echo "${pkg}: no metadata changes"
+              return 0
+            fi
+
+            git commit -m "Update ${pkg} package for ${TAG}"
+            if git ls-remote --exit-code --heads origin >/dev/null 2>&1; then
+              git push
+            else
+              git push -u origin HEAD:master
+            fi
+          }
+
+          publish_pkg openbitdo
+          publish_pkg openbitdo-bin
