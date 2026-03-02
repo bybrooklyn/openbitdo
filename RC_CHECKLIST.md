@@ -126,14 +126,31 @@ shasum -a 256 -c openbitdo-v0.0.1-rc.1-macos-arm64.pkg.sha256
 ## RC Gate Snapshot (Local)
 | Gate | Status | Notes |
 | --- | --- | --- |
-| Clean tree | Pending | Will pass after local baseline commit if `git status --porcelain` is empty. |
+| Clean tree | Pass | Verified empty on `c3115da` before final checklist update (`git status --porcelain`). |
 | Secrets present | Pass | `AUR_USERNAME`, `AUR_SSH_PRIVATE_KEY`, `HOMEBREW_TAP_TOKEN` exist in repo secrets. |
 | Required checks configured | Pass | `guard`, `test`, `tui-smoke-test`, `aur-validate`, `build-macos-arm64`, `hardware-108jp`, `hardware-ultimate2`. |
-| Open release-blocker issues | Fail | `1` open (`Wave 2 Dirty-Room Expansion (+12 Popularity Set)`). |
-| RC release allowed | Fail | `No` while release-blocker count is non-zero. |
+| Open release-blocker issues | Pass | `0` open (`gh issue list --label release-blocker --state open`). |
+| RC release allowed | Fail | `No` yet: required hardware checks are still queued on the RC commit and AUR SSH auth still returns `Permission denied (publickey)`. |
 
 ## RC Execution Log
 - 2026-03-02T20:54:31Z: governance preflight complete; release blocker remains open by policy.
-- Local baseline commit snapshot:
-  - commit hash: `PENDING_AFTER_COMMIT` (retrieve with `git rev-parse --short HEAD`)
-  - clean-tree check: run `git status --porcelain` and expect empty output.
+- 2026-03-02T21:38:17Z: set `HOMEBREW_TAP_REPO=bybrooklyn/homebrew-openbitdo`; repository and tap visibility switched to public.
+- 2026-03-02T21:40:00Z: bootstrapped tap repo `bybrooklyn/homebrew-openbitdo` with initial `Formula/openbitdo.rb`.
+- 2026-03-02T21:45:27Z to 2026-03-02T21:48:55Z: CI run `22597105846` on commit `c3115da` passed `guard`, `test`, `tui-smoke-test`, `aur-validate`, `build-macos-arm64`, `build-linux-x86_64`, and `build-linux-aarch64`.
+- 2026-03-02T21:48:55Z: required hardware jobs `hardware-108jp` and `hardware-ultimate2` entered queued state on the same commit and are still pending runner pickup.
+- 2026-03-02T21:49:00Z to 2026-03-02T21:55:00Z: downloaded CI artifacts and manually verified each artifact hash against `.sha256` content (all matched) for:
+  - `openbitdo-v0.0.0-ci-linux-x86_64.tar.gz`
+  - `openbitdo-v0.0.0-ci-linux-x86_64`
+  - `openbitdo-v0.0.0-ci-linux-aarch64.tar.gz`
+  - `openbitdo-v0.0.0-ci-linux-aarch64`
+  - `openbitdo-v0.0.0-ci-macos-arm64.tar.gz`
+  - `openbitdo-v0.0.0-ci-macos-arm64`
+  - `openbitdo-v0.0.0-ci-macos-arm64.pkg`
+- 2026-03-02T21:56:00Z to 2026-03-02T22:00:00Z: Linux artifact smoke completed in containers for `linux/amd64` and `linux/arm64` by launching `openbitdo --mock` and observing successful TUI startup.
+- 2026-03-02T21:57:00Z: local macOS packaging smoke completed via `./sdk/scripts/package-macos.sh v0.0.0-local arm64` (tarball, standalone binary, pkg generated).
+- 2026-03-02T21:58:00Z: local standalone macOS smoke completed (`openbitdo-v0.0.0-local-macos-arm64 --mock`) with TUI startup and clean exit via scripted key input.
+- 2026-03-02T21:59:00Z: pkg payload path validated by expansion (`Payload/opt/homebrew/bin/openbitdo`); direct installer invocation requires root (`installer: Must be run as root to install this package`).
+- 2026-03-02T21:59:30Z: About behavior validated by test run `cargo test -p bitdo_tui about_state_roundtrip_returns_home`.
+- 2026-03-02T22:02:00Z: Wave 2 issues `#2` through `#13` closed with per-issue evidence comments.
+- 2026-03-02T22:03:00Z: epic issue `#1` closed and `release-blocker` label removed after child closure summary.
+- 2026-03-02T22:04:00Z: clean-tree gate confirmed on baseline commit `c3115da` (`git status --porcelain` empty).
