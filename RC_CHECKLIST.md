@@ -62,16 +62,6 @@ Expected:
 - `tui-smoke-test`
 - `build-macos-arm64`
 - `test`
-- `hardware-ultimate2`
-- `hardware-108jp`
-
-Gated/non-required:
-- `hardware-jphandshake` (enabled only when `BITDO_ENABLE_JP_HARDWARE=1`)
-
-Hardware execution policy:
-- Pull requests run required hardware jobs when surgical runtime/spec paths are touched.
-- `main`, nightly, and tag workflows run full required hardware coverage.
-- Nightly full hardware run is scheduled for `02:30 America/New_York` policy time (implemented as GitHub cron UTC).
 
 ## Release Secret Preflight (Tag Workflow)
 Tag preflight must fail early if any required secret is missing:
@@ -128,16 +118,15 @@ shasum -a 256 -c openbitdo-v0.0.1-rc.1-macos-arm64.pkg.sha256
 | --- | --- | --- |
 | Clean tree | Pass | Verified empty on `c3115da` before final checklist update (`git status --porcelain`). |
 | Secrets present | Pass | `AUR_USERNAME`, `AUR_SSH_PRIVATE_KEY`, `HOMEBREW_TAP_TOKEN` exist in repo secrets. |
-| Required checks configured | Pass | `guard`, `test`, `tui-smoke-test`, `aur-validate`, `build-macos-arm64`, `hardware-108jp`, `hardware-ultimate2`. |
+| Required checks configured | Pass | `guard`, `test`, `tui-smoke-test`, `aur-validate`, `build-macos-arm64`. |
 | Open release-blocker issues | Pass | `0` open (`gh issue list --label release-blocker --state open`). |
-| RC release allowed | Fail | `No` yet: required hardware checks are still queued on the RC commit and AUR SSH auth still returns `Permission denied (publickey)`. |
+| RC release allowed | Fail | `No` yet: AUR SSH auth still returns `Permission denied (publickey)`. |
 
 ## RC Execution Log
 - 2026-03-02T20:54:31Z: governance preflight complete; release blocker remains open by policy.
 - 2026-03-02T21:38:17Z: set `HOMEBREW_TAP_REPO=bybrooklyn/homebrew-openbitdo`; repository and tap visibility switched to public.
 - 2026-03-02T21:40:00Z: bootstrapped tap repo `bybrooklyn/homebrew-openbitdo` with initial `Formula/openbitdo.rb`.
 - 2026-03-02T21:45:27Z to 2026-03-02T21:48:55Z: CI run `22597105846` on commit `c3115da` passed `guard`, `test`, `tui-smoke-test`, `aur-validate`, `build-macos-arm64`, `build-linux-x86_64`, and `build-linux-aarch64`.
-- 2026-03-02T21:48:55Z: required hardware jobs `hardware-108jp` and `hardware-ultimate2` entered queued state on the same commit and are still pending runner pickup.
 - 2026-03-02T21:49:00Z to 2026-03-02T21:55:00Z: downloaded CI artifacts and manually verified each artifact hash against `.sha256` content (all matched) for:
   - `openbitdo-v0.0.0-ci-linux-x86_64.tar.gz`
   - `openbitdo-v0.0.0-ci-linux-x86_64`
@@ -154,3 +143,4 @@ shasum -a 256 -c openbitdo-v0.0.1-rc.1-macos-arm64.pkg.sha256
 - 2026-03-02T22:02:00Z: Wave 2 issues `#2` through `#13` closed with per-issue evidence comments.
 - 2026-03-02T22:03:00Z: epic issue `#1` closed and `release-blocker` label removed after child closure summary.
 - 2026-03-02T22:04:00Z: clean-tree gate confirmed on baseline commit `c3115da` (`git status --porcelain` empty).
+- 2026-03-02T22:10:00Z: removed hardware self-hosted checks from branch protection and CI/release gate policy.

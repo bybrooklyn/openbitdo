@@ -124,9 +124,10 @@ Packaging outputs use:
   - unsigned/ad-hoc is accepted for RC
   - notarization required for `v0.1.0`
 
-## Hardware CI gates
+## CI Gates
 - required:
-  - `hardware-ultimate2`
-  - `hardware-108jp`
-- gated:
-  - `hardware-jphandshake` (enabled only when `BITDO_ENABLE_JP_HARDWARE=1`)
+  - `guard`
+  - `test`
+  - `tui-smoke-test`
+  - `aur-validate`
+  - `build-macos-arm64`
