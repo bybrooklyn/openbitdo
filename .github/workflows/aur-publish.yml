@@ -54,7 +54,7 @@ jobs:
             --pattern "openbitdo-${TAG}-linux-aarch64.tar.gz" \
             --pattern "openbitdo-${TAG}-macos-arm64.tar.gz" \
             --dir /tmp/release-input
-          gh api -H "Accept: application/octet-stream" "repos/${GITHUB_REPOSITORY}/tarball/${TAG}" \
+          gh api "repos/${GITHUB_REPOSITORY}/tarball/${TAG}" \
             > "/tmp/release-input/openbitdo-${TAG}-source.tar.gz"
           bash packaging/scripts/render_release_metadata.sh \
             "$TAG" \
