@@ -23,7 +23,8 @@ esac
 
 DIST_ROOT="$ROOT/dist"
 PKG_NAME="openbitdo-${VERSION}-linux-${ARCH_LABEL}"
-PKG_DIR="$DIST_ROOT/$PKG_NAME"
+STAGE_ROOT="$(mktemp -d)"
+PKG_DIR="$STAGE_ROOT/$PKG_NAME"
 BIN_ASSET="$DIST_ROOT/${PKG_NAME}"
 
 checksum_file() {
@@ -50,7 +51,6 @@ build_binary() {
 
 BIN_PATH="$(build_binary)"
 
-rm -rf "$PKG_DIR"
 mkdir -p "$PKG_DIR/bin" "$DIST_ROOT"
 
 cp "$BIN_PATH" "$PKG_DIR/bin/openbitdo"
@@ -59,7 +59,8 @@ cp "$REPO_ROOT/README.md" "$PKG_DIR/README.md"
 cp "$ROOT/README.md" "$PKG_DIR/SDK_README.md"
 cp "$REPO_ROOT/LICENSE" "$PKG_DIR/LICENSE"
 
-tar -C "$DIST_ROOT" -czf "$DIST_ROOT/${PKG_NAME}.tar.gz" "$PKG_NAME"
+tar -C "$STAGE_ROOT" -czf "$DIST_ROOT/${PKG_NAME}.tar.gz" "$PKG_NAME"
+rm -rf "$STAGE_ROOT"
 
 checksum_file "$DIST_ROOT/${PKG_NAME}.tar.gz"
 checksum_file "$BIN_ASSET"
