@@ -55,5 +55,19 @@ git commit -m "Update openbitdo formula" || {
   echo "no formula changes to push"
   exit 0
 }
-git remote set-url origin "https://${TAP_USER}:${HOMEBREW_TAP_TOKEN}@github.com/${TAP_REPO}.git"
-git push
+
+push_with_user() {
+  local user="$1"
+  git remote set-url origin "https://${user}:${HOMEBREW_TAP_TOKEN}@github.com/${TAP_REPO}.git"
+  git push
+}
+
+if ! push_with_user "$TAP_USER"; then
+  # Some token types require x-access-token as the username for writes.
+  if [[ "$TAP_USER" != "x-access-token" ]]; then
+    push_with_user "x-access-token"
+  else
+    echo "failed to push formula updates to ${TAP_REPO}" >&2
+    exit 1
+  fi
+fi
