@@ -62,23 +62,10 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           HOMEBREW_TAP_REPO: ${{ vars.HOMEBREW_TAP_REPO }}
-          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
         run: |
           set -euo pipefail
           [[ -n "${HOMEBREW_TAP_REPO:-}" ]] || { echo "missing required variable: HOMEBREW_TAP_REPO" >&2; exit 1; }
           gh repo view "${HOMEBREW_TAP_REPO}" >/dev/null
-          tap_token="$(printf '%s' "${HOMEBREW_TAP_TOKEN}" | tr -d '\r\n')"
-          if ! tap_push_permission="$(
-            GH_TOKEN="${tap_token}" \
-              gh api "repos/${HOMEBREW_TAP_REPO}" --jq '.permissions.push // false' 2>/dev/null
-          )"; then
-            echo "HOMEBREW_TAP_TOKEN is invalid or lacks API access to ${HOMEBREW_TAP_REPO}" >&2
-            exit 1
-          fi
-          if [[ "${tap_push_permission}" != "true" ]]; then
-            echo "HOMEBREW_TAP_TOKEN does not have push permission on ${HOMEBREW_TAP_REPO}" >&2
-            exit 1
-          fi
 
       - name: Require successful CI checks on tagged commit
         working-directory: ${{ github.workspace }}
