@@ -46,7 +46,7 @@ api_with_fallback() {
   fi
 
   if [[ -n "${JOB_GH_TOKEN}" && "${JOB_GH_TOKEN}" != "${HOMEBREW_TAP_TOKEN}" ]]; then
-    echo "homebrew token auth failed; retrying with workflow token"
+    echo "homebrew token auth failed; retrying with workflow token" >&2
     if api "${JOB_GH_TOKEN}" "$@" 2>"$error_log"; then
       return 0
     fi
