@@ -67,19 +67,18 @@ jobs:
           set -euo pipefail
           [[ -n "${HOMEBREW_TAP_REPO:-}" ]] || { echo "missing required variable: HOMEBREW_TAP_REPO" >&2; exit 1; }
           gh repo view "${HOMEBREW_TAP_REPO}" >/dev/null
-          # Validate token auth against the exact git remote path used for tap sync.
           tap_token="$(printf '%s' "${HOMEBREW_TAP_TOKEN}" | tr -d '\r\n')"
-          tap_owner="${HOMEBREW_TAP_REPO%%/*}"
-          tap_url_primary="https://${tap_owner}:${tap_token}@github.com/${HOMEBREW_TAP_REPO}.git"
-          tap_url_fallback="https://x-access-token:${tap_token}@github.com/${HOMEBREW_TAP_REPO}.git"
-          if git ls-remote --heads "${tap_url_primary}" >/dev/null 2>&1; then
-            exit 0
+          if ! tap_push_permission="$(
+            GH_TOKEN="${tap_token}" \
+              gh api "repos/${HOMEBREW_TAP_REPO}" --jq '.permissions.push // false' 2>/dev/null
+          )"; then
+            echo "HOMEBREW_TAP_TOKEN is invalid or lacks API access to ${HOMEBREW_TAP_REPO}" >&2
+            exit 1
           fi
-          if git ls-remote --heads "${tap_url_fallback}" >/dev/null 2>&1; then
-            exit 0
+          if [[ "${tap_push_permission}" != "true" ]]; then
+            echo "HOMEBREW_TAP_TOKEN does not have push permission on ${HOMEBREW_TAP_REPO}" >&2
+            exit 1
           fi
-          echo "HOMEBREW_TAP_TOKEN cannot access ${HOMEBREW_TAP_REPO} via git over HTTPS" >&2
-          exit 1
 
       - name: Require successful CI checks on tagged commit
         working-directory: ${{ github.workspace }}

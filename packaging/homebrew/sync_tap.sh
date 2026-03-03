@@ -16,8 +16,6 @@ HOMEBREW_TAP_TOKEN="$(printf '%s' "${HOMEBREW_TAP_TOKEN}" | tr -d '\r\n')"
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 TAP_REPO="${HOMEBREW_TAP_REPO:-bybrooklyn/homebrew-openbitdo}"
-TAP_OWNER="${TAP_REPO%%/*}"
-TAP_USER="${HOMEBREW_TAP_USERNAME:-$TAP_OWNER}"
 FORMULA_SOURCE="${FORMULA_SOURCE:-$ROOT/packaging/homebrew/Formula/openbitdo.rb}"
 TMP="$(mktemp -d)"
 
@@ -26,48 +24,33 @@ if [[ ! -f "$FORMULA_SOURCE" ]]; then
   exit 1
 fi
 
-clone_url() {
-  local user="$1"
-  echo "attempting tap clone using token auth as '${user}'"
-  git clone "https://${user}:${HOMEBREW_TAP_TOKEN}@github.com/${TAP_REPO}.git" "$TMP/tap"
+api() {
+  GH_TOKEN="${HOMEBREW_TAP_TOKEN}" gh api "$@"
 }
 
-if ! clone_url "$TAP_USER"; then
-  # Some token types (for example GitHub App tokens) require x-access-token.
-  if [[ "$TAP_USER" != "x-access-token" ]]; then
-    rm -rf "$TMP/tap"
-    clone_url "x-access-token"
-    TAP_USER="x-access-token"
-  else
-    echo "failed to clone tap repo with HOMEBREW_TAP_TOKEN" >&2
-    exit 1
+formula_path="Formula/openbitdo.rb"
+encoded_formula="$(base64 < "$FORMULA_SOURCE" | tr -d '\n')"
+remote_sha=""
+remote_content_file="$TMP/remote_formula.rb"
+
+if api "repos/${TAP_REPO}/contents/${formula_path}?ref=main" >"$TMP/remote.json" 2>/dev/null; then
+  remote_sha="$(jq -r '.sha // ""' "$TMP/remote.json")"
+  jq -r '.content // ""' "$TMP/remote.json" | tr -d '\n' | base64 --decode >"$remote_content_file"
+  if cmp -s "$FORMULA_SOURCE" "$remote_content_file"; then
+    echo "no formula changes to push"
+    exit 0
   fi
 fi
 
-mkdir -p "$TMP/tap/Formula"
-cp "$FORMULA_SOURCE" "$TMP/tap/Formula/openbitdo.rb"
-
-cd "$TMP/tap"
-git config user.name "${GIT_AUTHOR_NAME:-openbitdo-ci}"
-git config user.email "${GIT_AUTHOR_EMAIL:-actions@users.noreply.github.com}"
-git add Formula/openbitdo.rb
-git commit -m "Update openbitdo formula" || {
-  echo "no formula changes to push"
-  exit 0
-}
-
-push_with_user() {
-  local user="$1"
-  git remote set-url origin "https://${user}:${HOMEBREW_TAP_TOKEN}@github.com/${TAP_REPO}.git"
-  git push
-}
-
-if ! push_with_user "$TAP_USER"; then
-  # Some token types require x-access-token as the username for writes.
-  if [[ "$TAP_USER" != "x-access-token" ]]; then
-    push_with_user "x-access-token"
-  else
-    echo "failed to push formula updates to ${TAP_REPO}" >&2
-    exit 1
-  fi
+api_args=(
+  --method PUT
+  "repos/${TAP_REPO}/contents/${formula_path}"
+  -f message="Update openbitdo formula"
+  -f content="${encoded_formula}"
+  -f branch="main"
+)
+if [[ -n "${remote_sha}" ]]; then
+  api_args+=(-f sha="${remote_sha}")
 fi
+api "${api_args[@]}" >/dev/null
+echo "updated ${TAP_REPO}:${formula_path}"
