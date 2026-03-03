@@ -38,21 +38,27 @@ api() {
 }
 
 api_with_fallback() {
-  local error_log="$TMP/gh_api_error.log"
-  rm -f "$error_log"
+  local primary_error_log="$TMP/gh_api_primary_error.log"
+  local fallback_error_log="$TMP/gh_api_fallback_error.log"
+  rm -f "$primary_error_log" "$fallback_error_log"
 
-  if api "${HOMEBREW_TAP_TOKEN}" "$@" 2>"$error_log"; then
+  if api "${HOMEBREW_TAP_TOKEN}" "$@" 2>"$primary_error_log"; then
     return 0
   fi
 
-  if [[ -n "${JOB_GH_TOKEN}" && "${JOB_GH_TOKEN}" != "${HOMEBREW_TAP_TOKEN}" ]]; then
-    echo "homebrew token auth failed; retrying with workflow token" >&2
-    if api "${JOB_GH_TOKEN}" "$@" 2>"$error_log"; then
-      return 0
+  # Only try workflow-token fallback for clear auth failures.
+  if grep -Eq 'HTTP 401|HTTP 403' "$primary_error_log"; then
+    if [[ -n "${JOB_GH_TOKEN}" && "${JOB_GH_TOKEN}" != "${HOMEBREW_TAP_TOKEN}" ]]; then
+      echo "homebrew token auth failed; retrying with workflow token" >&2
+      if api "${JOB_GH_TOKEN}" "$@" 2>"$fallback_error_log"; then
+        return 0
+      fi
+      cat "$fallback_error_log" >&2
+      return 1
     fi
   fi
 
-  cat "$error_log" >&2
+  cat "$primary_error_log" >&2
   return 1
 }
 
