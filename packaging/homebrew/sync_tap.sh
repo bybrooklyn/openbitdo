@@ -6,6 +6,8 @@ if [[ "${HOMEBREW_PUBLISH_ENABLED:-0}" != "1" ]]; then
   exit 0
 fi
 
+JOB_GH_TOKEN="${GH_TOKEN:-}"
+
 if [[ -z "${HOMEBREW_TAP_TOKEN:-}" ]]; then
   echo "missing HOMEBREW_TAP_TOKEN" >&2
   exit 1
@@ -30,7 +32,28 @@ if [[ ! -f "$FORMULA_SOURCE" ]]; then
 fi
 
 api() {
-  GH_TOKEN="${HOMEBREW_TAP_TOKEN}" gh api "$@"
+  local token="$1"
+  shift
+  GH_TOKEN="${token}" gh api "$@"
+}
+
+api_with_fallback() {
+  local error_log="$TMP/gh_api_error.log"
+  rm -f "$error_log"
+
+  if api "${HOMEBREW_TAP_TOKEN}" "$@" 2>"$error_log"; then
+    return 0
+  fi
+
+  if [[ -n "${JOB_GH_TOKEN}" && "${JOB_GH_TOKEN}" != "${HOMEBREW_TAP_TOKEN}" ]]; then
+    echo "homebrew token auth failed; retrying with workflow token"
+    if api "${JOB_GH_TOKEN}" "$@" 2>"$error_log"; then
+      return 0
+    fi
+  fi
+
+  cat "$error_log" >&2
+  return 1
 }
 
 formula_path="Formula/openbitdo.rb"
@@ -38,7 +61,7 @@ encoded_formula="$(base64 < "$FORMULA_SOURCE" | tr -d '\n')"
 remote_sha=""
 remote_content_file="$TMP/remote_formula.rb"
 
-if api "repos/${TAP_REPO}/contents/${formula_path}?ref=main" >"$TMP/remote.json" 2>/dev/null; then
+if api_with_fallback "repos/${TAP_REPO}/contents/${formula_path}?ref=main" >"$TMP/remote.json" 2>/dev/null; then
   remote_sha="$(jq -r '.sha // ""' "$TMP/remote.json")"
   jq -r '.content // ""' "$TMP/remote.json" | tr -d '\n' | base64 --decode >"$remote_content_file"
   if cmp -s "$FORMULA_SOURCE" "$remote_content_file"; then
@@ -57,5 +80,5 @@ api_args=(
 if [[ -n "${remote_sha}" ]]; then
   api_args+=(-f sha="${remote_sha}")
 fi
-api "${api_args[@]}" >/dev/null
+api_with_fallback "${api_args[@]}" >/dev/null
 echo "updated ${TAP_REPO}:${formula_path}"
