@@ -12,7 +12,12 @@ if [[ -z "${HOMEBREW_TAP_TOKEN:-}" ]]; then
 fi
 
 # Trim accidental newline/CR characters from copied secrets.
-HOMEBREW_TAP_TOKEN="$(printf '%s' "${HOMEBREW_TAP_TOKEN}" | tr -d '\r\n')"
+# Also trim any leading/trailing whitespace introduced by copy/paste.
+HOMEBREW_TAP_TOKEN="$(
+  printf '%s' "${HOMEBREW_TAP_TOKEN}" \
+    | tr -d '\r\n' \
+    | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//'
+)"
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 TAP_REPO="${HOMEBREW_TAP_REPO:-bybrooklyn/homebrew-openbitdo}"
