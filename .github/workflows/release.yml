@@ -50,20 +50,21 @@ jobs:
         env:
           AUR_USERNAME: ${{ secrets.AUR_USERNAME }}
           AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
-          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
         run: |
           set -euo pipefail
           [[ -n "${AUR_USERNAME:-}" ]] || { echo "missing required secret: AUR_USERNAME" >&2; exit 1; }
           [[ -n "${AUR_SSH_PRIVATE_KEY:-}" ]] || { echo "missing required secret: AUR_SSH_PRIVATE_KEY" >&2; exit 1; }
-          [[ -n "${HOMEBREW_TAP_TOKEN:-}" ]] || { echo "missing required secret: HOMEBREW_TAP_TOKEN" >&2; exit 1; }
 
       - name: Preflight Homebrew tap repository access
+        if: vars.HOMEBREW_PUBLISH_ENABLED == '1'
         working-directory: ${{ github.workspace }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
           HOMEBREW_TAP_REPO: ${{ vars.HOMEBREW_TAP_REPO }}
         run: |
           set -euo pipefail
+          [[ -n "${HOMEBREW_TAP_TOKEN:-}" ]] || { echo "missing required secret: HOMEBREW_TAP_TOKEN" >&2; exit 1; }
           [[ -n "${HOMEBREW_TAP_REPO:-}" ]] || { echo "missing required variable: HOMEBREW_TAP_REPO" >&2; exit 1; }
           gh repo view "${HOMEBREW_TAP_REPO}" >/dev/null
 
