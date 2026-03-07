@@ -30,21 +30,21 @@ jobs:
     container: archlinux:base
     steps:
       - uses: actions/checkout@v4
-      - name: Install AUR packaging toolchain
+      - name: Install packaging validation toolchain
         run: |
-          pacman -Sy --noconfirm --needed base-devel git
-      - name: Ensure package metadata has pinned checksum fields
+          pacman -Sy --noconfirm --needed base-devel git jq
+      - name: Validate release metadata rendering
         run: |
           set -euo pipefail
-          if grep -nE 'SKIP|:no_check' \
-            packaging/aur/openbitdo-bin/PKGBUILD \
-            packaging/homebrew/Formula/openbitdo.rb; then
-            echo "Found placeholder checksum markers; release metadata must be pinned." >&2
-            exit 1
-          fi
           test -f packaging/scripts/render_release_metadata.sh
           test -f packaging/aur/openbitdo-bin/PKGBUILD.tmpl
           test -f packaging/homebrew/Formula/openbitdo.rb.tmpl
+          test ! -f packaging/homebrew/Formula/openbitdo.rb
+          bash packaging/scripts/test_render_release_metadata.sh
+      - name: Validate Homebrew tap sync helper
+        run: |
+          set -euo pipefail
+          bash packaging/homebrew/test_sync_tap.sh
       - name: Validate PKGBUILD and .SRCINFO
         run: |
           useradd -m builder
@@ -53,6 +53,10 @@ jobs:
             cd '$GITHUB_WORKSPACE/packaging/aur/openbitdo-bin'; \
             makepkg --printsrcinfo > /tmp/openbitdo-bin.srcinfo; \
             diff -u .SRCINFO /tmp/openbitdo-bin.srcinfo"
+      - name: Check docs consistency
+        run: |
+          set -euo pipefail
+          bash sdk/scripts/check_docs_consistency.sh
 
   tui-smoke-test:
     runs-on: ubuntu-latest

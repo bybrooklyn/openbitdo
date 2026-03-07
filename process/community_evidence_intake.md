@@ -1,30 +1,25 @@
 # Community Evidence Intake
 
-## Purpose
-Collect hardware and protocol evidence from the community in a clean-room-safe format.
+This process collects safe, sanitized device evidence from users and testers.
 
-## Submission Requirements
-Every report must include:
-- Device name
-- VID/PID (`0xVVVV:0xPPPP`)
-- Firmware version shown by official software/device
-- Operation attempted
-- Sanitized request/response shape description
-- Reproducibility notes (steps, OS, transport mode)
+## Required Submission Data
+
+- device name
+- VID/PID in `0xVVVV:0xPPPP` form
+- firmware version
+- operation attempted
+- sanitized request or response description
+- OS, transport mode, and reproducibility notes
 
 ## Prohibited Content
-- Raw copied decompiled code.
-- Vendor source snippets.
-- Binary dumps with proprietary content not required for protocol structure.
 
-## Acceptance Levels
-- `intake`: report received, unverified.
-- `triaged`: mapped to a PID/operation group and requirement IDs.
-- `accepted`: converted into sanitized dossier/spec updates.
+- raw decompiled code
+- copied vendor source snippets
+- proprietary dumps that are not sanitized into structure-level notes
 
-## Maintainer Processing
-1. Validate report format.
-2. Cross-reference PID with `spec/pid_matrix.csv`.
-3. Create/update `spec/dossiers/<pid_hex>/*.toml`.
-4. Update `spec/evidence_index.csv` and command/pid matrices.
-5. Keep device as `candidate-readonly` until full 3-signal promotion gate is met.
+## Maintainer Flow
+
+1. validate the report format
+2. map it to a known PID or create a new sanitized record
+3. update the relevant spec or dossier artifacts
+4. keep the device read-only until runtime and hardware confirmation justify promotion

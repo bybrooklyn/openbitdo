@@ -24,18 +24,18 @@ pub fn render(frame: &mut Frame<'_>, state: &AppState, area: Rect) -> HitMap {
     let adv = Paragraph::new(vec![
         Line::from(Span::styled(
             if state.advanced_mode {
-                "Advanced mode is on"
+                "Advanced controls are on"
             } else {
-                "Advanced mode is off"
+                "Advanced controls are off"
             },
             crate::ui::theme::screen_title_style(),
         )),
         Line::from(Span::styled(
-            "Toggle to expose expert-only report and workflow options.",
+            "Turn this on only if you want expert labels and extra workflow options.",
             crate::ui::theme::subtle_style(),
         )),
     ])
-    .block(panel_block("Advanced", Some("press t or click"), true));
+    .block(panel_block("Advanced", Some("toggle"), true));
     frame.render_widget(adv, rows[0]);
 
     let report = Paragraph::new(vec![
@@ -44,11 +44,11 @@ pub fn render(frame: &mut Frame<'_>, state: &AppState, area: Rect) -> HitMap {
             crate::ui::theme::screen_title_style(),
         )),
         Line::from(Span::styled(
-            "Cycle report persistence policy with r or mouse.",
+            "Choose whether support reports save automatically after diagnostics or firmware work.",
             crate::ui::theme::subtle_style(),
         )),
     ])
-    .block(panel_block("Reports", Some("press r or click"), true));
+    .block(panel_block("Reports", Some("save policy"), true));
     frame.render_widget(report, rows[1]);
 
     let settings_path = state
@@ -61,11 +61,11 @@ pub fn render(frame: &mut Frame<'_>, state: &AppState, area: Rect) -> HitMap {
         Line::from(""),
         Line::from(format!("Config path: {settings_path}")),
         Line::from(Span::styled(
-            "Dashboard layout and filter state persist when a settings path is configured.",
+            "Dashboard layout, filters, and report preferences persist when this path is available.",
             crate::ui::theme::subtle_style(),
         )),
     ])
-    .block(panel_block("Status", Some("saved preferences"), true));
+    .block(panel_block("Status", Some("persistence"), true));
     frame.render_widget(status, rows[2]);
 
     let actions = state
@@ -95,7 +95,7 @@ fn inner_click_rect(rect: Rect) -> Rect {
 fn settings_action_caption(action: crate::app::action::QuickAction) -> &'static str {
     match action {
         crate::app::action::QuickAction::Back => "return to dashboard",
-        crate::app::action::QuickAction::Quit => "exit openbitdo",
+        crate::app::action::QuickAction::Quit => "close OpenBitdo",
         _ => "available",
     }
 }

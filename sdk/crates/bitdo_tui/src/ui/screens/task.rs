@@ -22,8 +22,8 @@ pub fn render(frame: &mut Frame<'_>, state: &AppState, area: Rect) -> HitMap {
     let task = state.task_state.as_ref();
     let title = match task.map(|t| t.mode) {
         Some(TaskMode::Diagnostics) => "Diagnostics",
-        Some(TaskMode::Preflight) => "Preflight",
-        Some(TaskMode::Updating) => "Updating",
+        Some(TaskMode::Preflight) => "Safety Check",
+        Some(TaskMode::Updating) => "Update In Progress",
         Some(TaskMode::Final) => "Result",
         None => "Task",
     };
@@ -51,7 +51,7 @@ pub fn render(frame: &mut Frame<'_>, state: &AppState, area: Rect) -> HitMap {
                 crate::ui::theme::screen_title_style(),
             )),
             Line::from(""),
-            Line::from("Select a device action from the dashboard to begin."),
+            Line::from("Choose a controller action from the dashboard to begin."),
         ]
     };
 
@@ -96,14 +96,20 @@ fn render_task_details(frame: &mut Frame<'_>, state: &AppState, area: Rect) {
         let mut lines = vec![Line::from(task.status.clone())];
         if let Some(plan) = task.plan.as_ref() {
             lines.push(Line::from(""));
-            lines.push(Line::from(format!("Session: {:?}", plan.session_id)));
+            lines.push(Line::from(format!(
+                "Transfer session: {:?}",
+                plan.session_id
+            )));
             lines.push(Line::from(format!("Chunk size: {} bytes", plan.chunk_size)));
-            lines.push(Line::from(format!("Chunks: {}", plan.chunks_total)));
-            lines.push(Line::from(format!("Estimated: {}s", plan.expected_seconds)));
+            lines.push(Line::from(format!("Total chunks: {}", plan.chunks_total)));
+            lines.push(Line::from(format!(
+                "Estimated transfer time: {}s",
+                plan.expected_seconds
+            )));
             if !plan.warnings.is_empty() {
                 lines.push(Line::from(""));
                 lines.push(Line::from(Span::styled(
-                    "Warnings",
+                    "Safety notes",
                     crate::ui::theme::warning_style(),
                 )));
                 for warning in &plan.warnings {
@@ -145,16 +151,19 @@ fn render_task_details(frame: &mut Frame<'_>, state: &AppState, area: Rect) {
 
     let summary_lines = if let Some(task) = task {
         vec![
-            Line::from(format!("Stage: {}", task_mode_caption(task.mode))),
+            Line::from(format!("Current stage: {}", task_mode_caption(task.mode))),
             Line::from(format!("Progress: {progress}%")),
-            Line::from(format!("Reports: {}", state.report_save_mode.as_str())),
+            Line::from(format!(
+                "Report policy: {}",
+                state.report_save_mode.as_str()
+            )),
             Line::from(Span::styled(
                 state.status_line.clone(),
                 crate::ui::theme::subtle_style(),
             )),
         ]
     } else {
-        vec![Line::from("Select an action to see task details.")]
+        vec![Line::from("Choose an action to see its workflow details.")]
     };
     let summary =
         Paragraph::new(summary_lines).block(panel_block("Context", Some("current session"), true));
@@ -163,18 +172,18 @@ fn render_task_details(frame: &mut Frame<'_>, state: &AppState, area: Rect) {
 
 fn task_mode_caption(mode: TaskMode) -> &'static str {
     match mode {
-        TaskMode::Diagnostics => "diagnostic probe",
-        TaskMode::Preflight => "preflight safety check",
-        TaskMode::Updating => "firmware transfer",
-        TaskMode::Final => "final outcome",
+        TaskMode::Diagnostics => "running safe diagnostics",
+        TaskMode::Preflight => "reviewing update safety",
+        TaskMode::Updating => "sending verified firmware",
+        TaskMode::Final => "showing the final result",
     }
 }
 
 fn task_action_caption(action: crate::app::action::QuickAction) -> &'static str {
     match action {
-        crate::app::action::QuickAction::Confirm => "acknowledge risk + start",
-        crate::app::action::QuickAction::Cancel => "stop this workflow",
-        crate::app::action::QuickAction::Back => "return to dashboard",
+        crate::app::action::QuickAction::Confirm => "acknowledge risk and start the update",
+        crate::app::action::QuickAction::Cancel => "stop and discard this step",
+        crate::app::action::QuickAction::Back => "leave this screen",
         _ => "available",
     }
 }

@@ -1,6 +1,5 @@
 ---
 source: crates/bitdo_tui/src/tests.rs
-assertion_line: 317
 expression: rendered
 ---
 ╭Session───────────────────────────────────────────────────────────────────────────────────────────╮
@@ -8,7 +7,7 @@ expression: rendered
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭Diagnostics  summary──────────────────────────────────────────────────────────────────────────────╮
 │3/5 passed  •  2 issues  •  2 experimental                                                        │
-│Tier: full  •  Family: Standard64  •  Transport: ready                                            │
+│Tier: supported  •  Family: Standard64  •  Transport: ready                                       │
 │                                                                                                  │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭Filter  All──╮╭Filter  Issu╮╭Filter  Exper╮╭Selected Check  detail────────────────────────────────╮
@@ -22,7 +21,7 @@ expression: rendered
 │  ATTN Version  invalid response…         ││Validator: test:GetPid                                │
 │                                          │╰──────────────────────────────────────────────────────╯
 │                                          │╭Next Steps  guidance──────────────────────────────────╮
-│                                          ││Action: Return to the dashboard and choose Recomme…   │
+│                                          ││Action: Return to the dashboard for update or mapp…   │
 │                                          ││Summary: 3/5 checks passed. Experimental checks: 1…   │
 │                                          ││Saved report: not yet saved in this screen            │
 │                                          ││                                                      │
@@ -31,5 +30,5 @@ expression: rendered
 ╰──────────────────────────────────────────╯╰──────────────────────────────────────────────────────╯
 ╭Run Again──────────────────────╮╭Save Report────────────────────╮╭Back───────────────────────────╮
 │Run Again                      ││Save Report                    ││Back                           │
-│rerun safe-read probe          ││write support report           ││return to dashboard            │
+│run the safe checks again      ││save a shareable support re…   ││return to dashboard            │
 ╰───────────────────────────────╯╰───────────────────────────────╯╰───────────────────────────────╯

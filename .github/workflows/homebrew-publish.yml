@@ -1,0 +1,82 @@
+name: Homebrew Publish
+
+on:
+  workflow_call:
+    inputs:
+      tag:
+        description: "Release tag to publish (for example: v0.0.1-rc.4)"
+        required: true
+        type: string
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to publish (for example: v0.0.1-rc.4)"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  publish-homebrew:
+    if: vars.HOMEBREW_PUBLISH_ENABLED == '1'
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      TAG: ${{ inputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Wait for release assets
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 30); do
+            if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+              echo "release ${TAG} is available"
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "release ${TAG} was not found after waiting" >&2
+          exit 1
+
+      - name: Render Homebrew formula from released assets
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/release-input /tmp/release-metadata
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" \
+            --pattern "openbitdo-${TAG}-linux-x86_64.tar.gz" \
+            --pattern "openbitdo-${TAG}-linux-aarch64.tar.gz" \
+            --pattern "openbitdo-${TAG}-macos-arm64.tar.gz" \
+            --dir /tmp/release-input
+          bash packaging/scripts/render_release_metadata.sh \
+            "$TAG" \
+            "$GITHUB_REPOSITORY" \
+            /tmp/release-input \
+            /tmp/release-metadata
+
+      - name: Upload rendered Homebrew formula (audit)
+        uses: actions/upload-artifact@v4
+        with:
+          name: homebrew-rendered-formula-${{ inputs.tag }}
+          path: |
+            /tmp/release-metadata/homebrew/Formula/openbitdo.rb
+            /tmp/release-metadata/checksums.env
+
+      - name: Sync Homebrew tap
+        env:
+          HOMEBREW_PUBLISH_ENABLED: "1"
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          HOMEBREW_TAP_REPO: ${{ vars.HOMEBREW_TAP_REPO }}
+          FORMULA_SOURCE: /tmp/release-metadata/homebrew/Formula/openbitdo.rb
+        run: |
+          set -euo pipefail
+          if [[ -z "${HOMEBREW_TAP_TOKEN:-}" ]]; then
+            echo "missing required secret: HOMEBREW_TAP_TOKEN" >&2
+            exit 1
+          fi
+          if [[ -z "${HOMEBREW_TAP_REPO:-}" ]]; then
+            echo "missing required variable: HOMEBREW_TAP_REPO" >&2
+            exit 1
+          fi
+          bash packaging/homebrew/sync_tap.sh

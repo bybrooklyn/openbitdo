@@ -9,8 +9,16 @@ fn help_mentions_single_command_surface() {
         .success()
         .stdout(predicate::str::contains("Usage: openbitdo [OPTIONS]"))
         .stdout(predicate::str::contains("--mock"))
+        .stdout(predicate::str::contains("Examples:"))
+        .stdout(predicate::str::contains(
+            "Homebrew: brew tap bybrooklyn/openbitdo && brew install openbitdo",
+        ))
+        .stdout(predicate::str::contains(
+            "macOS packages are currently unsigned and non-notarized.",
+        ))
+        .stdout(predicate::str::contains("Commands:").not())
         .stdout(predicate::str::contains("ui").not())
-        .stdout(predicate::str::contains("run").not());
+        .stdout(predicate::str::contains("run [OPTIONS]").not());
 }
 
 #[test]

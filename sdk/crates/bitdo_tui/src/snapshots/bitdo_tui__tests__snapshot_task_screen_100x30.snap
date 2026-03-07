@@ -1,13 +1,12 @@
 ---
 source: crates/bitdo_tui/src/tests.rs
-assertion_line: 212
 expression: rendered
 ---
 ╭Session───────────────────────────────────────────────────────────────────────────────────────────╮
 │OpenBitDo  Workflow  •  Ready  •  reports fail-only  •  safe                                      │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-╭Preflight  status and intent──────────────────────────────────────────────────────────────────────╮
-│Preflight Workflow  preflight safety check                                                        │
+╭Safety Check  status and intent───────────────────────────────────────────────────────────────────╮
+│Safety Check Workflow  reviewing update safety                                                    │
 │                                                                                                  │
 │Ready to confirm transfer                                                                         │
 │                                                                                                  │
@@ -17,9 +16,9 @@ expression: rendered
 │                                                        ││█████             12%                   │
 │                                                        │╰────────────────────────────────────────╯
 │                                                        │╭Context  current session────────────────╮
-│                                                        ││Stage: preflight safety check           │
+│                                                        ││Current stage: reviewing update safety  │
 │                                                        ││Progress: 12%                           │
-│                                                        ││Reports: failure_only                   │
+│                                                        ││Report policy: failure_only             │
 │                                                        ││Ready                                   │
 │                                                        ││                                        │
 │                                                        ││                                        │
@@ -31,5 +30,5 @@ expression: rendered
 ╰────────────────────────────────────────────────────────╯╰────────────────────────────────────────╯
 ╭Confirm────────────────────────╮╭Cancel─────────────────────────╮╭Back───────────────────────────╮
 │Confirm                        ││Cancel                         ││Back                           │
-│acknowledge risk + start       ││stop this workflow             ││return to dashboard            │
+│acknowledge risk and start …   ││stop and discard this step     ││leave this screen              │
 ╰───────────────────────────────╯╰───────────────────────────────╯╰───────────────────────────────╯

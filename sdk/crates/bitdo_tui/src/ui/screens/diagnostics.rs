@@ -467,8 +467,8 @@ fn render_next_steps(frame: &mut Frame<'_>, state: &AppState, area: Rect) {
 
 fn diagnostics_action_caption(action: QuickAction) -> &'static str {
     match action {
-        QuickAction::RunAgain => "rerun safe-read probe",
-        QuickAction::SaveReport => "write support report",
+        QuickAction::RunAgain => "run the safe checks again",
+        QuickAction::SaveReport => "save a shareable support report",
         QuickAction::Back => "return to dashboard",
         _ => "available",
     }
@@ -477,13 +477,13 @@ fn diagnostics_action_caption(action: QuickAction) -> &'static str {
 fn recommended_next_action(diagnostics: &crate::app::state::DiagnosticsState) -> &'static str {
     match diagnostics.result.support_tier {
         bitdo_proto::SupportTier::Full => {
-            "Return to the dashboard and choose Recommended Update or Edit Mapping if needed."
+            "Return to the dashboard for update or mapping if this device still needs work."
         }
         bitdo_proto::SupportTier::CandidateReadOnly => {
-            "Save or share the report. Update and mapping remain blocked until confirmation lands."
+            "Save or share the report. Update and mapping stay blocked until this device family is hardware-confirmed."
         }
         bitdo_proto::SupportTier::DetectOnly => {
-            "Diagnostics only. Do not attempt update or mapping for this device."
+            "Use diagnostics only. This device is not ready for update or mapping flows."
         }
     }
 }
@@ -514,8 +514,8 @@ fn severity_style(has_issues: bool) -> Style {
 
 fn support_tier_label(tier: bitdo_proto::SupportTier) -> &'static str {
     match tier {
-        bitdo_proto::SupportTier::Full => "full",
-        bitdo_proto::SupportTier::CandidateReadOnly => "candidate-readonly",
+        bitdo_proto::SupportTier::Full => "supported",
+        bitdo_proto::SupportTier::CandidateReadOnly => "read-only candidate",
         bitdo_proto::SupportTier::DetectOnly => "detect-only",
     }
 }

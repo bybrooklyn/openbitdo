@@ -1,17 +1,20 @@
-# OpenBitdo Commenting Standard
+# Commenting Standard
 
-This project prefers concise, high-context comments.
+OpenBitdo prefers sparse, high-value comments.
 
-## Required Comment Zones
-- Command gating order and rationale (`bitdo_proto::session`).
-- Support-tier decisions and promotion boundaries (`candidate-readonly` vs `full`).
-- Unsafe/firmware blocking rules and brick-risk protections.
-- Retry/fallback behavior where multiple command paths exist.
-- State-machine transitions in TUI/app-core flows when transitions are non-obvious.
+## Add Comments When
 
-## Avoid
-- Trivial comments that restate code syntax.
-- Comment blocks that drift from behavior and are not maintained.
+- safety or brick-risk behavior is non-obvious
+- support-tier gating would be easy to misread
+- retries, fallbacks, or validator behavior need rationale
+- a state transition matters more than the literal code line
 
-## Rule of Thumb
-If someone adding a new device could misread a policy or safety boundary, comment it.
+## Avoid Comments When
+
+- the code already says the same thing clearly
+- the comment would become stale as soon as names or branches change
+- the comment explains syntax instead of intent
+
+## Rule Of Thumb
+
+If a future contributor could accidentally weaken a safety boundary, the surrounding code deserves a short comment.

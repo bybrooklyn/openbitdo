@@ -1,23 +1,24 @@
 # Clean-Room Rules
 
-## Allowed Inputs During Clean Implementation
-- `cleanroom/spec/**`
-- `cleanroom/process/cleanroom_rules.md`
-- `cleanroom/harness/golden/**`
+## Allowed Inputs
 
-## Forbidden Inputs During Clean Implementation
-- `decompiled/**`
-- `decompiled_*/*`
-- `bundle_extract/**`
-- `extracted/**`
-- `extracted_net/**`
-- `session-ses_35e4.md`
+- `cleanroom/spec/**`
+- `cleanroom/process/**`
+- approved harness fixtures and generated release artifacts
+
+## Forbidden Inputs
+
+- decompiled vendor code
+- copied proprietary snippets
+- direct references to dirty-room paths from clean implementation or user-facing docs
 
 ## Enforcement
-- `cleanroom/sdk/scripts/cleanroom_guard.sh` checks for forbidden path and token references.
-- CI runs the guard before test jobs.
+
+- `cleanroom/sdk/scripts/cleanroom_guard.sh` scans for forbidden references
+- CI runs the guard before packaging and test jobs
 
 ## Commit Hygiene
-- No copied decompiled code snippets.
-- No direct references to dirty-room files in SDK implementation/tests.
-- Any new protocol fact must be added to sanitized spec artifacts first.
+
+- no copied decompiled code
+- no raw vendor-source excerpts
+- new protocol facts must arrive through sanitized spec or evidence updates first

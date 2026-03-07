@@ -1,17 +1,22 @@
 # AUR Packaging
 
-This directory contains AUR package sources for:
-- `openbitdo-bin` (prebuilt release assets)
+This directory holds the tracked AUR source for `openbitdo-bin`.
 
-Publishing is automated by `.github/workflows/aur-publish.yml` and remains gated:
-- requires repository variable `AUR_PUBLISH_ENABLED=1`
-- requires secrets `AUR_SSH_PRIVATE_KEY` and `AUR_USERNAME`
+## Source Of Truth
 
-Publish flow:
-1. wait for release assets from a `v*` tag
-2. compute authoritative SHA256 values from released artifacts
-3. render `PKGBUILD`/`.SRCINFO` with pinned hashes
-4. push updates to AUR repo
+- tracked metadata: `packaging/aur/openbitdo-bin/PKGBUILD` and `.SRCINFO`
+- template: `packaging/aur/openbitdo-bin/PKGBUILD.tmpl`
+- renderer: `packaging/scripts/render_release_metadata.sh`
 
-Template files used for release rendering:
-- `openbitdo-bin/PKGBUILD.tmpl`
+## Publish Flow
+
+1. Publish GitHub release assets for a `v*` tag.
+2. Render `PKGBUILD` and `.SRCINFO` from those assets.
+3. Upload rendered metadata as a workflow artifact for audit.
+4. Push the updated metadata to the AUR repo for `openbitdo-bin`.
+
+## Required Controls
+
+- repo variable `AUR_PUBLISH_ENABLED=1`
+- secrets `AUR_USERNAME` and `AUR_SSH_PRIVATE_KEY`
+- no placeholder checksums in published metadata

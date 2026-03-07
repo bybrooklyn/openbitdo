@@ -36,7 +36,7 @@ body:
     id: openbitdo_version
     attributes:
       label: OpenBitdo version
-      placeholder: v0.0.1-rc.1
+      placeholder: v0.0.1-rc.4
     validations:
       required: true
   - type: textarea

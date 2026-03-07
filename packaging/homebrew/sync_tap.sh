@@ -23,8 +23,21 @@ HOMEBREW_TAP_TOKEN="$(
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 TAP_REPO="${HOMEBREW_TAP_REPO:-bybrooklyn/homebrew-openbitdo}"
-FORMULA_SOURCE="${FORMULA_SOURCE:-$ROOT/packaging/homebrew/Formula/openbitdo.rb}"
+FORMULA_SOURCE="${FORMULA_SOURCE:-}"
 TMP="$(mktemp -d)"
+
+decode_base64() {
+  if base64 --help 2>/dev/null | grep -q -- "--decode"; then
+    base64 --decode
+  else
+    base64 -D
+  fi
+}
+
+if [[ -z "$FORMULA_SOURCE" ]]; then
+  echo "FORMULA_SOURCE must point to a rendered formula; run render_release_metadata.sh first" >&2
+  exit 1
+fi
 
 if [[ ! -f "$FORMULA_SOURCE" ]]; then
   echo "formula source not found: $FORMULA_SOURCE" >&2
@@ -69,7 +82,7 @@ remote_content_file="$TMP/remote_formula.rb"
 
 if api_with_fallback "repos/${TAP_REPO}/contents/${formula_path}?ref=main" >"$TMP/remote.json" 2>/dev/null; then
   remote_sha="$(jq -r '.sha // ""' "$TMP/remote.json")"
-  jq -r '.content // ""' "$TMP/remote.json" | tr -d '\n' | base64 --decode >"$remote_content_file"
+  jq -r '.content // ""' "$TMP/remote.json" | tr -d '\n' | decode_base64 >"$remote_content_file"
   if cmp -s "$FORMULA_SOURCE" "$remote_content_file"; then
     echo "no formula changes to push"
     exit 0

@@ -3,7 +3,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 REPO_ROOT="$(cd "$ROOT/.." && pwd)"
-VERSION="${1:-v0.0.1-rc.1}"
+VERSION="${1:-v0.0.0-local}"
 ARCH_LABEL="${2:-$(uname -m)}"
 TARGET_TRIPLE="${3:-}"
 

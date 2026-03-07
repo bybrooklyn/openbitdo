@@ -1,23 +1,22 @@
 ---
 source: crates/bitdo_tui/src/tests.rs
-assertion_line: 196
 expression: rendered
 ---
 ╭Session───────────────────────────────────────────────────────────────────────╮
 │OpenBitDo  Dashboard  •  3 devices  •  reports fail-only  •  safe             │
 ╰──────────────────────────────────────────────────────────────────────────────╯
-╭Search  filter────────────────╮╭Device  full──────────╮╭Actions  Enter/click──╮
-│Search  active                ││Ultimate2  2dc8:5209  ││› Refresh  •  scan    │
-╰──────────────────────────────╯│Support: supported    ││  Diagnose  •  probe  │
+╭Search  filter────────────────╮╭Device  supported─────╮╭Actions  Enter/click──╮
+│Search  active                ││Ultimate2  2dc8:5209  ││› Refresh  •  look for│
+╰──────────────────────────────╯│Support: Supported    ││  Diagnose  •  run saf│
 ╭Controllers  detected─────────╮│Protocol: Standard64  ││  Recommended Update  │
-│› 2dc8:5209 Ultimate2         ││Evidence: Confirmed   ││  Edit Mapping  •  map│
-│full • S64 • conf             ││                      ││  Settings  •  prefs  │
-│  2dc8:6009 Ultimate          ││Capabilities          ││  Quit  •  exit       │
-│ro • S64 • infer              ││• firmware            ││                      │
-│  2dc8:901a Candidate         ││• profile rw          │╰──────────────────────╯
-│ro • unknown • untest         ││• mode switch         │╭Activity  events──────╮
-│                              ││• JP108 mapping       ││                      │
-│                              ││• U2 slot + map       ││                      │
+│› 2dc8:5209 Ultimate2         ││Evidence: Confirmed   ││  Edit Mapping  •  cha│
+│supported • standard64 • confi││                      ││  Settings  •  report │
+│  2dc8:6009 Ultimate          ││Capabilities          ││  Quit  •  close OpenB│
+│read-only • standard64 • infer││• firmware updates    ││                      │
+│  2dc8:901a Candidate         ││• profile read and wri│╰──────────────────────╯
+│read-only • unknown • untested││• mode switching      │╭Activity  events──────╮
+│                              ││• JP108 dedicated mapp││                      │
+│                              ││• Ultimate 2 slot and ││                      │
 │                              ││                      ││                      │
 │                              ││                      ││                      │
 │                              ││                      ││                      │
@@ -25,5 +24,5 @@ expression: rendered
 ╰──────────────────────────────╯╰──────────────────────╯╰──────────────────────╯
 ╭Status────────────────────────────────────────────────────────────────────────╮
 │Ready                                                                         │
-│Ultimate2  •  click • arrows • Enter • Esc/q                                  │
+│Ultimate2  •  click a device or action • arrows, Enter, Esc, and q still work │
 ╰──────────────────────────────────────────────────────────────────────────────╯

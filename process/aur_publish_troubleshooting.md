@@ -1,14 +1,15 @@
-# AUR Publish SSH Troubleshooting
+# AUR Publish Troubleshooting
 
-This runbook focuses on resolving AUR publish failures such as `Permission denied (publickey)` in release workflows.
+Use this runbook when the AUR release path fails, especially on SSH authentication.
 
-## Preconditions
-- `AUR_USERNAME` secret exists.
-- `AUR_SSH_PRIVATE_KEY` secret exists and contains the full private key block.
-- Runner can reach `aur.archlinux.org:22`.
+## Typical Failure Signatures
 
-## 1) Key format and permissions checks
-Run on a secure local shell before updating secrets:
+- `Permission denied (publickey)`
+- `Host key verification failed`
+- missing `AUR_USERNAME`
+- missing `AUR_SSH_PRIVATE_KEY`
+
+## Local SSH Sanity Check
 
 ```bash
 mkdir -p /tmp/aur-debug && cd /tmp/aur-debug
@@ -20,10 +21,11 @@ ssh-keygen -y -f aur_key >/tmp/aur_key.pub
 ```
 
 Expected:
-- `ssh-keygen -y` succeeds.
-- no passphrase prompt for CI use.
 
-## 2) Known hosts and host verification
+- the key parses successfully
+- no CI-incompatible passphrase prompt
+
+## Known Hosts Check
 
 ```bash
 mkdir -p ~/.ssh && chmod 700 ~/.ssh
@@ -31,40 +33,27 @@ ssh-keyscan -H aur.archlinux.org >> ~/.ssh/known_hosts
 chmod 600 ~/.ssh/known_hosts
 ```
 
-Expected:
-- `aur.archlinux.org` host key is present in `known_hosts`.
-
-## 3) SSH dry-run authentication
+## Remote Auth Check
 
 ```bash
 ssh -i /tmp/aur-debug/aur_key \
   -o IdentitiesOnly=yes \
   -o StrictHostKeyChecking=yes \
-  ${AUR_USERNAME}@aur.archlinux.org
+  "${AUR_USERNAME}@aur.archlinux.org"
 ```
 
-Expected success signature:
-- authentication accepted (AUR may close session after auth; that still proves key acceptance).
+An immediate disconnect after auth is still acceptable. It proves the key is valid.
 
-Expected failure signatures:
-- `Permission denied (publickey)` means wrong key/user pairing.
-- `Host key verification failed` means known_hosts mismatch/missing.
-
-## 4) Repo-level publish dry run
-For package repo:
+## Repo Check
 
 ```bash
-git ls-remote ssh://${AUR_USERNAME}@aur.archlinux.org/openbitdo-bin.git
+git ls-remote "ssh://${AUR_USERNAME}@aur.archlinux.org/openbitdo-bin.git"
 ```
 
-Expected:
-- command returns refs without auth failures.
+If this fails, the AUR account or key pairing is still wrong.
 
-## 5) CI secret update checklist
-- Store private key in `AUR_SSH_PRIVATE_KEY` exactly as multiline PEM/OpenSSH block.
-- Store account name in `AUR_USERNAME`.
-- Re-run release workflow preflight job.
+## After The Fix
 
-## 6) Post-fix validation
-- Confirm release preflight no longer fails on SSH auth.
-- Confirm `publish-aur` job pushes `openbitdo-bin` metadata repo.
+- rerun the release workflow
+- confirm `publish-aur` succeeds
+- confirm `openbitdo-bin` points at the new release tag

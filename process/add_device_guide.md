@@ -1,68 +1,37 @@
-# Add Device Support (Hardcoded Path)
+# Add Device Support
 
-This guide keeps device support simple and explicit: everything is added directly in Rust code.
+This guide describes the clean-room path for adding or promoting a device.
 
-## 1) Add/verify PID in hardcoded registry
-File:
-- `/Users/brooklyn/data/8bitdo/cleanroom/sdk/crates/bitdo_proto/src/pid_registry_table.rs`
+## Update The Runtime Catalog
 
-Add a `PidRegistryRow` with:
-- `name`
-- `pid`
-- `support_level`
-- `support_tier`
-- `protocol_family`
+1. Add or verify the PID row in `sdk/crates/bitdo_proto/src/pid_registry_table.rs`.
+2. Update capability defaults and support-tier policy in `sdk/crates/bitdo_proto/src/registry.rs`.
+3. Add or verify command rows in `sdk/crates/bitdo_proto/src/command_registry_table.rs`.
+4. Update candidate-readonly gating in `sdk/crates/bitdo_proto/src/session.rs` when the new PID needs safe-read diagnostics.
 
-## 2) Update capability policy
-File:
-- `/Users/brooklyn/data/8bitdo/cleanroom/sdk/crates/bitdo_proto/src/registry.rs`
+## Update The Sanitized Evidence
 
-Update `default_capability_for(...)` and support-tier PID lists so capability flags match evidence.
+Keep the spec and evidence artifacts aligned:
 
-## 3) Add/verify command declarations
-File:
-- `/Users/brooklyn/data/8bitdo/cleanroom/sdk/crates/bitdo_proto/src/command_registry_table.rs`
+- `spec/device_name_catalog.md`
+- `spec/protocol_spec.md`
+- `process/device_name_sources.md`
+- dossier and matrix artifacts where applicable
 
-Add/verify command rows:
-- `id`
-- `safety_class`
-- `confidence`
-- `experimental_default`
-- `report_id`
-- `request`
-- `expected_response`
-- `applies_to`
-- `operation_group`
+## Update Tests
 
-## 4) Confirm runtime policy
-Runtime policy is derived in code (not scripts):
-- `confirmed` -> enabled by default
-- inferred `SafeRead` -> experimental-gated
-- inferred `SafeWrite`/unsafe -> blocked until confirmed
+At minimum, touch the tests that prove:
 
-File:
-- `/Users/brooklyn/data/8bitdo/cleanroom/sdk/crates/bitdo_proto/src/registry.rs`
+- support-tier gating is correct
+- command/runtime policy is correct
+- diagnostics or mapping behavior is correct for the new device family
 
-## 5) Update candidate gating allowlists
-File:
-- `/Users/brooklyn/data/8bitdo/cleanroom/sdk/crates/bitdo_proto/src/session.rs`
+## Validation
 
-Update `is_command_allowed_for_candidate_pid(...)` so detect/diag behavior for the new PID is explicit.
+From `cleanroom/sdk`:
 
-## 6) Keep spec artifacts in sync
-Files:
-- `/Users/brooklyn/data/8bitdo/cleanroom/spec/pid_matrix.csv`
-- `/Users/brooklyn/data/8bitdo/cleanroom/spec/command_matrix.csv`
-- `/Users/brooklyn/data/8bitdo/cleanroom/spec/evidence_index.csv`
-- `/Users/brooklyn/data/8bitdo/cleanroom/spec/dossiers/...`
-
-## 7) Add tests
-- Extend candidate gating tests:
-  - `/Users/brooklyn/data/8bitdo/cleanroom/sdk/tests/candidate_readonly_gating.rs`
-- Extend runtime policy tests:
-  - `/Users/brooklyn/data/8bitdo/cleanroom/sdk/tests/runtime_policy.rs`
-
-## 8) Validation
-From `/Users/brooklyn/data/8bitdo/cleanroom/sdk`:
-- `cargo test --workspace --all-targets`
-- `./scripts/cleanroom_guard.sh`
+```bash
+./scripts/cleanroom_guard.sh
+cargo clippy --workspace --all-targets -- -D warnings
+cargo test --workspace --all-targets
+```

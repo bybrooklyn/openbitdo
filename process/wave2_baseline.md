@@ -1,32 +1,17 @@
-# Wave 2 Baseline (Frozen)
+# Wave 2 Baseline
 
-## Snapshot Date
-- 2026-03-01
+Snapshot date: 2026-03-01.
 
-## Pre-Wave Counts (Frozen)
-- `spec/pid_matrix.csv` rows: 59
-- Support tier counts (pre-wave):
-  - `full`: 14
-  - `candidate-readonly`: 15
-  - `detect-only`: 30
-- `spec/command_matrix.csv` rows (pre-wave): 37
+## Baseline Assumptions
 
-## Hardware Reality (Current)
-- Available fixtures: JP108 line and Ultimate2 line only.
-- Non-owned devices must remain `candidate-readonly` until strict promotion signals are complete.
-
-## Required Checks Baseline
-Branch protection for `main` must require:
-- `guard`
-- `aur-validate`
-- `tui-smoke-test`
-- `build-macos-arm64`
-- `test`
-- `hardware-108jp`
-- `hardware-ultimate2`
+- hardware ownership still covered only the JP108 and Ultimate 2 lines
+- newly researched PIDs had to remain read-only until confirmation improved
+- release gates stayed anchored on `guard`, `aur-validate`, `tui-smoke-test`, `build-macos-arm64`, and `test`
 
 ## Promotion Policy
-Promotion from `candidate-readonly` to `full` requires all 3 signals:
-1. static dossier evidence,
-2. runtime sanitized traces,
-3. hardware read/write/readback confirmation.
+
+Promotion from `read-only candidate` to `supported` requires:
+
+1. static evidence
+2. runtime evidence
+3. hardware evidence

@@ -15,8 +15,12 @@ pub fn render(frame: &mut Frame<'_>, state: &AppState, area: Rect) -> HitMap {
         .split(area);
 
     let status_hint = match state.dashboard_layout_mode {
-        DashboardLayoutMode::Compact => "compact layout • resize for full three-panel view",
-        DashboardLayoutMode::Wide => "click • arrows • Enter • Esc/q",
+        DashboardLayoutMode::Compact => {
+            "compact layout • resize for three panels or keep using click, arrows, and Enter"
+        }
+        DashboardLayoutMode::Wide => {
+            "click a device or action • arrows, Enter, Esc, and q still work"
+        }
     };
     let selected_summary = state
         .selected_device()
@@ -94,7 +98,7 @@ fn render_devices(frame: &mut Frame<'_>, state: &AppState, area: Rect, map: &mut
     let filter = Paragraph::new(Line::from(vec![
         Span::styled("Search ", crate::ui::theme::title_style()),
         Span::raw(if filter_label.is_empty() {
-            "type a model, VID, or PID".to_owned()
+            "type a model name or USB ID".to_owned()
         } else {
             filter_label
         }),
@@ -194,7 +198,7 @@ fn render_selected_device(frame: &mut Frame<'_>, state: &AppState, area: Rect) {
         if device.support_tier != bitdo_proto::SupportTier::Full {
             details.push(Line::from(""));
             details.push(Line::from(Span::styled(
-                "Write actions stay blocked until hardware confirmation lands.",
+                "This device is still read-only here. Safe diagnostics work, but mapping and update stay blocked until hardware confirmation lands.",
                 crate::ui::theme::warning_style(),
             )));
         }
@@ -333,17 +337,31 @@ fn truncate_reason(reason: &str) -> String {
 
 fn action_caption(action: crate::app::action::QuickAction) -> &'static str {
     match action {
-        crate::app::action::QuickAction::Refresh => "scan",
-        crate::app::action::QuickAction::Diagnose => "probe",
-        crate::app::action::QuickAction::RecommendedUpdate => "safe update",
-        crate::app::action::QuickAction::EditMappings => "mapping",
-        crate::app::action::QuickAction::Settings => "prefs",
-        crate::app::action::QuickAction::Quit => "exit",
+        crate::app::action::QuickAction::Refresh => "look for connected controllers",
+        crate::app::action::QuickAction::Diagnose => {
+            "run safe diagnostics and build a support summary"
+        }
+        crate::app::action::QuickAction::RecommendedUpdate => {
+            "download and stage a verified firmware update"
+        }
+        crate::app::action::QuickAction::EditMappings => {
+            "change supported buttons on supported devices"
+        }
+        crate::app::action::QuickAction::Settings => "report saving and interface preferences",
+        crate::app::action::QuickAction::Quit => "close OpenBitdo",
         _ => "available",
     }
 }
 
 fn support_tier_label(tier: bitdo_proto::SupportTier) -> &'static str {
+    match tier {
+        bitdo_proto::SupportTier::Full => "Supported",
+        bitdo_proto::SupportTier::CandidateReadOnly => "Read-only candidate",
+        bitdo_proto::SupportTier::DetectOnly => "Detection only",
+    }
+}
+
+fn support_tier_short(tier: bitdo_proto::SupportTier) -> &'static str {
     match tier {
         bitdo_proto::SupportTier::Full => "supported",
         bitdo_proto::SupportTier::CandidateReadOnly => "read-only",
@@ -351,34 +369,26 @@ fn support_tier_label(tier: bitdo_proto::SupportTier) -> &'static str {
     }
 }
 
-fn support_tier_short(tier: bitdo_proto::SupportTier) -> &'static str {
-    match tier {
-        bitdo_proto::SupportTier::Full => "full",
-        bitdo_proto::SupportTier::CandidateReadOnly => "ro",
-        bitdo_proto::SupportTier::DetectOnly => "detect",
-    }
-}
-
 fn capability_lines(device: &bitdo_app_core::AppDevice) -> Vec<String> {
     let mut lines = Vec::new();
 
     if device.capability.supports_firmware {
-        lines.push("• firmware".to_owned());
+        lines.push("• firmware updates".to_owned());
     }
     if device.capability.supports_profile_rw {
-        lines.push("• profile rw".to_owned());
+        lines.push("• profile read and write".to_owned());
     }
     if device.capability.supports_mode {
-        lines.push("• mode switch".to_owned());
+        lines.push("• mode switching".to_owned());
     }
     if device.capability.supports_jp108_dedicated_map {
-        lines.push("• JP108 mapping".to_owned());
+        lines.push("• JP108 dedicated mapping".to_owned());
     }
     if device.capability.supports_u2_button_map || device.capability.supports_u2_slot_config {
-        lines.push("• U2 slot + map".to_owned());
+        lines.push("• Ultimate 2 slot and mapping".to_owned());
     }
     if lines.is_empty() {
-        lines.push("• detect only".to_owned());
+        lines.push("• detection only".to_owned());
     }
 
     lines
@@ -396,7 +406,9 @@ fn compact_reason(reason: &str) -> String {
 
 fn protocol_short(protocol: bitdo_proto::ProtocolFamily) -> &'static str {
     match protocol {
-        bitdo_proto::ProtocolFamily::Standard64 => "S64",
+        bitdo_proto::ProtocolFamily::Standard64 => "standard64",
+        bitdo_proto::ProtocolFamily::DInput => "dinput",
+        bitdo_proto::ProtocolFamily::JpHandshake => "jp",
         bitdo_proto::ProtocolFamily::Unknown => "unknown",
         _ => "other",
     }
@@ -404,8 +416,8 @@ fn protocol_short(protocol: bitdo_proto::ProtocolFamily) -> &'static str {
 
 fn evidence_short(evidence: bitdo_proto::SupportEvidence) -> &'static str {
     match evidence {
-        bitdo_proto::SupportEvidence::Confirmed => "conf",
-        bitdo_proto::SupportEvidence::Inferred => "infer",
-        bitdo_proto::SupportEvidence::Untested => "untest",
+        bitdo_proto::SupportEvidence::Confirmed => "confirmed",
+        bitdo_proto::SupportEvidence::Inferred => "inferred",
+        bitdo_proto::SupportEvidence::Untested => "untested",
     }
 }

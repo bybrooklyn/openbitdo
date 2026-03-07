@@ -9,7 +9,7 @@ resolver = "2"
 
 [workspace.package]
 edition = "2021"
-version = "0.0.1-rc.2"
+version = "0.0.1-rc.4"
 license = "BSD-3-Clause"
 
 [workspace.dependencies]

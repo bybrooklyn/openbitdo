@@ -1,38 +1,22 @@
-# Wave 2 Runtime/Hardware Intake (Prepared, Deferred)
+# Wave 2 Runtime Intake
 
-## Purpose
-Define exactly what sanitized runtime/hardware evidence is needed to move Wave 2 devices beyond static-only dossiers.
+This note describes the evidence still needed to move Wave 2 devices beyond static-only confidence.
 
 ## Required Submission Data
-Every submission must include:
-1. VID/PID in hex.
-2. Firmware version.
-3. Operation attempted.
-4. Sanitized request structure.
-5. Sanitized response structure.
-6. Reproducibility notes (OS, transport, retries, success/failure rate).
 
-## Sanitization Rules
-Allowed content:
-- byte-layout summaries,
-- command/response shape descriptions,
-- validation predicates,
-- timing/retry observations.
+1. VID/PID
+2. firmware version
+3. operation attempted
+4. sanitized request structure
+5. sanitized response structure
+6. reproducibility notes
 
-Forbidden content:
-- raw decompiled code snippets,
-- copied vendor constants blocks,
-- copied source fragments from official binaries/tools.
+## Acceptance Rules
 
-## Evidence Acceptance Checklist
-1. VID/PID and firmware fields are present.
-2. Request/response structure is sanitized and technically complete.
-3. Failure signatures are mapped to stable categories (`timeout`, `malformed`, `unsupported`, `invalid_signature`).
-4. Repro steps are clear enough for independent rerun.
-5. No forbidden raw-source content appears.
+- no copied vendor code or decompiled snippets
+- failure signatures must map to stable categories
+- the report must be repeatable enough for an independent rerun
 
-## Promotion Readiness Mapping
-A PID is promotion-eligible only when all are true:
-1. Static dossiers complete.
-2. Runtime traces accepted from at least 2 independent runs.
-3. Hardware read/write/readback validation passes on owned fixture(s).
+## Promotion Readiness
+
+A PID is promotion-ready only when static, runtime, and hardware evidence all exist together.

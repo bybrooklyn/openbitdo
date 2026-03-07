@@ -1,23 +1,9 @@
-# Wave 1 Results (Template)
+# Wave 1 Results
 
-Generated: 2026-02-28
+Generated on 2026-02-28.
 
-## Summary
-- Primary target PIDs processed: 14
-- Stretch target PIDs processed: TBD
-- New `full` promotions: 0 (expected in decompiler-only wave)
+## Outcome
 
-## Deliverables
-- Dossiers created: `spec/dossiers/**`
-- Evidence index updated: `spec/evidence_index.csv`
-- Matrices updated: `spec/pid_matrix.csv`, `spec/command_matrix.csv`
-- Requirements updated: `spec/requirements.yaml`
-
-## Validation
-- `cargo test --workspace --all-targets`: pending
-- `./scripts/cleanroom_guard.sh`: pending
-- Detect/diag targeted tests: pending
-
-## Follow-Up
-- Collect runtime traces for candidate-readonly devices.
-- Run hardware confirmation on each candidate before promotion to `full`.
+- Wave 1 produced sanitized evidence and candidate-readonly expansion work.
+- No new device families were promoted directly to full support.
+- Follow-up work remained runtime traces and hardware confirmation.

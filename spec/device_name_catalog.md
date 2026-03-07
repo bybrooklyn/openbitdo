@@ -1,7 +1,14 @@
 # Device Name Catalog
 
-This catalog is the sanitized naming source of truth for OpenBitdo runtime/docs.
-Canonical rows are unique by PID (no duplicates in this table).
+This catalog is the canonical PID-to-name reference for OpenBitdo.
+Use it when you need a stable display name for runtime UI, docs, packaging copy, or evidence review.
+
+## How To Use This Catalog
+
+- Match devices by `pid_hex` first.
+- Treat `display_name_en` as the preferred user-facing label.
+- Keep aliases out of new canonical rows; add them to the `aliases` column and the alias index instead.
+- When confidence is low or the source is `internal-fallback`, treat the name as provisional until better evidence is collected.
 
 | canonical_pid_name | pid_hex | display_name_en | protocol_family | name_source | source_confidence | aliases |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -64,5 +71,7 @@ Canonical rows are unique by PID (no duplicates in this table).
 | PID_ASLGJP | 0x205a | Riviera Keyboard | JpHandshake | vendor-language-map | high | |
 
 ## Notes
-- Name-source references are indexed in `/Users/brooklyn/data/8bitdo/cleanroom/process/device_name_sources.md`.
-- Alias names are documented in `/Users/brooklyn/data/8bitdo/cleanroom/spec/alias_index.md` and intentionally excluded from canonical PID rows.
+
+- Canonical rows are unique by PID. Do not duplicate a PID to reflect a marketing alias.
+- Name-source evidence is indexed in `/Users/brooklyn/data/8bitdo/cleanroom/process/device_name_sources.md`.
+- Alias names live in `/Users/brooklyn/data/8bitdo/cleanroom/spec/alias_index.md` and stay out of the primary PID rows unless they become the canonical public name.

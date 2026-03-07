@@ -1,16 +1,20 @@
-# Branch and Merge Policy
+# Branch Policy
 
-Because this workspace currently has no active Git repository metadata, this policy is documented for use when repository control is re-enabled.
+## Defaults
 
-## Branches
-- `codex/dirtyroom-spec`: sanitize findings into `cleanroom/spec` and `cleanroom/process`
-- `codex/cleanroom-sdk`: implement SDK and CLI from sanitized artifacts only
+- default branch: `main`
+- automation/worktree branches: `codex/*`
+- release tags: `v*`
 
-## Merge Strategy
-- Cherry-pick sanitized spec commits from dirtyroom branch into cleanroom branch.
-- Never merge dirty-room evidence paths into cleanroom implementation branch.
+## Merge Expectations
+
+- clean-room implementation stays in `cleanroom/`
+- dirty-room or decompiler material never lands in runtime, tests, docs, or workflows inside this tree
+- release tags are created from commits that are already on `main`
 
 ## Review Checklist
-- Guard script passes.
-- No forbidden path references in code/tests.
-- Requirement IDs are traceable from implementation and tests.
+
+- clean-room guard passes
+- no forbidden path references were introduced
+- docs and release metadata are consistent with the current RC
+- required CI checks stay green

@@ -4,9 +4,25 @@ use bitdo_tui::{run_ui, UiLaunchOptions};
 use clap::Parser;
 use openbitdo::{load_user_settings, user_settings_path, BuildInfo, UserSettings};
 
+const CLI_AFTER_HELP: &str = "\
+Examples:
+  openbitdo
+  openbitdo --mock
+
+Install:
+  Homebrew: brew tap bybrooklyn/openbitdo && brew install openbitdo
+  AUR:      paru -S openbitdo-bin
+  Releases: download a tarball, then run bin/openbitdo
+
+Notes:
+  --mock starts the app without real hardware.
+  macOS packages are currently unsigned and non-notarized.
+";
+
 #[derive(Debug, Parser)]
 #[command(name = "openbitdo")]
-#[command(about = "OpenBitdo beginner-first launcher")]
+#[command(about = "Beginner-first 8BitDo controller utility")]
+#[command(after_help = CLI_AFTER_HELP)]
 struct Cli {
     #[arg(long, help = "Use mock transport/devices")]
     mock: bool,

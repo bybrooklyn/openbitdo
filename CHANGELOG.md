@@ -1,40 +1,41 @@
 # Changelog
 
-All notable changes to this project will be documented in this file.
+All notable changes to OpenBitdo are tracked here.
 
 ## Unreleased
 
+## v0.0.1-rc.4
+
 ### Changed
-- CLI contract reverted to single-command interactive launch:
-  - `openbitdo [--mock]`
-  - subcommand forms `openbitdo ui ...` and `openbitdo run ...` are rejected.
-- Headless automation output remains available in the `bitdo_tui` Rust API (human and line-delimited JSON records).
-- AUR packaging/publish flow now targets `openbitdo-bin` only.
-- Settings schema is now documented as v2:
-  - `schema_version`
-  - `advanced_mode`
-  - `report_save_mode`
-  - `device_filter_text`
-  - `dashboard_layout_mode`
-  - `last_panel_focus`
+
+- Release docs are being rewritten around the `v0.0.1-rc.4` flow.
+- Homebrew publishing is being moved to a reusable workflow with the separate tap repo kept as the canonical Homebrew destination.
+- TUI copy is being expanded so first-run guidance is clearer and blocked-action reasons are easier to understand.
+- The checked-in Homebrew formula output is being removed; the template and rendered release metadata remain the source of truth.
+
+## v0.0.1-rc.3
+
+### Added
+
+- Tag-driven GitHub prerelease assets for Linux `x86_64`, Linux `aarch64`, and macOS arm64.
+- AUR publication for `openbitdo-bin` with release-derived checksums.
+- Diagnostics screen with richer per-check detail and saved-report flow.
+
+### Changed
+
+- Firmware update defaults remain safe until the user explicitly acknowledges risk.
+- Temporary recommended-firmware downloads are cleaned up after success, failure, or cancellation.
+- Invalid persisted settings are surfaced as warnings instead of being silently discarded.
 
 ## v0.0.1-rc.1
 
 ### Added
-- Beginner-first `openbitdo` TUI flow with device-specific JP108 and Ultimate2 guided mapping paths.
-- About screen showing app version, git commit, build date, and runtime/target platform.
-- Release packaging scripts for Linux (`x86_64`, `aarch64`) and macOS arm64 outputs.
-- macOS arm64 unsigned/ad-hoc `.pkg` packaging to `/opt/homebrew/bin/openbitdo`.
-- AUR packaging sources for `openbitdo` and `openbitdo-bin`.
-- Homebrew formula scaffolding and deferred tap sync script.
-- Release workflow for tag-triggered GitHub pre-releases using changelog content.
-- Release metadata rendering that computes authoritative checksums from published assets for AUR/Homebrew updates.
 
-### Changed
-- Project license transitioned to BSD 3-Clause.
-- CI expanded to include macOS arm64 package build validation and AUR package metadata validation.
-- Release process documentation updated for clean-tree requirements and RC gating policy.
+- Beginner-first `openbitdo` launcher and terminal dashboard.
+- Release packaging scripts for Linux and macOS artifacts.
+- Unsigned, non-notarized macOS `.pkg` output for RC distribution.
+- AUR and Homebrew release metadata rendering.
 
 ### Notes
-- Homebrew and AUR publication paths are automated and remain controlled by repo variables (`HOMEBREW_PUBLISH_ENABLED`, `AUR_PUBLISH_ENABLED`).
-- Hardware CI gates remain required as configured in `ci.yml`.
+
+- Historical RC notes are preserved here for audit continuity.
