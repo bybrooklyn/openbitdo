@@ -1,0 +1,35 @@
+---
+source: crates/bitdo_tui/src/tests.rs
+assertion_line: 212
+expression: rendered
+---
+╭Session───────────────────────────────────────────────────────────────────────────────────────────╮
+│OpenBitDo  Workflow  •  Ready  •  reports fail-only  •  safe                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭Preflight  status and intent──────────────────────────────────────────────────────────────────────╮
+│Preflight Workflow  preflight safety check                                                        │
+│                                                                                                  │
+│Ready to confirm transfer                                                                         │
+│                                                                                                  │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭Details  workflow context───────────────────────────────╮╭Progress  transfer state────────────────╮
+│Ready to confirm transfer                               ││█████                                   │
+│                                                        ││█████             12%                   │
+│                                                        │╰────────────────────────────────────────╯
+│                                                        │╭Context  current session────────────────╮
+│                                                        ││Stage: preflight safety check           │
+│                                                        ││Progress: 12%                           │
+│                                                        ││Reports: failure_only                   │
+│                                                        ││Ready                                   │
+│                                                        ││                                        │
+│                                                        ││                                        │
+│                                                        ││                                        │
+│                                                        ││                                        │
+│                                                        ││                                        │
+│                                                        ││                                        │
+│                                                        ││                                        │
+╰────────────────────────────────────────────────────────╯╰────────────────────────────────────────╯
+╭Confirm────────────────────────╮╭Cancel─────────────────────────╮╭Back───────────────────────────╮
+│Confirm                        ││Cancel                         ││Back                           │
+│acknowledge risk + start       ││stop this workflow             ││return to dashboard            │
+╰───────────────────────────────╯╰───────────────────────────────╯╰───────────────────────────────╯

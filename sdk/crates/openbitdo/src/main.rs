@@ -1,8 +1,8 @@
 use anyhow::Result;
 use bitdo_app_core::{OpenBitdoCore, OpenBitdoCoreConfig};
-use bitdo_tui::{run_tui_app, TuiLaunchOptions};
+use bitdo_tui::{run_ui, UiLaunchOptions};
 use clap::Parser;
-use openbitdo::{load_user_settings, user_settings_path, BuildInfo};
+use openbitdo::{load_user_settings, user_settings_path, BuildInfo, UserSettings};
 
 #[derive(Debug, Parser)]
 #[command(name = "openbitdo")]
@@ -15,9 +15,19 @@ struct Cli {
 #[tokio::main]
 async fn main() -> Result<()> {
     tracing_subscriber::fmt::init();
+
     let cli = Cli::parse();
     let settings_path = user_settings_path();
-    let settings = load_user_settings(&settings_path);
+    let settings = match load_user_settings(&settings_path) {
+        Ok(settings) => settings,
+        Err(err) => {
+            eprintln!(
+                "warning: failed to load settings from {}: {err}; using defaults",
+                settings_path.display()
+            );
+            UserSettings::default()
+        }
+    };
 
     let core = OpenBitdoCore::new(OpenBitdoCoreConfig {
         mock_mode: cli.mock,
@@ -25,9 +35,10 @@ async fn main() -> Result<()> {
         progress_interval_ms: 5,
         ..Default::default()
     });
-    run_tui_app(
+
+    run_ui(
         core,
-        TuiLaunchOptions {
+        UiLaunchOptions {
             build_info: BuildInfo::current().to_tui_info(),
             advanced_mode: settings.advanced_mode,
             report_save_mode: settings.report_save_mode,
@@ -36,6 +47,7 @@ async fn main() -> Result<()> {
         },
     )
     .await?;
+
     Ok(())
 }
 
@@ -51,7 +63,21 @@ mod tests {
     }
 
     #[test]
-    fn cli_rejects_cmd_subcommand() {
+    fn cli_rejects_ui_subcommand_form() {
+        let err = Cli::try_parse_from(["openbitdo", "ui", "--mock"]).expect_err("must reject ui");
+        assert_eq!(err.kind(), ErrorKind::UnknownArgument);
+    }
+
+    #[test]
+    fn cli_rejects_run_subcommand_form() {
+        let err =
+            Cli::try_parse_from(["openbitdo", "run", "--vidpid", "2dc8:6009", "--recommended"])
+                .expect_err("must reject run");
+        assert_eq!(err.kind(), ErrorKind::UnknownArgument);
+    }
+
+    #[test]
+    fn cli_rejects_legacy_cmd_subcommand() {
         let err = Cli::try_parse_from(["openbitdo", "cmd"]).expect_err("must reject cmd");
         assert_eq!(err.kind(), ErrorKind::UnknownArgument);
     }

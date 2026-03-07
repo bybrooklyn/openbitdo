@@ -1,14 +1,14 @@
 use base64::Engine;
 use bitdo_proto::{
-    device_profile_for, enumerate_hid_devices, BitdoErrorCode, DeviceSession, DiagProbeResult,
-    DiagSeverity, HidTransport, PidCapability, ProtocolFamily, SessionConfig, SupportEvidence,
-    SupportLevel, SupportTier, VidPid,
+    device_profile_for, enumerate_hid_devices, find_command, BitdoErrorCode, CommandId,
+    DeviceSession, DiagProbeResult, DiagSeverity, HidTransport, PidCapability, ProtocolFamily,
+    ResponseStatus, SessionConfig, SupportEvidence, SupportLevel, SupportTier, VidPid,
 };
 use chrono::{DateTime, Utc};
 use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -348,6 +348,11 @@ impl OpenBitdoCore {
     pub fn beginner_diag_summary(&self, device: &AppDevice, diag: &DiagProbeResult) -> String {
         let passed = diag.command_checks.iter().filter(|c| c.ok).count();
         let total = diag.command_checks.len();
+        let issue_total = diag
+            .command_checks
+            .iter()
+            .filter(|c| !c.ok || c.severity != DiagSeverity::Ok)
+            .count();
         let experimental_total = diag
             .command_checks
             .iter()
@@ -381,23 +386,28 @@ impl OpenBitdoCore {
             }
         };
 
-        let status_hint = if needs_attention > 0 {
-            format!("Needs attention: {needs_attention} safety-critical diagnostic signal(s).")
+        let status_hint = if issue_total > 0 {
+            format!("Issues: {issue_total} total, {needs_attention} need attention.")
         } else {
-            "Needs attention: none.".to_owned()
+            "Issues: none.".to_owned()
         };
         let experimental_hint =
             format!("Experimental checks: {experimental_ok}/{experimental_total} passed.");
+        let transport_hint = if diag.transport_ready {
+            "Transport ready: yes."
+        } else {
+            "Transport ready: no successful safe-read responses yet."
+        };
 
         match device.support_tier {
             SupportTier::Full => format!(
-                "{passed}/{total} checks passed. {experimental_hint} {status_hint} {family_hint} This device is full-support."
+                "{passed}/{total} checks passed. {experimental_hint} {status_hint} {transport_hint} {family_hint} This device is full-support."
             ),
             SupportTier::CandidateReadOnly => format!(
-                "{passed}/{total} checks passed. {experimental_hint} {status_hint} {family_hint} This device is candidate-readonly: update and mapping stay blocked until runtime + hardware confirmation."
+                "{passed}/{total} checks passed. {experimental_hint} {status_hint} {transport_hint} {family_hint} This device is candidate-readonly: update and mapping stay blocked until runtime + hardware confirmation."
             ),
             SupportTier::DetectOnly => format!(
-                "{passed}/{total} checks passed. {experimental_hint} {status_hint} {family_hint} This device is detect-only: use diagnostics only."
+                "{passed}/{total} checks passed. {experimental_hint} {status_hint} {transport_hint} {family_hint} This device is detect-only: use diagnostics only."
             ),
         }
     }
@@ -1790,6 +1800,30 @@ fn mock_device(vid_pid: VidPid, full: bool) -> AppDevice {
 
 fn mock_diag_probe(target: VidPid) -> DiagProbeResult {
     let profile = device_profile_for(target);
+    let command_checks = mock_diag_commands_for(&profile, target)
+        .into_iter()
+        .map(|command| {
+            let parsed_facts = mock_diag_parsed_facts(command, target);
+            let detail = mock_diag_detail(command, &parsed_facts);
+            let row = find_command(command).expect("mock diag command exists");
+            bitdo_proto::DiagCommandStatus {
+                command,
+                ok: true,
+                confidence: row.evidence_confidence(),
+                is_experimental: row.experimental_default,
+                severity: bitdo_proto::DiagSeverity::Ok,
+                attempts: 1,
+                validator: format!("mock:{command:?}"),
+                response_status: ResponseStatus::Ok,
+                bytes_written: row.request.len(),
+                bytes_read: 64,
+                error_code: None,
+                detail,
+                parsed_facts,
+            }
+        })
+        .collect::<Vec<_>>();
+
     DiagProbeResult {
         target,
         profile_name: profile.name,
@@ -1799,35 +1833,203 @@ fn mock_diag_probe(target: VidPid) -> DiagProbeResult {
         capability: profile.capability,
         evidence: profile.evidence,
         transport_ready: true,
-        command_checks: vec![
-            bitdo_proto::DiagCommandStatus {
-                command: bitdo_proto::CommandId::GetPid,
-                ok: true,
-                confidence: bitdo_proto::EvidenceConfidence::Confirmed,
-                is_experimental: false,
-                severity: bitdo_proto::DiagSeverity::Ok,
-                error_code: None,
-                detail: "ok".to_owned(),
-            },
-            bitdo_proto::DiagCommandStatus {
-                command: bitdo_proto::CommandId::GetControllerVersion,
-                ok: true,
-                confidence: bitdo_proto::EvidenceConfidence::Confirmed,
-                is_experimental: false,
-                severity: bitdo_proto::DiagSeverity::Ok,
-                error_code: None,
-                detail: "ok".to_owned(),
-            },
-            bitdo_proto::DiagCommandStatus {
-                command: bitdo_proto::CommandId::GetSuperButton,
-                ok: true,
-                confidence: bitdo_proto::EvidenceConfidence::Inferred,
-                is_experimental: true,
-                severity: bitdo_proto::DiagSeverity::Ok,
-                error_code: None,
-                detail: "ok".to_owned(),
-            },
-        ],
+        command_checks,
+    }
+}
+
+fn mock_diag_commands_for(profile: &bitdo_proto::DeviceProfile, target: VidPid) -> Vec<CommandId> {
+    const SAFE_READ_ORDER: &[CommandId] = &[
+        CommandId::GetPid,
+        CommandId::GetReportRevision,
+        CommandId::GetMode,
+        CommandId::GetModeAlt,
+        CommandId::GetControllerVersion,
+        CommandId::GetSuperButton,
+        CommandId::Idle,
+        CommandId::Version,
+        CommandId::ReadProfile,
+        CommandId::Jp108ReadDedicatedMappings,
+        CommandId::Jp108ReadFeatureFlags,
+        CommandId::Jp108ReadVoice,
+        CommandId::U2GetCurrentSlot,
+        CommandId::U2ReadConfigSlot,
+        CommandId::U2ReadButtonMap,
+    ];
+
+    SAFE_READ_ORDER
+        .iter()
+        .copied()
+        .filter(|command| mock_diag_command_allowed(profile, target, *command))
+        .collect()
+}
+
+fn mock_diag_command_allowed(
+    profile: &bitdo_proto::DeviceProfile,
+    target: VidPid,
+    command: CommandId,
+) -> bool {
+    let Some(row) = find_command(command) else {
+        return false;
+    };
+    if !row.applies_to.is_empty() && !row.applies_to.contains(&target.pid) {
+        return false;
+    }
+    if !mock_diag_family_allowed(profile.protocol_family, command) {
+        return false;
+    }
+    if !mock_diag_capability_allowed(profile.capability, command) {
+        return false;
+    }
+    if profile.support_tier == SupportTier::CandidateReadOnly
+        && !mock_diag_candidate_allowed(target.pid, command)
+    {
+        return false;
+    }
+
+    true
+}
+
+fn mock_diag_family_allowed(family: ProtocolFamily, command: CommandId) -> bool {
+    match family {
+        ProtocolFamily::Unknown => matches!(
+            command,
+            CommandId::GetPid
+                | CommandId::GetReportRevision
+                | CommandId::GetControllerVersion
+                | CommandId::Version
+                | CommandId::Idle
+        ),
+        ProtocolFamily::JpHandshake => !matches!(
+            command,
+            CommandId::GetMode
+                | CommandId::GetModeAlt
+                | CommandId::ReadProfile
+                | CommandId::U2GetCurrentSlot
+                | CommandId::U2ReadConfigSlot
+                | CommandId::U2ReadButtonMap
+        ),
+        ProtocolFamily::DS4Boot => matches!(
+            command,
+            CommandId::GetPid
+                | CommandId::GetReportRevision
+                | CommandId::GetControllerVersion
+                | CommandId::Version
+                | CommandId::Idle
+        ),
+        ProtocolFamily::Standard64 | ProtocolFamily::DInput => !matches!(
+            command,
+            CommandId::Jp108ReadDedicatedMappings
+                | CommandId::Jp108ReadFeatureFlags
+                | CommandId::Jp108ReadVoice
+        ),
+    }
+}
+
+fn mock_diag_capability_allowed(capability: PidCapability, command: CommandId) -> bool {
+    match command {
+        CommandId::GetPid
+        | CommandId::GetReportRevision
+        | CommandId::GetControllerVersion
+        | CommandId::GetSuperButton
+        | CommandId::Idle
+        | CommandId::Version => true,
+        CommandId::GetMode | CommandId::GetModeAlt => capability.supports_mode,
+        CommandId::ReadProfile => capability.supports_profile_rw,
+        CommandId::Jp108ReadDedicatedMappings
+        | CommandId::Jp108ReadFeatureFlags
+        | CommandId::Jp108ReadVoice => capability.supports_jp108_dedicated_map,
+        CommandId::U2GetCurrentSlot | CommandId::U2ReadConfigSlot => {
+            capability.supports_u2_slot_config
+        }
+        CommandId::U2ReadButtonMap => capability.supports_u2_button_map,
+        _ => false,
+    }
+}
+
+fn mock_diag_candidate_allowed(pid: u16, command: CommandId) -> bool {
+    const BASE_DIAG_READS: &[CommandId] = &[
+        CommandId::GetPid,
+        CommandId::GetReportRevision,
+        CommandId::GetControllerVersion,
+        CommandId::Version,
+        CommandId::Idle,
+    ];
+    const STANDARD_CANDIDATE_PIDS: &[u16] = &[
+        0x6002, 0x6003, 0x3010, 0x3011, 0x3012, 0x3013, 0x3004, 0x3019, 0x3100, 0x3105, 0x2100,
+        0x2101, 0x901a, 0x6006, 0x5203, 0x5204, 0x301a, 0x9028, 0x3026, 0x3027,
+    ];
+    const JP_CANDIDATE_PIDS: &[u16] = &[0x5200, 0x5201, 0x203a, 0x2049, 0x2028, 0x202e];
+
+    if BASE_DIAG_READS.contains(&command) {
+        return STANDARD_CANDIDATE_PIDS.contains(&pid) || JP_CANDIDATE_PIDS.contains(&pid);
+    }
+
+    if STANDARD_CANDIDATE_PIDS.contains(&pid) {
+        return matches!(
+            command,
+            CommandId::GetMode | CommandId::GetModeAlt | CommandId::ReadProfile
+        );
+    }
+
+    false
+}
+
+fn mock_diag_parsed_facts(command: CommandId, target: VidPid) -> BTreeMap<String, u32> {
+    let mut facts = BTreeMap::new();
+    match command {
+        CommandId::GetPid => {
+            facts.insert("detected_pid".to_owned(), target.pid as u32);
+        }
+        CommandId::GetReportRevision => {
+            facts.insert("revision".to_owned(), 1);
+        }
+        CommandId::GetMode | CommandId::GetModeAlt => {
+            facts.insert("mode".to_owned(), 2);
+        }
+        CommandId::GetControllerVersion | CommandId::Version => {
+            facts.insert("version_x100".to_owned(), 4200);
+            facts.insert("beta".to_owned(), 0);
+        }
+        CommandId::U2GetCurrentSlot => {
+            facts.insert("slot".to_owned(), 1);
+        }
+        _ => {}
+    }
+    facts
+}
+
+fn mock_diag_detail(command: CommandId, parsed_facts: &BTreeMap<String, u32>) -> String {
+    match command {
+        CommandId::GetPid => parsed_facts
+            .get("detected_pid")
+            .map(|pid| format!("detected pid {pid:#06x}"))
+            .unwrap_or_else(|| "ok".to_owned()),
+        CommandId::GetReportRevision => parsed_facts
+            .get("revision")
+            .map(|revision| format!("report revision {revision}"))
+            .unwrap_or_else(|| "ok".to_owned()),
+        CommandId::GetMode | CommandId::GetModeAlt => parsed_facts
+            .get("mode")
+            .map(|mode| format!("mode {mode}"))
+            .unwrap_or_else(|| "ok".to_owned()),
+        CommandId::GetControllerVersion | CommandId::Version => {
+            let version_x100 = parsed_facts.get("version_x100").copied();
+            let beta = parsed_facts.get("beta").copied().unwrap_or(0);
+            version_x100
+                .map(|version| {
+                    format!(
+                        "firmware {}.{:02} beta={beta}",
+                        version / 100,
+                        version % 100
+                    )
+                })
+                .unwrap_or_else(|| "ok".to_owned())
+        }
+        CommandId::U2GetCurrentSlot => parsed_facts
+            .get("slot")
+            .map(|slot| format!("current slot {slot}"))
+            .unwrap_or_else(|| "ok".to_owned()),
+        _ => "ok".to_owned(),
     }
 }
 

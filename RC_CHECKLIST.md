@@ -1,9 +1,9 @@
-# OpenBitdo RC Checklist (`v0.0.1-rc.1`)
+# OpenBitdo RC Checklist (`v0.0.1-rc.2`)
 
-This checklist defines release-candidate readiness for the first public RC tag.
+This checklist defines release-candidate readiness for the `v0.0.1-rc.2` public RC tag.
 
 ## Candidate Policy
-- Tag format: `v*` (for this RC: `v0.0.1-rc.1`)
+- Tag format: `v*` (for this RC: `v0.0.1-rc.2`)
 - Tag source: `main` only
 - Release trigger: tag push
 - RC gate: all required CI checks + manual smoke validation
@@ -22,9 +22,11 @@ Daily review cadence:
 - run once per day until RC tag:
   - `gh issue list -R bybrooklyn/openbitdo --label release-blocker --state open --limit 200`
 - release remains blocked while this list is non-empty.
+- AUR auth troubleshooting runbook:
+  - [aur_publish_troubleshooting.md](/Users/brooklyn/data/8bitdo/cleanroom/process/aur_publish_troubleshooting.md)
 
 ## Scope-Completeness Gate ("Good Point")
-Before tagging `v0.0.1-rc.1`, RC scope must match the locked contract:
+Before tagging `v0.0.1-rc.2`, RC scope must match the locked contract:
 - JP108 mapping supports dedicated keys only (`A/B/K1-K8`) for RC.
 - Ultimate2 expanded mapping supports RC-required fields only:
   - remappable slots `A/B/K1-K8`
@@ -71,42 +73,45 @@ Tag preflight must fail early if any required secret is missing:
 
 ## Artifact Expectations
 Release assets must include:
-- `openbitdo-v0.0.1-rc.1-linux-x86_64.tar.gz`
-- `openbitdo-v0.0.1-rc.1-linux-x86_64`
-- `openbitdo-v0.0.1-rc.1-linux-aarch64.tar.gz`
-- `openbitdo-v0.0.1-rc.1-linux-aarch64`
-- `openbitdo-v0.0.1-rc.1-macos-arm64.tar.gz`
-- `openbitdo-v0.0.1-rc.1-macos-arm64`
-- `openbitdo-v0.0.1-rc.1-macos-arm64.pkg`
+- `openbitdo-v0.0.1-rc.2-linux-x86_64.tar.gz`
+- `openbitdo-v0.0.1-rc.2-linux-x86_64`
+- `openbitdo-v0.0.1-rc.2-linux-aarch64.tar.gz`
+- `openbitdo-v0.0.1-rc.2-linux-aarch64`
+- `openbitdo-v0.0.1-rc.2-macos-arm64.tar.gz`
+- `openbitdo-v0.0.1-rc.2-macos-arm64`
+- `openbitdo-v0.0.1-rc.2-macos-arm64.pkg`
 - corresponding `.sha256` files for every artifact above
 
 ## Verify Checksums
 Run from release asset directory:
 
 ```bash
-shasum -a 256 -c openbitdo-v0.0.1-rc.1-linux-x86_64.tar.gz.sha256
-shasum -a 256 -c openbitdo-v0.0.1-rc.1-linux-x86_64.sha256
-shasum -a 256 -c openbitdo-v0.0.1-rc.1-linux-aarch64.tar.gz.sha256
-shasum -a 256 -c openbitdo-v0.0.1-rc.1-linux-aarch64.sha256
-shasum -a 256 -c openbitdo-v0.0.1-rc.1-macos-arm64.tar.gz.sha256
-shasum -a 256 -c openbitdo-v0.0.1-rc.1-macos-arm64.sha256
-shasum -a 256 -c openbitdo-v0.0.1-rc.1-macos-arm64.pkg.sha256
+shasum -a 256 -c openbitdo-v0.0.1-rc.2-linux-x86_64.tar.gz.sha256
+shasum -a 256 -c openbitdo-v0.0.1-rc.2-linux-x86_64.sha256
+shasum -a 256 -c openbitdo-v0.0.1-rc.2-linux-aarch64.tar.gz.sha256
+shasum -a 256 -c openbitdo-v0.0.1-rc.2-linux-aarch64.sha256
+shasum -a 256 -c openbitdo-v0.0.1-rc.2-macos-arm64.tar.gz.sha256
+shasum -a 256 -c openbitdo-v0.0.1-rc.2-macos-arm64.sha256
+shasum -a 256 -c openbitdo-v0.0.1-rc.2-macos-arm64.pkg.sha256
 ```
 
 ## Manual Smoke Matrix
 1. Linux `x86_64`
 - Extract tarball, run `./bin/openbitdo --mock`
-- Confirm waiting/home flow renders
-- Confirm About page opens (`a` and mouse click)
+- Confirm dashboard renders (device list, quick actions, event panel)
+- Confirm settings screen opens and returns to dashboard
 
 2. Linux `aarch64`
 - Extract tarball, run `./bin/openbitdo --mock`
-- Confirm main navigation and update preflight render
+- Confirm dashboard navigation and preflight/task render
 
 3. macOS arm64
 - Run standalone binary `openbitdo --mock`
 - Install `.pkg`, then run `/opt/homebrew/bin/openbitdo --mock`
-- Confirm launch and About page behavior
+- Confirm launch and settings view behavior
+
+## Help Surface Verification
+- `openbitdo --help` shows single-command usage with `--mock`.
 
 ## Distribution Readiness Notes
 - Homebrew publication runs after release asset publish when `HOMEBREW_PUBLISH_ENABLED=1`.
@@ -123,6 +128,8 @@ shasum -a 256 -c openbitdo-v0.0.1-rc.1-macos-arm64.pkg.sha256
 | RC release allowed | Fail | `No` yet: AUR SSH auth still returns `Permission denied (publickey)`. |
 
 ## RC Execution Log
+Historical note: entries below may mention older command forms from prior milestones and are preserved as-is for audit history.
+
 - 2026-03-02T20:54:31Z: governance preflight complete; release blocker remains open by policy.
 - 2026-03-02T21:38:17Z: set `HOMEBREW_TAP_REPO=bybrooklyn/homebrew-openbitdo`; repository and tap visibility switched to public.
 - 2026-03-02T21:40:00Z: bootstrapped tap repo `bybrooklyn/homebrew-openbitdo` with initial `Formula/openbitdo.rb`.

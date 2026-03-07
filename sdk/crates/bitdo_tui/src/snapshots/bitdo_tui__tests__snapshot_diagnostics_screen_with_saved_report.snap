@@ -1,0 +1,35 @@
+---
+source: crates/bitdo_tui/src/tests.rs
+assertion_line: 343
+expression: rendered
+---
+╭Session───────────────────────────────────────────────────────────────────────────────────────────╮
+│OpenBitDo  Diagnostics  •  3/5 passed  •  reports fail-only  •  safe                              │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭Diagnostics  summary──────────────────────────────────────────────────────────────────────────────╮
+│3/5 passed  •  2 issues  •  2 experimental                                                        │
+│Tier: full  •  Family: Standard64  •  Transport: ready                                            │
+│                                                                                                  │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭Filter  All──╮╭Filter  Issu╮╭Filter  Exper╮╭Selected Check  detail────────────────────────────────╮
+│All          ││Issues      ││Experimental ││Version  ATTN                                         │
+╰─────────────╯╰────────────╯╰─────────────╯│Severity: NeedsAttention                              │
+╭Checks  click a row───────────────────────╮│Confidence: Confirmed                                 │
+│  WARN ReadProfile exp  timeout while wa… ││Experimental: no                                      │
+│› ATTN Version  invalid response…         ││Error code: InvalidResponse                           │
+│                                          ││Response: Invalid  •  attempts 1                      │
+│                                          ││IO: wrote 64B, read 8B                                │
+│                                          ││Validator: test:Version                               │
+│                                          │╰──────────────────────────────────────────────────────╯
+│                                          │╭Next Steps  guidance──────────────────────────────────╮
+│                                          ││Action: Return to the dashboard and choose Recomme…   │
+│                                          ││Summary: 3/5 checks passed. Experimental checks: 1…   │
+│                                          ││Saved report: /tmp/openbitdo-diag-report.toml         │
+│                                          ││                                                      │
+│                                          ││                                                      │
+│                                          ││                                                      │
+╰──────────────────────────────────────────╯╰──────────────────────────────────────────────────────╯
+╭Run Again──────────────────────╮╭Save Report────────────────────╮╭Back───────────────────────────╮
+│Run Again                      ││Save Report                    ││Back                           │
+│rerun safe-read probe          ││write support report           ││return to dashboard            │
+╰───────────────────────────────╯╰───────────────────────────────╯╰───────────────────────────────╯

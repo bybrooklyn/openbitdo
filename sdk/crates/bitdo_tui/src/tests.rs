@@ -1,370 +1,654 @@
 use super::*;
-use crate::support_report::report_subject_token;
-use bitdo_app_core::{FirmwareOutcome, OpenBitdoCoreConfig};
-use bitdo_proto::SupportLevel;
-
-#[test]
-fn about_state_roundtrip_returns_home() {
-    let mut app = TuiApp::default();
-    app.refresh_devices(vec![AppDevice {
-        vid_pid: VidPid::new(0x2dc8, 0x6009),
-        name: "Test".to_owned(),
-        support_level: SupportLevel::Full,
-        support_tier: SupportTier::Full,
-        protocol_family: bitdo_proto::ProtocolFamily::Standard64,
-        capability: bitdo_proto::PidCapability::full(),
-        evidence: bitdo_proto::SupportEvidence::Confirmed,
-        serial: Some("SERIAL1".to_owned()),
-        connected: true,
-    }]);
-    app.open_about();
-    assert_eq!(app.state, TuiWorkflowState::About);
-    app.close_overlay();
-    assert_eq!(app.state, TuiWorkflowState::Home);
-}
-
-#[test]
-fn refresh_devices_without_any_device_enters_wait_state() {
-    let mut app = TuiApp::default();
-    app.refresh_devices(Vec::new());
-    assert_eq!(app.state, TuiWorkflowState::WaitForDevice);
-    assert!(app.selected.is_none());
-}
-
-#[test]
-fn refresh_devices_autoselects_single_device() {
-    let mut app = TuiApp::default();
-    app.refresh_devices(vec![AppDevice {
-        vid_pid: VidPid::new(0x2dc8, 0x6009),
-        name: "One".to_owned(),
-        support_level: SupportLevel::Full,
-        support_tier: SupportTier::Full,
-        protocol_family: bitdo_proto::ProtocolFamily::Standard64,
-        capability: bitdo_proto::PidCapability::full(),
-        evidence: bitdo_proto::SupportEvidence::Confirmed,
-        serial: None,
-        connected: true,
-    }]);
-
-    assert_eq!(app.state, TuiWorkflowState::Home);
-    assert_eq!(app.selected_index, 0);
-    assert_eq!(app.selected, Some(VidPid::new(0x2dc8, 0x6009)));
-}
-
-#[test]
-fn serial_token_prefers_serial_then_vidpid() {
-    let with_serial = AppDevice {
-        vid_pid: VidPid::new(0x2dc8, 0x6009),
-        name: "S".to_owned(),
-        support_level: SupportLevel::Full,
-        support_tier: SupportTier::Full,
-        protocol_family: bitdo_proto::ProtocolFamily::Standard64,
-        capability: bitdo_proto::PidCapability::full(),
-        evidence: bitdo_proto::SupportEvidence::Confirmed,
-        serial: Some("ABC 123".to_owned()),
-        connected: true,
-    };
-    assert_eq!(report_subject_token(Some(&with_serial)), "ABC_123");
-
-    let without_serial = AppDevice {
-        serial: None,
-        ..with_serial
-    };
-    assert_eq!(report_subject_token(Some(&without_serial)), "2dc86009");
-}
-
-#[test]
-fn launch_options_default_to_failure_only_reports() {
-    let opts = TuiLaunchOptions::default();
-    assert_eq!(opts.report_save_mode, ReportSaveMode::FailureOnly);
-}
-
-#[test]
-fn blocked_panel_text_matches_support_tier() {
-    let mut app = TuiApp::default();
-    app.refresh_devices(vec![AppDevice {
-        vid_pid: VidPid::new(0x2dc8, 0x2100),
-        name: "Candidate".to_owned(),
-        support_level: SupportLevel::DetectOnly,
-        support_tier: SupportTier::CandidateReadOnly,
-        protocol_family: bitdo_proto::ProtocolFamily::Standard64,
-        capability: bitdo_proto::PidCapability {
-            supports_mode: true,
-            supports_profile_rw: true,
-            supports_boot: false,
-            supports_firmware: false,
-            supports_jp108_dedicated_map: false,
-            supports_u2_slot_config: false,
-            supports_u2_button_map: false,
-        },
-        evidence: bitdo_proto::SupportEvidence::Inferred,
-        serial: None,
-        connected: true,
-    }]);
-    let selected = app.selected_device().expect("selected");
-    let text = blocked_action_panel_text(selected);
-    assert!(text.contains("blocked"));
-    assert!(text.contains("Status shown as Blocked"));
-    assert_eq!(beginner_status_label(selected), "Blocked");
-}
-
-#[test]
-fn non_advanced_report_mode_skips_off_setting() {
-    let mut app = TuiApp {
-        advanced_mode: false,
-        ..Default::default()
-    };
-    assert_eq!(app.report_save_mode, ReportSaveMode::FailureOnly);
-    app.cycle_report_save_mode().expect("cycle");
-    assert_eq!(app.report_save_mode, ReportSaveMode::Always);
-    app.cycle_report_save_mode().expect("cycle");
-    assert_eq!(app.report_save_mode, ReportSaveMode::FailureOnly);
-}
-
-#[test]
-fn unknown_device_label_is_beginner_friendly() {
-    let device = AppDevice {
-        vid_pid: VidPid::new(0x2dc8, 0xabcd),
-        name: "PID_UNKNOWN".to_owned(),
-        support_level: SupportLevel::DetectOnly,
-        support_tier: SupportTier::DetectOnly,
-        protocol_family: bitdo_proto::ProtocolFamily::Unknown,
-        capability: bitdo_proto::PidCapability::identify_only(),
-        evidence: bitdo_proto::SupportEvidence::Untested,
-        serial: None,
-        connected: true,
-    };
-    let label = super::display_device_name(&device);
-    assert!(label.contains("Unknown 8BitDo Device"));
-    assert!(label.contains("2dc8:abcd"));
-}
+use crate::app::action::QuickAction;
+use crate::app::event::AppEvent;
+use crate::app::reducer::reduce;
+use crate::app::state::{
+    AppState, DiagnosticsFilter, DiagnosticsState, MappingDraftState, Screen, TaskMode,
+};
+use crate::persistence::ui_state::{load_ui_state, persist_ui_state};
+use crate::runtime::effect_executor::execute_effect;
+use bitdo_app_core::{DedicatedButtonId, DedicatedButtonMapping, OpenBitdoCoreConfig};
+use bitdo_proto::{
+    BitdoErrorCode, CommandId, DiagCommandStatus, DiagProbeResult, DiagSeverity,
+    EvidenceConfidence, ResponseStatus, SupportTier, VidPid,
+};
+use insta::assert_snapshot;
+use ratatui::backend::TestBackend;
+use ratatui::Terminal;
+use std::collections::BTreeMap;
+use std::path::PathBuf;
 
 #[tokio::test]
-async fn home_refresh_loads_devices() {
-    let core = OpenBitdoCore::new(OpenBitdoCoreConfig {
+async fn quick_action_matrix_blocks_update_for_read_only() {
+    let core = bitdo_app_core::OpenBitdoCore::new(OpenBitdoCoreConfig {
         mock_mode: true,
-        default_chunk_size: 16,
-        progress_interval_ms: 1,
         ..Default::default()
     });
 
-    let mut app = TuiApp::default();
-    app.refresh_devices(core.list_devices().await.expect("devices"));
+    let mut state = AppState::new(&UiLaunchOptions::default());
+    let devices = core.list_devices().await.expect("devices");
+    let _ = reduce(&mut state, AppEvent::DevicesLoaded(devices));
 
-    assert!(!app.devices.is_empty());
-    assert!(app.selected_device().is_some());
+    let update = state
+        .quick_actions
+        .iter()
+        .find(|a| a.action == QuickAction::RecommendedUpdate)
+        .expect("update action");
+    assert!(update.enabled);
+
+    let readonly_idx = state
+        .devices
+        .iter()
+        .position(|d| d.support_tier != SupportTier::Full)
+        .expect("readonly device");
+    state.selected_device_id = Some(state.devices[readonly_idx].vid_pid);
+    state.recompute_quick_actions();
+
+    let update = state
+        .quick_actions
+        .iter()
+        .find(|a| a.action == QuickAction::RecommendedUpdate)
+        .expect("update action");
+    assert!(!update.enabled);
+}
+
+#[test]
+fn mapping_draft_undo_and_reset() {
+    let mut state = AppState::new(&UiLaunchOptions::default());
+    state.screen = Screen::MappingEditor;
+    state.mapping_draft_state = Some(MappingDraftState::Jp108 {
+        loaded: vec![DedicatedButtonMapping {
+            button: DedicatedButtonId::A,
+            target_hid_usage: 0x0004,
+        }],
+        current: vec![DedicatedButtonMapping {
+            button: DedicatedButtonId::A,
+            target_hid_usage: 0x0004,
+        }],
+        undo_stack: Vec::new(),
+        selected_row: 0,
+    });
+
+    let _ = reduce(&mut state, AppEvent::MappingAdjust(1));
+    assert!(state.mapping_has_changes());
+
+    let _ = reduce(&mut state, AppEvent::TriggerAction(QuickAction::UndoDraft));
+    assert!(!state.mapping_has_changes());
+
+    let _ = reduce(&mut state, AppEvent::MappingAdjust(1));
+    assert!(state.mapping_has_changes());
+    let _ = reduce(&mut state, AppEvent::TriggerAction(QuickAction::ResetDraft));
+    assert!(!state.mapping_has_changes());
+}
+
+#[test]
+fn settings_schema_v2_roundtrip() {
+    let path = std::env::temp_dir().join("bitdo-tui-ui-state-v2.toml");
+    persist_ui_state(
+        &path,
+        true,
+        ReportSaveMode::Always,
+        "ultimate".to_owned(),
+        DashboardLayoutMode::Compact,
+        PanelFocus::QuickActions,
+    )
+    .expect("persist");
+
+    let loaded = load_ui_state(&path).expect("load");
+    assert_eq!(loaded.schema_version, 2);
+    assert!(loaded.advanced_mode);
+    assert_eq!(loaded.report_save_mode, ReportSaveMode::Always);
+    assert_eq!(loaded.device_filter_text, "ultimate");
+    assert_eq!(loaded.dashboard_layout_mode, DashboardLayoutMode::Compact);
+    assert_eq!(loaded.last_panel_focus, PanelFocus::QuickActions);
+
+    let _ = std::fs::remove_file(path);
+}
+
+#[test]
+fn invalid_ui_state_returns_error() {
+    let path = std::env::temp_dir().join("bitdo-tui-invalid-ui-state.toml");
+    std::fs::write(&path, "advanced_mode = [").expect("write invalid");
+
+    let err = load_ui_state(&path).expect_err("invalid ui state must error");
+    assert!(err.to_string().contains("failed to parse ui state"));
+
+    let _ = std::fs::remove_file(path);
+}
+
+#[test]
+fn launch_defaults_are_safe() {
+    let ui = UiLaunchOptions::default();
+    assert!(!ui.allow_unsafe);
+    assert!(!ui.brick_risk_ack);
+
+    let headless = RunLaunchOptions::default();
+    assert!(!headless.allow_unsafe);
+    assert!(!headless.brick_risk_ack);
+    assert!(!headless.acknowledged_risk);
 }
 
 #[tokio::test]
-async fn run_tui_app_no_ui_blocks_detect_only_pid() {
-    let core = OpenBitdoCore::new(OpenBitdoCoreConfig {
+async fn integration_refresh_select_preflight_cancel_path() {
+    let core = bitdo_app_core::OpenBitdoCore::new(OpenBitdoCoreConfig {
         mock_mode: true,
-        default_chunk_size: 16,
-        progress_interval_ms: 1,
         ..Default::default()
     });
 
-    let result = run_tui_app(
-        core,
-        TuiLaunchOptions {
-            no_ui: true,
-            selected_vid_pid: Some(VidPid::new(0x2dc8, 0x2100)),
-            ..Default::default()
-        },
+    let mut state = AppState::new(&UiLaunchOptions::default());
+    drive(&core, &mut state, AppEvent::Init).await;
+
+    assert!(!state.devices.is_empty());
+
+    let full_support_index = state
+        .devices
+        .iter()
+        .position(|device| device.support_tier == SupportTier::Full)
+        .expect("full-support device");
+    drive(
+        &core,
+        &mut state,
+        AppEvent::SelectFilteredDevice(full_support_index),
+    )
+    .await;
+    drive(
+        &core,
+        &mut state,
+        AppEvent::TriggerAction(QuickAction::RecommendedUpdate),
     )
     .await;
 
-    assert!(result.is_err());
+    assert_eq!(state.screen, Screen::Task);
+    assert!(state.task_state.is_some());
+    let downloaded_path = state
+        .task_state
+        .as_ref()
+        .and_then(|task| task.downloaded_firmware_path.clone())
+        .expect("downloaded firmware path");
+    assert!(downloaded_path.exists());
+
+    drive(
+        &core,
+        &mut state,
+        AppEvent::TriggerAction(QuickAction::Cancel),
+    )
+    .await;
+    assert_eq!(state.screen, Screen::Dashboard);
+    assert!(!downloaded_path.exists());
 }
 
 #[tokio::test]
-async fn run_tui_app_no_ui_full_support_completes() {
-    let core = OpenBitdoCore::new(OpenBitdoCoreConfig {
+async fn integration_diagnostics_run_rerun_save_and_back() {
+    let core = bitdo_app_core::OpenBitdoCore::new(OpenBitdoCoreConfig {
         mock_mode: true,
-        default_chunk_size: 16,
+        ..Default::default()
+    });
+
+    let mut state = AppState::new(&UiLaunchOptions::default());
+    drive(&core, &mut state, AppEvent::Init).await;
+    drive(&core, &mut state, AppEvent::SelectFilteredDevice(0)).await;
+    drive(
+        &core,
+        &mut state,
+        AppEvent::TriggerAction(QuickAction::Diagnose),
+    )
+    .await;
+
+    assert_eq!(state.screen, Screen::Diagnostics);
+    assert!(state.diagnostics_state.is_some());
+    assert!(state.task_state.is_none());
+
+    drive(
+        &core,
+        &mut state,
+        AppEvent::TriggerAction(QuickAction::RunAgain),
+    )
+    .await;
+    assert_eq!(state.screen, Screen::Diagnostics);
+    assert!(state.diagnostics_state.is_some());
+
+    drive(
+        &core,
+        &mut state,
+        AppEvent::TriggerAction(QuickAction::SaveReport),
+    )
+    .await;
+    let saved_path = state
+        .diagnostics_state
+        .as_ref()
+        .and_then(|diagnostics| diagnostics.latest_report_path.clone())
+        .expect("diagnostics report path");
+    assert!(saved_path.exists());
+
+    drive(
+        &core,
+        &mut state,
+        AppEvent::TriggerAction(QuickAction::Back),
+    )
+    .await;
+    assert_eq!(state.screen, Screen::Dashboard);
+
+    let _ = std::fs::remove_file(saved_path);
+}
+
+#[test]
+fn diagnostics_filter_changes_visible_rows() {
+    let mut state = snapshot_state();
+    state.screen = Screen::Diagnostics;
+    state.diagnostics_state = Some(sample_diagnostics_state(None));
+    state.recompute_quick_actions();
+
+    assert_eq!(state.diagnostics_filtered_indices(), vec![0, 1, 2, 3, 4]);
+
+    let _ = reduce(
+        &mut state,
+        AppEvent::DiagnosticsSetFilter(DiagnosticsFilter::Issues),
+    );
+    assert_eq!(state.diagnostics_filtered_indices(), vec![3, 4]);
+    assert_eq!(
+        state
+            .selected_diagnostics_check()
+            .map(|check| check.command),
+        Some(CommandId::ReadProfile)
+    );
+
+    let _ = reduce(
+        &mut state,
+        AppEvent::DiagnosticsSetFilter(DiagnosticsFilter::Experimental),
+    );
+    assert_eq!(state.diagnostics_filtered_indices(), vec![2, 3]);
+    assert_eq!(
+        state
+            .selected_diagnostics_check()
+            .map(|check| check.command),
+        Some(CommandId::ReadProfile)
+    );
+}
+
+#[tokio::test]
+async fn manual_save_report_updates_diagnostics_state() {
+    let core = bitdo_app_core::OpenBitdoCore::new(OpenBitdoCoreConfig {
+        mock_mode: true,
+        ..Default::default()
+    });
+
+    let mut state = snapshot_state();
+    state.screen = Screen::Diagnostics;
+    state.diagnostics_state = Some(sample_diagnostics_state(None));
+    state.recompute_quick_actions();
+
+    drive(
+        &core,
+        &mut state,
+        AppEvent::TriggerAction(QuickAction::SaveReport),
+    )
+    .await;
+
+    let saved_path = state
+        .diagnostics_state
+        .as_ref()
+        .and_then(|diagnostics| diagnostics.latest_report_path.clone())
+        .expect("saved diagnostics report path");
+    assert!(saved_path.exists());
+
+    let _ = std::fs::remove_file(saved_path);
+}
+
+#[test]
+fn recovery_transition_is_preserved() {
+    let mut state = AppState::new(&UiLaunchOptions::default());
+    let _ = reduce(
+        &mut state,
+        AppEvent::MappingApplied {
+            backup_id: None,
+            message: "rollback failed".to_owned(),
+            recovery_lock: true,
+        },
+    );
+    assert_eq!(state.screen, Screen::Recovery);
+    assert!(state.write_lock_until_restart);
+}
+
+#[tokio::test]
+async fn headless_human_and_json_modes_complete() {
+    let core = bitdo_app_core::OpenBitdoCore::new(OpenBitdoCoreConfig {
+        mock_mode: true,
         progress_interval_ms: 1,
         ..Default::default()
     });
 
-    run_tui_app(
-        core,
-        TuiLaunchOptions {
-            no_ui: true,
-            selected_vid_pid: Some(VidPid::new(0x2dc8, 0x6009)),
+    let report_human = run_headless(
+        core.clone(),
+        RunLaunchOptions {
+            vid_pid: VidPid::new(0x2dc8, 0x6009),
+            use_recommended: true,
+            allow_unsafe: true,
+            brick_risk_ack: true,
+            acknowledged_risk: true,
+            output_mode: HeadlessOutputMode::Human,
+            emit_events: false,
             ..Default::default()
         },
     )
     .await
-    .expect("run app");
-}
+    .expect("human mode");
+    assert_eq!(
+        report_human.status,
+        bitdo_app_core::FirmwareOutcome::Completed
+    );
 
-#[tokio::test]
-async fn tui_flow_with_manual_path_completes() {
-    let core = OpenBitdoCore::new(OpenBitdoCoreConfig {
-        mock_mode: true,
-        default_chunk_size: 16,
-        progress_interval_ms: 1,
-        ..Default::default()
-    });
-
-    let path = std::env::temp_dir().join("openbitdo-tui-flow.bin");
-    tokio::fs::write(&path, vec![1u8; 128])
-        .await
-        .expect("write");
-
-    let report = run_tui_flow(
+    let report_json = run_headless(
         core,
-        TuiRunRequest {
+        RunLaunchOptions {
             vid_pid: VidPid::new(0x2dc8, 0x6009),
-            firmware_path: path.clone(),
+            use_recommended: true,
             allow_unsafe: true,
             brick_risk_ack: true,
-            experimental: true,
-            chunk_size: Some(32),
             acknowledged_risk: true,
-            no_ui: true,
+            output_mode: HeadlessOutputMode::Json,
+            emit_events: true,
+            ..Default::default()
         },
     )
     .await
-    .expect("run tui flow");
-
-    assert_eq!(report.status, FirmwareOutcome::Completed);
-    let _ = tokio::fs::remove_file(path).await;
+    .expect("json mode");
+    assert_eq!(
+        report_json.status,
+        bitdo_app_core::FirmwareOutcome::Completed
+    );
 }
 
-#[tokio::test]
-async fn support_report_is_toml_file() {
-    let device = AppDevice {
-        vid_pid: VidPid::new(0x2dc8, 0x6009),
-        name: "Test".to_owned(),
-        support_level: SupportLevel::Full,
-        support_tier: SupportTier::Full,
+#[test]
+fn snapshot_dashboard_80x24() {
+    let mut state = snapshot_state();
+    state.dashboard_layout_mode = DashboardLayoutMode::Wide;
+    let rendered = render_state(&mut state, 80, 24);
+    assert_snapshot!(rendered);
+}
+
+#[test]
+fn snapshot_task_screen_100x30() {
+    let mut state = snapshot_state();
+    state.screen = Screen::Task;
+    state.task_state = Some(crate::app::state::TaskState {
+        mode: TaskMode::Preflight,
+        plan: None,
+        progress: 12,
+        status: "Ready to confirm transfer".to_owned(),
+        final_report: None,
+        downloaded_firmware_path: None,
+    });
+    state.recompute_quick_actions();
+    let rendered = render_state(&mut state, 100, 30);
+    assert_snapshot!(rendered);
+}
+
+#[test]
+fn snapshot_diagnostics_screen_100x30() {
+    let mut state = snapshot_state();
+    state.screen = Screen::Diagnostics;
+    state.diagnostics_state = Some(sample_diagnostics_state(None));
+    state.recompute_quick_actions();
+    let rendered = render_state(&mut state, 100, 30);
+    assert_snapshot!(rendered);
+}
+
+#[test]
+fn snapshot_diagnostics_screen_80x24() {
+    let mut state = snapshot_state();
+    state.screen = Screen::Diagnostics;
+    state.diagnostics_state = Some(sample_diagnostics_state(None));
+    state.recompute_quick_actions();
+    let rendered = render_state(&mut state, 80, 24);
+    assert_snapshot!(rendered);
+}
+
+#[test]
+fn snapshot_diagnostics_screen_with_saved_report() {
+    let mut state = snapshot_state();
+    state.screen = Screen::Diagnostics;
+    state.diagnostics_state = Some(sample_diagnostics_state(Some(PathBuf::from(
+        "/tmp/openbitdo-diag-report.toml",
+    ))));
+    if let Some(diagnostics) = state.diagnostics_state.as_mut() {
+        diagnostics.active_filter = DiagnosticsFilter::Issues;
+        diagnostics.selected_check_index = 4;
+    }
+    state.recompute_quick_actions();
+    let rendered = render_state(&mut state, 100, 30);
+    assert_snapshot!(rendered);
+}
+
+#[test]
+fn snapshot_mapping_editor_screen() {
+    let mut state = snapshot_state();
+    state.screen = Screen::MappingEditor;
+    state.mapping_draft_state = Some(MappingDraftState::Jp108 {
+        loaded: vec![DedicatedButtonMapping {
+            button: DedicatedButtonId::A,
+            target_hid_usage: 0x0004,
+        }],
+        current: vec![DedicatedButtonMapping {
+            button: DedicatedButtonId::A,
+            target_hid_usage: 0x0005,
+        }],
+        undo_stack: Vec::new(),
+        selected_row: 0,
+    });
+    state.recompute_quick_actions();
+    let rendered = render_state(&mut state, 100, 30);
+    assert_snapshot!(rendered);
+}
+
+#[test]
+fn snapshot_recovery_screen() {
+    let mut state = snapshot_state();
+    state.screen = Screen::Recovery;
+    state.write_lock_until_restart = true;
+    state.recompute_quick_actions();
+    let rendered = render_state(&mut state, 80, 24);
+    assert_snapshot!(rendered);
+}
+
+async fn drive(core: &bitdo_app_core::OpenBitdoCore, state: &mut AppState, initial: AppEvent) {
+    let mut queue = std::collections::VecDeque::from([initial]);
+    while let Some(event) = queue.pop_front() {
+        let effects = reduce(state, event);
+        for effect in effects {
+            let emitted = execute_effect(core, state, effect).await;
+            for next in emitted {
+                queue.push_back(next);
+            }
+        }
+    }
+}
+
+fn snapshot_state() -> AppState {
+    let mut state = AppState::new(&UiLaunchOptions::default());
+    let _ = reduce(
+        &mut state,
+        AppEvent::DevicesLoaded(vec![
+            bitdo_app_core::AppDevice {
+                vid_pid: VidPid::new(0x2dc8, 0x5209),
+                name: "Ultimate2".to_owned(),
+                support_level: bitdo_proto::SupportLevel::Full,
+                support_tier: bitdo_proto::SupportTier::Full,
+                protocol_family: bitdo_proto::ProtocolFamily::Standard64,
+                capability: bitdo_proto::PidCapability::full(),
+                evidence: bitdo_proto::SupportEvidence::Confirmed,
+                serial: None,
+                connected: true,
+            },
+            bitdo_app_core::AppDevice {
+                vid_pid: VidPid::new(0x2dc8, 0x6009),
+                name: "Ultimate".to_owned(),
+                support_level: bitdo_proto::SupportLevel::DetectOnly,
+                support_tier: bitdo_proto::SupportTier::CandidateReadOnly,
+                protocol_family: bitdo_proto::ProtocolFamily::Standard64,
+                capability: bitdo_proto::PidCapability::identify_only(),
+                evidence: bitdo_proto::SupportEvidence::Inferred,
+                serial: None,
+                connected: true,
+            },
+            bitdo_app_core::AppDevice {
+                vid_pid: VidPid::new(0x2dc8, 0x901a),
+                name: "Candidate".to_owned(),
+                support_level: bitdo_proto::SupportLevel::DetectOnly,
+                support_tier: bitdo_proto::SupportTier::CandidateReadOnly,
+                protocol_family: bitdo_proto::ProtocolFamily::Unknown,
+                capability: bitdo_proto::PidCapability::identify_only(),
+                evidence: bitdo_proto::SupportEvidence::Untested,
+                serial: None,
+                connected: true,
+            },
+        ]),
+    );
+    state.event_log.clear();
+    state.status_line = "Ready".to_owned();
+    state
+}
+
+fn sample_diagnostics_state(report_path: Option<PathBuf>) -> DiagnosticsState {
+    DiagnosticsState {
+        result: sample_diagnostics_result(),
+        summary: "3/5 checks passed. Experimental checks: 1/2 passed. Issues: 2 total, 1 need attention. Transport ready: yes. Standard64 diagnostics are available. This device is full-support.".to_owned(),
+        selected_check_index: 0,
+        active_filter: DiagnosticsFilter::All,
+        latest_report_path: report_path,
+    }
+}
+
+fn sample_diagnostics_result() -> DiagProbeResult {
+    DiagProbeResult {
+        target: VidPid::new(0x2dc8, 0x5209),
+        profile_name: "Ultimate2".to_owned(),
+        support_level: bitdo_proto::SupportLevel::Full,
+        support_tier: bitdo_proto::SupportTier::Full,
         protocol_family: bitdo_proto::ProtocolFamily::Standard64,
         capability: bitdo_proto::PidCapability::full(),
         evidence: bitdo_proto::SupportEvidence::Confirmed,
-        serial: Some("RPT-1".to_owned()),
-        connected: true,
-    };
-
-    let report_path = persist_support_report(
-        "diag-probe",
-        Some(&device),
-        "ok",
-        "all checks passed".to_owned(),
-        None,
-        None,
-    )
-    .await
-    .expect("report path");
-
-    assert_eq!(
-        report_path.extension().and_then(|s| s.to_str()),
-        Some("toml")
-    );
-    let _ = tokio::fs::remove_file(report_path).await;
+        transport_ready: true,
+        command_checks: vec![
+            diag_check(
+                CommandId::GetPid,
+                DiagCheckFixture {
+                    ok: true,
+                    confidence: EvidenceConfidence::Confirmed,
+                    is_experimental: false,
+                    severity: DiagSeverity::Ok,
+                    error_code: None,
+                    detail: "detected pid 0x5209",
+                    parsed_facts: [("detected_pid", 0x5209)].into_iter().collect(),
+                },
+            ),
+            diag_check(
+                CommandId::GetMode,
+                DiagCheckFixture {
+                    ok: true,
+                    confidence: EvidenceConfidence::Confirmed,
+                    is_experimental: false,
+                    severity: DiagSeverity::Ok,
+                    error_code: None,
+                    detail: "mode 2",
+                    parsed_facts: [("mode", 2)].into_iter().collect(),
+                },
+            ),
+            diag_check(
+                CommandId::GetSuperButton,
+                DiagCheckFixture {
+                    ok: true,
+                    confidence: EvidenceConfidence::Inferred,
+                    is_experimental: true,
+                    severity: DiagSeverity::Ok,
+                    error_code: None,
+                    detail: "ok",
+                    parsed_facts: BTreeMap::new(),
+                },
+            ),
+            diag_check(
+                CommandId::ReadProfile,
+                DiagCheckFixture {
+                    ok: false,
+                    confidence: EvidenceConfidence::Inferred,
+                    is_experimental: true,
+                    severity: DiagSeverity::Warning,
+                    error_code: Some(BitdoErrorCode::Timeout),
+                    detail: "timeout while waiting for device response",
+                    parsed_facts: BTreeMap::new(),
+                },
+            ),
+            diag_check(
+                CommandId::Version,
+                DiagCheckFixture {
+                    ok: false,
+                    confidence: EvidenceConfidence::Confirmed,
+                    is_experimental: false,
+                    severity: DiagSeverity::NeedsAttention,
+                    error_code: Some(BitdoErrorCode::InvalidResponse),
+                    detail: "invalid response for Version: response signature mismatch",
+                    parsed_facts: [("version_x100", 4200), ("beta", 0)].into_iter().collect(),
+                },
+            ),
+        ],
+    }
 }
 
-#[tokio::test]
-async fn update_action_enters_jp108_wizard_for_jp108_device() {
-    let core = OpenBitdoCore::new(OpenBitdoCoreConfig {
-        mock_mode: true,
-        ..Default::default()
-    });
-    let mut app = TuiApp::default();
-    app.refresh_devices(core.list_devices().await.expect("devices"));
-    let jp108_idx = app
-        .devices
-        .iter()
-        .position(|d| d.vid_pid.pid == 0x5209)
-        .expect("jp108 fixture");
-    app.select_index(jp108_idx);
-    app.state = TuiWorkflowState::Home;
-
-    let mut terminal = None;
-    let mut events = None;
-    let opts = TuiLaunchOptions::default();
-    execute_home_action(
-        &core,
-        &mut terminal,
-        &mut app,
-        &opts,
-        &mut events,
-        HomeAction::Update,
-    )
-    .await
-    .expect("execute");
-
-    assert_eq!(app.state, TuiWorkflowState::Jp108Mapping);
-    assert!(!app.jp108_mappings.is_empty());
+struct DiagCheckFixture<'a> {
+    ok: bool,
+    confidence: EvidenceConfidence,
+    is_experimental: bool,
+    severity: DiagSeverity,
+    error_code: Option<BitdoErrorCode>,
+    detail: &'a str,
+    parsed_facts: BTreeMap<&'a str, u32>,
 }
 
-#[tokio::test]
-async fn update_action_enters_u2_wizard_for_ultimate2_device() {
-    let core = OpenBitdoCore::new(OpenBitdoCoreConfig {
-        mock_mode: true,
-        ..Default::default()
-    });
-    let mut app = TuiApp::default();
-    app.refresh_devices(core.list_devices().await.expect("devices"));
-    let u2_idx = app
-        .devices
-        .iter()
-        .position(|d| d.vid_pid.pid == 0x6012)
-        .expect("u2 fixture");
-    app.select_index(u2_idx);
-    app.state = TuiWorkflowState::Home;
-
-    let mut terminal = None;
-    let mut events = None;
-    let opts = TuiLaunchOptions::default();
-    execute_home_action(
-        &core,
-        &mut terminal,
-        &mut app,
-        &opts,
-        &mut events,
-        HomeAction::Update,
-    )
-    .await
-    .expect("execute");
-
-    assert_eq!(app.state, TuiWorkflowState::U2CoreProfile);
-    assert!(app.u2_profile.is_some());
+fn diag_check(command: CommandId, fixture: DiagCheckFixture<'_>) -> DiagCommandStatus {
+    DiagCommandStatus {
+        command,
+        ok: fixture.ok,
+        confidence: fixture.confidence,
+        is_experimental: fixture.is_experimental,
+        severity: fixture.severity,
+        attempts: 1,
+        validator: format!("test:{command:?}"),
+        response_status: if fixture.ok {
+            ResponseStatus::Ok
+        } else {
+            ResponseStatus::Invalid
+        },
+        bytes_written: 64,
+        bytes_read: if fixture.ok { 64 } else { 8 },
+        error_code: fixture.error_code,
+        detail: fixture.detail.to_owned(),
+        parsed_facts: fixture
+            .parsed_facts
+            .into_iter()
+            .map(|(key, value)| (key.to_owned(), value))
+            .collect(),
+    }
 }
 
-#[tokio::test]
-async fn device_flow_backup_apply_sets_backup_id() {
-    let core = OpenBitdoCore::new(OpenBitdoCoreConfig {
-        mock_mode: true,
-        ..Default::default()
-    });
-    let mut app = TuiApp::default();
-    app.refresh_devices(core.list_devices().await.expect("devices"));
-    let jp108_idx = app
-        .devices
-        .iter()
-        .position(|d| d.vid_pid.pid == 0x5209)
-        .expect("jp108 fixture");
-    app.select_index(jp108_idx);
-    app.begin_jp108_mapping(
-        core.jp108_read_dedicated_mapping(VidPid::new(0x2dc8, 0x5209))
-            .await
-            .expect("read"),
-    );
+fn render_state(state: &mut AppState, width: u16, height: u16) -> String {
+    state.set_layout_from_size(width, height);
+    let backend = TestBackend::new(width, height);
+    let mut terminal = Terminal::new(backend).expect("terminal");
+    terminal
+        .draw(|frame| {
+            let _ = crate::ui::layout::render(frame, state);
+        })
+        .expect("draw");
 
-    let mut terminal = None;
-    let mut events = None;
-    let opts = TuiLaunchOptions::default();
-    execute_device_flow_action(
-        &core,
-        &mut terminal,
-        &mut app,
-        &opts,
-        &mut events,
-        DeviceFlowAction::BackupApply,
-    )
-    .await
-    .expect("apply");
+    let backend = terminal.backend();
+    let buffer = backend.buffer();
+    let mut lines = Vec::new();
+    for y in 0..height {
+        let mut line = String::new();
+        for x in 0..width {
+            line.push_str(buffer[(x, y)].symbol());
+        }
+        lines.push(line.trim_end().to_owned());
+    }
 
-    assert!(app.latest_backup.is_some());
+    lines.join("\n")
 }

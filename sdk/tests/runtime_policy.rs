@@ -1,6 +1,6 @@
 use bitdo_proto::{
     find_command, BitdoError, CommandId, CommandRuntimePolicy, DeviceSession, DiagSeverity,
-    EvidenceConfidence, MockTransport, SessionConfig, VidPid,
+    EvidenceConfidence, MockTransport, ResponseStatus, SessionConfig, VidPid,
 };
 
 #[test]
@@ -71,6 +71,9 @@ fn diag_probe_marks_inferred_reads_as_experimental() {
         .expect("inferred check present");
     assert!(inferred.is_experimental);
     assert_eq!(inferred.confidence, EvidenceConfidence::Inferred);
+    assert!(inferred.attempts >= 1);
+    assert_eq!(inferred.response_status, ResponseStatus::Malformed);
+    assert!(inferred.bytes_written > 0);
     assert!(matches!(
         inferred.severity,
         DiagSeverity::Ok | DiagSeverity::Warning | DiagSeverity::NeedsAttention

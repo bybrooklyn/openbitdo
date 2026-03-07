@@ -1,0 +1,35 @@
+---
+source: crates/bitdo_tui/src/tests.rs
+assertion_line: 317
+expression: rendered
+---
+╭Session───────────────────────────────────────────────────────────────────────────────────────────╮
+│OpenBitDo  Diagnostics  •  3/5 passed  •  reports fail-only  •  safe                              │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭Diagnostics  summary──────────────────────────────────────────────────────────────────────────────╮
+│3/5 passed  •  2 issues  •  2 experimental                                                        │
+│Tier: full  •  Family: Standard64  •  Transport: ready                                            │
+│                                                                                                  │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭Filter  All──╮╭Filter  Issu╮╭Filter  Exper╮╭Selected Check  detail────────────────────────────────╮
+│All          ││Issues      ││Experimental ││GetPid  OK                                            │
+╰─────────────╯╰────────────╯╰─────────────╯│Severity: Ok                                          │
+╭Checks  click a row───────────────────────╮│Confidence: Confirmed                                 │
+│› OK GetPid  detected pid 0x5…            ││Experimental: no                                      │
+│  OK GetMode  mode 2                      ││Error code: none                                      │
+│  OK GetSuperButton exp  ok               ││Response: Ok  •  attempts 1                           │
+│  WARN ReadProfile exp  timeout while wa… ││IO: wrote 64B, read 64B                               │
+│  ATTN Version  invalid response…         ││Validator: test:GetPid                                │
+│                                          │╰──────────────────────────────────────────────────────╯
+│                                          │╭Next Steps  guidance──────────────────────────────────╮
+│                                          ││Action: Return to the dashboard and choose Recomme…   │
+│                                          ││Summary: 3/5 checks passed. Experimental checks: 1…   │
+│                                          ││Saved report: not yet saved in this screen            │
+│                                          ││                                                      │
+│                                          ││                                                      │
+│                                          ││                                                      │
+╰──────────────────────────────────────────╯╰──────────────────────────────────────────────────────╯
+╭Run Again──────────────────────╮╭Save Report────────────────────╮╭Back───────────────────────────╮
+│Run Again                      ││Save Report                    ││Back                           │
+│rerun safe-read probe          ││write support report           ││return to dashboard            │
+╰───────────────────────────────╯╰───────────────────────────────╯╰───────────────────────────────╯

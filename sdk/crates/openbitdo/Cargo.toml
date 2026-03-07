@@ -15,6 +15,7 @@ tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 bitdo_app_core = { path = "../bitdo_app_core" }
 bitdo_tui = { path = "../bitdo_tui" }
+bitdo_proto = { path = "../bitdo_proto" }
 
 [dev-dependencies]
 assert_cmd = "2.0"

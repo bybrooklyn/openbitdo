@@ -1,5 +1,5 @@
 use bitdo_app_core::{signing_key_fingerprint_active_sha256, signing_key_fingerprint_next_sha256};
-use bitdo_tui::ReportSaveMode;
+use bitdo_tui::{DashboardLayoutMode, PanelFocus, ReportSaveMode};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
@@ -89,6 +89,12 @@ pub struct UserSettings {
     pub advanced_mode: bool,
     #[serde(default)]
     pub report_save_mode: ReportSaveMode,
+    #[serde(default)]
+    pub device_filter_text: String,
+    #[serde(default)]
+    pub dashboard_layout_mode: DashboardLayoutMode,
+    #[serde(default)]
+    pub last_panel_focus: PanelFocus,
 }
 
 impl Default for UserSettings {
@@ -97,12 +103,15 @@ impl Default for UserSettings {
             schema_version: default_settings_schema_version(),
             advanced_mode: false,
             report_save_mode: ReportSaveMode::FailureOnly,
+            device_filter_text: String::new(),
+            dashboard_layout_mode: DashboardLayoutMode::Wide,
+            last_panel_focus: PanelFocus::Devices,
         }
     }
 }
 
 const fn default_settings_schema_version() -> u32 {
-    1
+    2
 }
 
 pub fn user_settings_path() -> PathBuf {
@@ -130,15 +139,17 @@ pub fn user_settings_path() -> PathBuf {
     std::env::temp_dir().join("openbitdo").join("config.toml")
 }
 
-pub fn load_user_settings(path: &Path) -> UserSettings {
+pub fn load_user_settings(path: &Path) -> anyhow::Result<UserSettings> {
     let Ok(raw) = std::fs::read_to_string(path) else {
-        return UserSettings::default();
+        return Ok(UserSettings::default());
     };
-    let mut settings: UserSettings = toml::from_str(&raw).unwrap_or_default();
+    let mut settings: UserSettings = toml::from_str(&raw)
+        .map_err(|err| anyhow::anyhow!("failed to parse settings {}: {err}", path.display()))?;
+    settings.schema_version = default_settings_schema_version();
     if !settings.advanced_mode && settings.report_save_mode == ReportSaveMode::Off {
         settings.report_save_mode = ReportSaveMode::FailureOnly;
     }
-    settings
+    Ok(settings)
 }
 
 pub fn save_user_settings(path: &Path, settings: &UserSettings) -> anyhow::Result<()> {
@@ -194,16 +205,19 @@ mod tests {
     }
 
     #[test]
-    fn settings_roundtrip_toml() {
+    fn settings_roundtrip_toml_v2() {
         let tmp =
-            std::env::temp_dir().join(format!("openbitdo-settings-{}.toml", std::process::id()));
+            std::env::temp_dir().join(format!("openbitdo-settings-v2-{}.toml", std::process::id()));
         let settings = UserSettings {
-            schema_version: 1,
+            schema_version: 2,
             advanced_mode: true,
             report_save_mode: ReportSaveMode::Always,
+            device_filter_text: "ultimate".to_owned(),
+            dashboard_layout_mode: DashboardLayoutMode::Compact,
+            last_panel_focus: PanelFocus::QuickActions,
         };
         save_user_settings(&tmp, &settings).expect("save settings");
-        let loaded = load_user_settings(&tmp);
+        let loaded = load_user_settings(&tmp).expect("load settings");
         assert_eq!(loaded, settings);
         let _ = std::fs::remove_file(tmp);
     }
@@ -211,8 +225,35 @@ mod tests {
     #[test]
     fn missing_settings_uses_defaults() {
         let path = PathBuf::from("/tmp/openbitdo-nonexistent-settings.toml");
-        let loaded = load_user_settings(&path);
+        let loaded = load_user_settings(&path).expect("load defaults");
         assert!(!loaded.advanced_mode);
         assert_eq!(loaded.report_save_mode, ReportSaveMode::FailureOnly);
+        assert_eq!(loaded.schema_version, 2);
+    }
+
+    #[test]
+    fn v1_settings_migrate_to_v2_defaults() {
+        let path = std::env::temp_dir().join("openbitdo-v1-migrate.toml");
+        std::fs::write(
+            &path,
+            "schema_version = 1\nadvanced_mode = true\nreport_save_mode = \"always\"\n",
+        )
+        .expect("write v1");
+        let loaded = load_user_settings(&path).expect("load migrated settings");
+        assert_eq!(loaded.schema_version, 2);
+        assert_eq!(loaded.device_filter_text, "");
+        assert_eq!(loaded.dashboard_layout_mode, DashboardLayoutMode::Wide);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn invalid_settings_returns_error() {
+        let path = std::env::temp_dir().join("openbitdo-invalid-settings.toml");
+        std::fs::write(&path, "advanced_mode = [").expect("write invalid");
+
+        let err = load_user_settings(&path).expect_err("invalid settings must error");
+        assert!(err.to_string().contains("failed to parse settings"));
+
+        let _ = std::fs::remove_file(path);
     }
 }

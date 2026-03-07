@@ -1,0 +1,29 @@
+---
+source: crates/bitdo_tui/src/tests.rs
+assertion_line: 243
+expression: rendered
+---
+╭Session───────────────────────────────────────────────────────────────────────╮
+│OpenBitDo  Recovery  •  write lock active  •  reports fail-only  •  safe      │
+╰──────────────────────────────────────────────────────────────────────────────╯
+╭Recovery  safe rollback path──────────────────────────────────────────────────╮
+│Recovery lock is active                                                       │
+│                                                                              │
+│Write operations stay blocked until the app restarts.                         │
+│Restore a backup if one exists, validate the device, then restart.            │
+╰──────────────────────────────────────────────────────────────────────────────╯
+╭Guidance  recommended sequence────────────────────────────────────────────────╮
+│1. Restore backup if available.                                               │
+│2. Confirm the controller responds normally.                                  │
+│3. Restart OpenBitDo before any further writes.                               │
+│                                                                              │
+│No backup is registered for this session.                                     │
+│Ready                                                                         │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+╰──────────────────────────────────────────────────────────────────────────────╯
+╭Restore Backup──────────╮╭Back─────────────────────╮╭Quit────────────────────╮
+│Restore Backup          ││Back                     ││Quit                    │
+│attempt rollback        ││return to dashboard      ││exit openbitdo          │
+╰────────────────────────╯╰─────────────────────────╯╰────────────────────────╯

@@ -1,0 +1,35 @@
+---
+source: crates/bitdo_tui/src/tests.rs
+assertion_line: 233
+expression: rendered
+---
+╭Session───────────────────────────────────────────────────────────────────────────────────────────╮
+│OpenBitDo  Mappings  •  draft modified  •  reports fail-only  •  safe                             │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭Mapping Studio  modified──────────────────────────────────────────────────────────────────────────╮
+│Apply is explicit. Arrow keys adjust only the highlighted mapping.                                │
+│                                                                                                  │
+│JP108 dedicated mapping                                                                           │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭Mappings  up/down select • left/right adjust────────────────╮╭Inspector  selected mapping─────────╮
+│› A  ->  0x0005                                             ││Button: A                           │
+│                                                            ││Target HID: 0x0005                  │
+│                                                            ││                                    │
+│                                                            ││Left/right cycles preset targets.   │
+│                                                            ││                                    │
+│                                                            ││Ready                               │
+│                                                            ││                                    │
+│                                                            ││                                    │
+│                                                            ││                                    │
+│                                                            ││                                    │
+│                                                            ││                                    │
+│                                                            ││                                    │
+╰────────────────────────────────────────────────────────────╯╰────────────────────────────────────╯
+╭Apply──────────────────────────╮╭Undo───────────────────────────╮╭Reset──────────────────────────╮
+│Apply                          ││Undo                           ││Reset                          │
+│write current draft            ││restore last edit              ││discard draft changes          │
+╰───────────────────────────────╯╰───────────────────────────────╯╰───────────────────────────────╯
+╭Restore Backup─────────────────╮╭Firmware───────────────────────╮╭Back───────────────────────────╮
+│Restore Backup                 ││Firmware                       ││Back                           │
+│recover saved backup           ││switch to firmware flow        ││return to dashboard            │
+╰───────────────────────────────╯╰───────────────────────────────╯╰───────────────────────────────╯

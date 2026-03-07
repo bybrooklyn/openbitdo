@@ -16,7 +16,7 @@ Optional mock mode:
 cargo run -p openbitdo -- --mock
 ```
 
-Beginner flow is always `openbitdo` only. No extra command surface is required.
+`openbitdo` launches the interactive dashboard directly.
 
 ## Install (Public RC)
 
@@ -30,11 +30,10 @@ brew install openbitdo
 Homebrew Core inclusion (`brew install openbitdo` without tapping) is not an RC blocker and may land later.
 
 AUR package names:
-- `openbitdo` (source build)
 - `openbitdo-bin` (prebuilt binary)
 
 macOS RC caveat:
-- `.pkg` installers are unsigned/ad-hoc for `v0.0.1-rc.1`.
+- `.pkg` installers are unsigned/ad-hoc for `v0.0.1-rc.2`.
 - notarization is required starting with `v0.1.0`.
 
 ## UI Language Support
@@ -182,5 +181,5 @@ Support is implemented to our best current knowledge. Coverage and confidence ar
 - Dirty-room source index + official web cross-check URLs: [device_name_sources.md](/Users/brooklyn/data/8bitdo/cleanroom/process/device_name_sources.md)
 
 ## Public RC Gate
-`v0.0.1-rc.1` remains blocked until release-blocker issues are zero and all required checks are green.
+The next RC remains blocked until release-blocker issues are zero and all required checks are green.
 RC gating is checklist-based (see [RC_CHECKLIST.md](/Users/brooklyn/data/8bitdo/cleanroom/RC_CHECKLIST.md)).

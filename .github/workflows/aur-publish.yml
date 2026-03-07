@@ -4,13 +4,13 @@ on:
   workflow_call:
     inputs:
       tag:
-        description: "Release tag to publish (for example: v0.0.1-rc.1)"
+        description: "Release tag to publish (for example: v0.0.1-rc.2)"
         required: true
         type: string
   workflow_dispatch:
     inputs:
       tag:
-        description: "Release tag to publish (for example: v0.0.1-rc.1)"
+        description: "Release tag to publish (for example: v0.0.1-rc.2)"
         required: true
         type: string
 
@@ -54,8 +54,6 @@ jobs:
             --pattern "openbitdo-${TAG}-linux-aarch64.tar.gz" \
             --pattern "openbitdo-${TAG}-macos-arm64.tar.gz" \
             --dir /tmp/release-input
-          gh api "repos/${GITHUB_REPOSITORY}/tarball/${TAG}" \
-            > "/tmp/release-input/openbitdo-${TAG}-source.tar.gz"
           bash packaging/scripts/render_release_metadata.sh \
             "$TAG" \
             "$GITHUB_REPOSITORY" \
@@ -64,8 +62,6 @@ jobs:
           useradd -m builder
           chown -R builder:builder /tmp/release-metadata
           su builder -s /bin/bash -c "set -euo pipefail; \
-            cd /tmp/release-metadata/aur/openbitdo; \
-            makepkg --printsrcinfo > .SRCINFO; \
             cd /tmp/release-metadata/aur/openbitdo-bin; \
             makepkg --printsrcinfo > .SRCINFO"
 
@@ -74,8 +70,6 @@ jobs:
         with:
           name: aur-rendered-metadata-${{ inputs.tag }}
           path: |
-            /tmp/release-metadata/aur/openbitdo/PKGBUILD
-            /tmp/release-metadata/aur/openbitdo/.SRCINFO
             /tmp/release-metadata/aur/openbitdo-bin/PKGBUILD
             /tmp/release-metadata/aur/openbitdo-bin/.SRCINFO
             /tmp/release-metadata/checksums.env
@@ -96,7 +90,7 @@ jobs:
           ssh-keyscan -H aur.archlinux.org >> "$HOME/.ssh/known_hosts"
           chmod 644 "$HOME/.ssh/known_hosts"
 
-      - name: Publish openbitdo and openbitdo-bin
+      - name: Publish openbitdo-bin
         env:
           GIT_SSH_COMMAND: ssh -i $HOME/.ssh/aur -o IdentitiesOnly=yes -o UserKnownHostsFile=$HOME/.ssh/known_hosts -o StrictHostKeyChecking=accept-new
         run: |
@@ -141,5 +135,4 @@ jobs:
             fi
           }
 
-          publish_pkg openbitdo
           publish_pkg openbitdo-bin

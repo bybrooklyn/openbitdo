@@ -1,0 +1,29 @@
+---
+source: crates/bitdo_tui/src/tests.rs
+assertion_line: 327
+expression: rendered
+---
+╭Session───────────────────────────────────────────────────────────────────────╮
+│OpenBitDo  Diagnostics  •  3/5 passed  •  reports fail-only  •  safe          │
+╰──────────────────────────────────────────────────────────────────────────────╯
+╭Diagnostics  summary──────────────────────────────────────────────────────────╮
+│3/5 passed  •  2 issues  •  2 experimental                                    │
+│Tier: full  •  Family: Standard64  •  Transport: ready                        │
+│                                                                              │
+╰──────────────────────────────────────────────────────────────────────────────╯
+╭Checks  tab cycles filter─────────────────────────────────────────────────────╮
+│All 5  Issues 2  Exp 2                                                        │
+│› OK GetPid  detected pid 0x5209                                              │
+│  OK GetMode  mode 2                                                          │
+╰──────────────────────────────────────────────────────────────────────────────╯
+╭Selected Check  detail────────────────────────────────────────────────────────╮
+│GetPid  OK                                                                    │
+│Severity: Ok                                                                  │
+╰──────────────────────────────────────────────────────────────────────────────╯
+╭Next Steps  guidance──────────────────────────────────────────────────────────╮
+│Action: Return to the dashboard and choose Recommended Update or Edit Mapp…   │
+╰──────────────────────────────────────────────────────────────────────────────╯
+╭Run Again───────────────╮╭Save Report──────────────╮╭Back────────────────────╮
+│Run Again               ││Save Report              ││Back                    │
+│rerun safe-read probe   ││write support report     ││return to dashboard     │
+╰────────────────────────╯╰─────────────────────────╯╰────────────────────────╯

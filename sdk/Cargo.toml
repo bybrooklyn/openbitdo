@@ -9,7 +9,7 @@ resolver = "2"
 
 [workspace.package]
 edition = "2021"
-version = "0.1.0"
+version = "0.0.1-rc.2"
 license = "BSD-3-Clause"
 
 [workspace.dependencies]
@@ -31,3 +31,6 @@ ratatui = "0.29"
 crossterm = "0.29"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter"] }
+fuzzy-matcher = "0.3"
+unicode-width = "0.2"
+insta = "1.43"

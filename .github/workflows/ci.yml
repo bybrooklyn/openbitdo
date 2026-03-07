@@ -37,14 +37,12 @@ jobs:
         run: |
           set -euo pipefail
           if grep -nE 'SKIP|:no_check' \
-            packaging/aur/openbitdo/PKGBUILD \
             packaging/aur/openbitdo-bin/PKGBUILD \
             packaging/homebrew/Formula/openbitdo.rb; then
             echo "Found placeholder checksum markers; release metadata must be pinned." >&2
             exit 1
           fi
           test -f packaging/scripts/render_release_metadata.sh
-          test -f packaging/aur/openbitdo/PKGBUILD.tmpl
           test -f packaging/aur/openbitdo-bin/PKGBUILD.tmpl
           test -f packaging/homebrew/Formula/openbitdo.rb.tmpl
       - name: Validate PKGBUILD and .SRCINFO
@@ -52,9 +50,6 @@ jobs:
           useradd -m builder
           chown -R builder:builder "$GITHUB_WORKSPACE"
           su builder -s /bin/bash -c "set -euo pipefail; \
-            cd '$GITHUB_WORKSPACE/packaging/aur/openbitdo'; \
-            makepkg --printsrcinfo > /tmp/openbitdo.srcinfo; \
-            diff -u .SRCINFO /tmp/openbitdo.srcinfo; \
             cd '$GITHUB_WORKSPACE/packaging/aur/openbitdo-bin'; \
             makepkg --printsrcinfo > /tmp/openbitdo-bin.srcinfo; \
             diff -u .SRCINFO /tmp/openbitdo-bin.srcinfo"

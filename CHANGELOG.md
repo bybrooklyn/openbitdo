@@ -2,6 +2,22 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+### Changed
+- CLI contract reverted to single-command interactive launch:
+  - `openbitdo [--mock]`
+  - subcommand forms `openbitdo ui ...` and `openbitdo run ...` are rejected.
+- Headless automation output remains available in the `bitdo_tui` Rust API (human and line-delimited JSON records).
+- AUR packaging/publish flow now targets `openbitdo-bin` only.
+- Settings schema is now documented as v2:
+  - `schema_version`
+  - `advanced_mode`
+  - `report_save_mode`
+  - `device_filter_text`
+  - `dashboard_layout_mode`
+  - `last_panel_focus`
+
 ## v0.0.1-rc.1
 
 ### Added

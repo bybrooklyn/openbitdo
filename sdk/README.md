@@ -31,50 +31,54 @@ cargo test --workspace --all-targets
 cargo run -p openbitdo -- --mock
 ```
 
-## Beginner-first behavior
-- launch with no subcommands
-- if no device is connected, OpenBitdo starts in a waiting screen with `Refresh`, `Help`, and `Quit`
-- if one device is connected, it is auto-selected and ready for action
-- choose `Recommended Update` or `Diagnose` from large clickable actions
-- for JP108 devices (`0x5209`/`0x520a`), `Recommended Update` enters a dedicated-button wizard:
-  - edit `A/B/K1-K8`
-  - backup + apply
-  - guided button test
-- for Ultimate2 devices (`0x6012`/`0x6013`), `Recommended Update` enters a core-profile wizard:
-  - choose slot (`Slot1/2/3`)
-  - set mode
-  - edit RC mapping slots (`A/B/K1-K8`) with known controller-button targets
-  - view/edit L2/R2 analog values when capability supports writes
-  - backup + apply
-  - guided button test
-- firmware path defaults to verified recommended download; local file fallback is prompted if unavailable
-- update transfer requires one plain-language `I Understand` confirmation
-- detect-only PIDs stay read/diagnostic-only with a clear block reason
-- mouse support:
-  - left click for primary actions
-  - right click on device rows for context menu actions
-  - scroll wheel to navigate device list/detail panes
-- support reports are TOML only
-  - beginner mode: `failure_only` (default) or `always`
-  - advanced mode: `failure_only`, `always`, or `off` (with warning)
-- advanced mode is toggled from About (`t` or click) and persisted to OS config TOML
-- advanced report hotkeys after a failure report exists:
-  - `c` copy report path
-  - `o` open report file
-  - `f` open report folder
-- open About from home (`a` key or click `About`) to view:
-  - app version
-  - git commit short and full hash
-  - build date (UTC)
-  - compile target triple
-  - runtime OS/arch
-  - firmware signing-key fingerprint (short with full-view toggle, plus next-key short)
+## CLI surface
+- `openbitdo [--mock]`: interactive dashboard flow (mouse-primary, minimal keyboard).
+
+## Interactive behavior (`openbitdo`)
+- dashboard starts with:
+  - searchable device list (left)
+  - quick actions (center)
+  - persistent event panel (right)
+- primary quick actions:
+  - `Refresh`
+  - `Diagnose`
+  - `Recommended Update`
+  - `Edit Mapping` (capability-gated)
+  - `Settings`
+  - `Quit`
+- firmware transfer path:
+  - preflight generation
+  - explicit confirm/cancel action
+  - updating progress and final result screen
+- mapping editors are draft-first with:
+  - apply
+  - undo
+  - reset
+  - restore backup
+- recovery lock behavior is preserved when rollback fails.
+
+## Headless library API
+- headless automation remains available as a Rust API in `bitdo_tui`:
+  - `run_headless`
+  - `RunLaunchOptions`
+  - `HeadlessOutputMode`
+- `openbitdo` CLI does not expose a headless command surface.
+
+## Config schema (v2)
+- persisted fields:
+  - `schema_version`
+  - `advanced_mode`
+  - `report_save_mode`
+  - `device_filter_text`
+  - `dashboard_layout_mode`
+  - `last_panel_focus`
+- v1 files are read with compatibility defaults and normalized to v2 fields at load time.
 
 ## Packaging
 ```bash
-./scripts/package-linux.sh v0.0.1-rc.1 x86_64
-./scripts/package-linux.sh v0.0.1-rc.1 aarch64
-./scripts/package-macos.sh v0.0.1-rc.1 arm64 aarch64-apple-darwin
+./scripts/package-linux.sh v0.0.1-rc.2 x86_64
+./scripts/package-linux.sh v0.0.1-rc.2 aarch64
+./scripts/package-macos.sh v0.0.1-rc.2 arm64 aarch64-apple-darwin
 ```
 
 Packaging outputs use:
@@ -87,7 +91,7 @@ Packaging outputs use:
 - CI checks remain in `.github/workflows/ci.yml`.
 - Tag-based release workflow is in `.github/workflows/release.yml`.
 - Release tags must originate from `main`.
-- `v0.0.1-rc.1` style tags publish GitHub pre-releases.
+- `v0.0.1-rc.2` style tags publish GitHub pre-releases.
 - Release notes are sourced from `/Users/brooklyn/data/8bitdo/cleanroom/CHANGELOG.md`.
 - Package-manager publish runs only after release assets are published.
 
@@ -102,15 +106,13 @@ Packaging outputs use:
 - Homebrew install path for public RC:
   - `brew tap bybrooklyn/openbitdo`
   - `brew install openbitdo`
-- Homebrew Core inclusion is not required for `v0.0.1-rc.1`.
+- Homebrew Core inclusion is not required for `v0.0.1-rc.2`.
 - Homebrew formula scaffold: `/Users/brooklyn/data/8bitdo/cleanroom/packaging/homebrew/Formula/openbitdo.rb`
 - Homebrew tap sync script (disabled by default): `/Users/brooklyn/data/8bitdo/cleanroom/packaging/homebrew/sync_tap.sh`
 - Tap repository: `bybrooklyn/homebrew-openbitdo`
 - AUR package sources:
-  - `/Users/brooklyn/data/8bitdo/cleanroom/packaging/aur/openbitdo`
   - `/Users/brooklyn/data/8bitdo/cleanroom/packaging/aur/openbitdo-bin`
 - AUR package names:
-  - `openbitdo`
   - `openbitdo-bin`
 - Release metadata renderer:
   - `/Users/brooklyn/data/8bitdo/cleanroom/packaging/scripts/render_release_metadata.sh`
@@ -121,7 +123,7 @@ Packaging outputs use:
   - `release.yml` renders checksum-pinned formula and runs `sync_tap.sh`
   - gated by `HOMEBREW_PUBLISH_ENABLED=1`
 - macOS `.pkg` caveat:
-  - unsigned/ad-hoc is accepted for RC
+  - unsigned/ad-hoc is accepted for `v0.0.1-rc.2`
   - notarization required for `v0.1.0`
 
 ## CI Gates

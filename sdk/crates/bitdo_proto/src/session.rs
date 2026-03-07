@@ -88,8 +88,14 @@ pub struct DiagCommandStatus {
     pub confidence: EvidenceConfidence,
     pub is_experimental: bool,
     pub severity: DiagSeverity,
+    pub attempts: u8,
+    pub validator: String,
+    pub response_status: ResponseStatus,
+    pub bytes_written: usize,
+    pub bytes_read: usize,
     pub error_code: Option<BitdoErrorCode>,
     pub detail: String,
+    pub parsed_facts: BTreeMap<String, u32>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -210,60 +216,12 @@ impl<T: Transport> DeviceSession<T> {
     }
 
     pub fn diag_probe(&mut self) -> DiagProbeResult {
-        let target_pid = self.target.pid;
-        let checks_to_run = [
-            CommandId::GetPid,
-            CommandId::GetReportRevision,
-            CommandId::GetMode,
-            CommandId::GetControllerVersion,
-            // Inferred safe reads are intentionally included in diagnostics so
-            // users always see signal quality, but results are labeled
-            // experimental and only strict safety conditions escalate.
-            CommandId::GetSuperButton,
-            CommandId::ReadProfile,
-        ]
-        .iter()
-        .filter_map(|cmd| {
-            let row = find_command(*cmd)?;
-            if row.safety_class != SafetyClass::SafeRead {
-                return None;
-            }
-            if !command_applies_to_pid(row, target_pid) {
-                return None;
-            }
-            Some((*cmd, row.runtime_policy(), row.evidence_confidence()))
-        })
-        .collect::<Vec<_>>();
-
+        let checks_to_run = self.diag_commands_to_run();
         let mut checks = Vec::with_capacity(checks_to_run.len());
-        for (cmd, runtime_policy, confidence) in checks_to_run {
-            match self.send_command(cmd, None) {
-                Ok(_) => checks.push(DiagCommandStatus {
-                    command: cmd,
-                    ok: true,
-                    confidence,
-                    is_experimental: runtime_policy == CommandRuntimePolicy::ExperimentalGate,
-                    severity: DiagSeverity::Ok,
-                    error_code: None,
-                    detail: "ok".to_owned(),
-                }),
-                Err(err) => checks.push(DiagCommandStatus {
-                    command: cmd,
-                    ok: false,
-                    confidence,
-                    is_experimental: runtime_policy == CommandRuntimePolicy::ExperimentalGate,
-                    severity: classify_diag_failure(
-                        cmd,
-                        runtime_policy,
-                        confidence,
-                        err.code(),
-                        self.target.pid,
-                    ),
-                    error_code: Some(err.code()),
-                    detail: err.to_string(),
-                }),
-            }
+        for (command, runtime_policy, confidence) in checks_to_run {
+            checks.push(self.run_diag_check(command, runtime_policy, confidence));
         }
+        let transport_ready = checks.iter().any(|check| check.ok);
 
         DiagProbeResult {
             target: self.target,
@@ -273,8 +231,190 @@ impl<T: Transport> DeviceSession<T> {
             protocol_family: self.profile.protocol_family,
             capability: self.profile.capability,
             evidence: self.profile.evidence,
-            transport_ready: true,
+            transport_ready,
             command_checks: checks,
+        }
+    }
+
+    fn diag_commands_to_run(&self) -> Vec<(CommandId, CommandRuntimePolicy, EvidenceConfidence)> {
+        CommandId::all()
+            .iter()
+            .filter_map(|command| {
+                let row = find_command(*command)?;
+                if row.safety_class != SafetyClass::SafeRead {
+                    return None;
+                }
+                if !command_applies_to_pid(row, self.target.pid) {
+                    return None;
+                }
+                if !is_command_allowed_by_family(self.profile.protocol_family, *command)
+                    || !is_command_allowed_by_capability(self.profile.capability, *command)
+                {
+                    return None;
+                }
+                if self.profile.support_tier == SupportTier::CandidateReadOnly
+                    && !is_command_allowed_for_candidate_pid(
+                        self.target.pid,
+                        *command,
+                        row.safety_class,
+                    )
+                {
+                    return None;
+                }
+
+                Some((*command, row.runtime_policy(), row.evidence_confidence()))
+            })
+            .collect()
+    }
+
+    fn run_diag_check(
+        &mut self,
+        command: CommandId,
+        runtime_policy: CommandRuntimePolicy,
+        confidence: EvidenceConfidence,
+    ) -> DiagCommandStatus {
+        if command == CommandId::GetMode {
+            return self.run_diag_mode_check(runtime_policy, confidence);
+        }
+
+        match self.send_command(command, None) {
+            Ok(response) => {
+                let detail = diag_success_detail(command, &response.parsed_fields);
+                self.diag_success_status(
+                    command,
+                    runtime_policy,
+                    confidence,
+                    response.parsed_fields,
+                    self.last_execution.clone(),
+                    detail,
+                )
+            }
+            Err(err) => self.diag_failure_status(
+                command,
+                runtime_policy,
+                confidence,
+                err,
+                self.last_execution.clone(),
+                None,
+            ),
+        }
+    }
+
+    fn run_diag_mode_check(
+        &mut self,
+        runtime_policy: CommandRuntimePolicy,
+        confidence: EvidenceConfidence,
+    ) -> DiagCommandStatus {
+        match self.send_command(CommandId::GetMode, None) {
+            Ok(response) => {
+                let detail = diag_success_detail(CommandId::GetMode, &response.parsed_fields);
+                self.diag_success_status(
+                    CommandId::GetMode,
+                    runtime_policy,
+                    confidence,
+                    response.parsed_fields,
+                    self.last_execution.clone(),
+                    detail,
+                )
+            }
+            Err(primary_err) => {
+                let primary_detail = primary_err.to_string();
+                let primary_execution = self.last_execution.clone();
+                match self.send_command(CommandId::GetModeAlt, None) {
+                    Ok(response) => self.diag_success_status(
+                        CommandId::GetMode,
+                        runtime_policy,
+                        confidence,
+                        response.parsed_fields,
+                        self.last_execution.clone().or(primary_execution),
+                        format!("ok via GetModeAlt fallback ({primary_detail})"),
+                    ),
+                    Err(fallback_err) => self.diag_failure_status(
+                        CommandId::GetMode,
+                        runtime_policy,
+                        confidence,
+                        fallback_err,
+                        self.last_execution.clone().or(primary_execution),
+                        Some(format!(
+                            "GetMode failed ({primary_detail}); GetModeAlt failed"
+                        )),
+                    ),
+                }
+            }
+        }
+    }
+
+    fn diag_success_status(
+        &self,
+        command: CommandId,
+        runtime_policy: CommandRuntimePolicy,
+        confidence: EvidenceConfidence,
+        parsed_facts: BTreeMap<String, u32>,
+        execution: Option<CommandExecutionReport>,
+        detail: String,
+    ) -> DiagCommandStatus {
+        let metadata = execution.as_ref();
+        DiagCommandStatus {
+            command,
+            ok: true,
+            confidence,
+            is_experimental: runtime_policy == CommandRuntimePolicy::ExperimentalGate,
+            severity: DiagSeverity::Ok,
+            attempts: metadata.map(|report| report.attempts).unwrap_or(0),
+            validator: metadata
+                .map(|report| report.validator.clone())
+                .unwrap_or_else(|| "unknown".to_owned()),
+            response_status: metadata
+                .map(|report| report.status.clone())
+                .unwrap_or(ResponseStatus::Ok),
+            bytes_written: metadata.map(|report| report.bytes_written).unwrap_or(0),
+            bytes_read: metadata.map(|report| report.bytes_read).unwrap_or(0),
+            error_code: None,
+            detail,
+            parsed_facts,
+        }
+    }
+
+    fn diag_failure_status(
+        &self,
+        command: CommandId,
+        runtime_policy: CommandRuntimePolicy,
+        confidence: EvidenceConfidence,
+        err: BitdoError,
+        execution: Option<CommandExecutionReport>,
+        detail_prefix: Option<String>,
+    ) -> DiagCommandStatus {
+        let metadata = execution.as_ref();
+        let error_code = err.code();
+        let detail = if let Some(prefix) = detail_prefix {
+            format!("{prefix} ({err})")
+        } else {
+            err.to_string()
+        };
+        DiagCommandStatus {
+            command,
+            ok: false,
+            confidence,
+            is_experimental: runtime_policy == CommandRuntimePolicy::ExperimentalGate,
+            severity: classify_diag_failure(
+                command,
+                runtime_policy,
+                confidence,
+                error_code,
+                self.target.pid,
+            ),
+            attempts: metadata.map(|report| report.attempts).unwrap_or(0),
+            validator: metadata
+                .map(|report| report.validator.clone())
+                .unwrap_or_else(|| "unknown".to_owned()),
+            response_status: metadata
+                .map(|report| report.status.clone())
+                .unwrap_or(ResponseStatus::Malformed),
+            bytes_written: metadata.map(|report| report.bytes_written).unwrap_or(0),
+            bytes_read: metadata.map(|report| report.bytes_read).unwrap_or(0),
+            error_code: Some(error_code),
+            detail,
+            parsed_facts: BTreeMap::new(),
         }
     }
 
@@ -1015,6 +1155,9 @@ fn parse_fields(command: CommandId, response: &[u8]) -> BTreeMap<String, u32> {
             let pid = u16::from_le_bytes([response[22], response[23]]);
             parsed.insert("detected_pid".to_owned(), pid as u32);
         }
+        CommandId::GetReportRevision if response.len() >= 6 => {
+            parsed.insert("revision".to_owned(), response[5] as u32);
+        }
         CommandId::GetMode | CommandId::GetModeAlt if response.len() >= 6 => {
             parsed.insert("mode".to_owned(), response[5] as u32);
         }
@@ -1046,4 +1189,41 @@ fn parse_indexed_u16_table(raw: &[u8], expected_items: usize) -> Vec<(u8, u16)> 
     }
 
     out
+}
+
+fn diag_success_detail(command: CommandId, parsed_facts: &BTreeMap<String, u32>) -> String {
+    match command {
+        CommandId::GetPid => parsed_facts
+            .get("detected_pid")
+            .map(|pid| format!("detected pid {pid:#06x}"))
+            .unwrap_or_else(|| "ok".to_owned()),
+        CommandId::GetReportRevision => parsed_facts
+            .get("revision")
+            .map(|revision| format!("report revision {revision}"))
+            .unwrap_or_else(|| "ok".to_owned()),
+        CommandId::GetMode | CommandId::GetModeAlt => parsed_facts
+            .get("mode")
+            .map(|mode| format!("mode {mode}"))
+            .unwrap_or_else(|| "ok".to_owned()),
+        CommandId::GetControllerVersion | CommandId::Version => {
+            let version = parsed_facts.get("version_x100").copied();
+            let beta = parsed_facts.get("beta").copied();
+            match (version, beta) {
+                (Some(version_x100), Some(beta)) => format!(
+                    "firmware {}.{:02} beta={beta}",
+                    version_x100 / 100,
+                    version_x100 % 100
+                ),
+                (Some(version_x100), None) => {
+                    format!("firmware {}.{:02}", version_x100 / 100, version_x100 % 100)
+                }
+                _ => "ok".to_owned(),
+            }
+        }
+        CommandId::U2GetCurrentSlot => parsed_facts
+            .get("slot")
+            .map(|slot| format!("current slot {slot}"))
+            .unwrap_or_else(|| "ok".to_owned()),
+        _ => "ok".to_owned(),
+    }
 }

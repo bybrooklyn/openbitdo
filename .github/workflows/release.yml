@@ -297,8 +297,6 @@ jobs:
             --pattern "openbitdo-${GITHUB_REF_NAME}-linux-aarch64.tar.gz" \
             --pattern "openbitdo-${GITHUB_REF_NAME}-macos-arm64.tar.gz" \
             --dir /tmp/release-input
-          gh api "repos/${GITHUB_REPOSITORY}/tarball/${GITHUB_REF_NAME}" \
-            > "/tmp/release-input/openbitdo-${GITHUB_REF_NAME}-source.tar.gz"
           bash packaging/scripts/render_release_metadata.sh \
             "${GITHUB_REF_NAME}" \
             "$GITHUB_REPOSITORY" \
