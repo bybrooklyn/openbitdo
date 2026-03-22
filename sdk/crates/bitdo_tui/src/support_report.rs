@@ -78,12 +78,7 @@ pub(crate) async fn persist_support_report(
     tokio::fs::create_dir_all(&report_dir).await?;
 
     let token = report_subject_token(device);
-    let file_name = format!(
-        "{}-{}-{}.toml",
-        sanitize_token(operation),
-        now.format("%Y%m%d-%H%M%S"),
-        token
-    );
+    let file_name = support_report_file_name(now, operation, &token);
     let path = report_dir.join(file_name);
 
     let body = toml::to_string_pretty(&report)
@@ -130,6 +125,16 @@ fn sanitize_token(value: &str) -> String {
     }
 
     out.trim_matches('_').to_owned()
+}
+
+fn support_report_file_name(now: chrono::DateTime<Utc>, operation: &str, token: &str) -> String {
+    format!(
+        "{}-{}-{:09}-{}.toml",
+        sanitize_token(operation),
+        now.format("%Y%m%d-%H%M%S"),
+        now.timestamp_subsec_nanos(),
+        token
+    )
 }
 
 fn default_report_directory() -> PathBuf {
@@ -214,4 +219,27 @@ fn home_directory() -> PathBuf {
     std::env::var_os("HOME")
         .map(PathBuf::from)
         .unwrap_or_else(std::env::temp_dir)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::{TimeZone, Timelike, Utc};
+
+    #[test]
+    fn support_report_file_names_do_not_collide_within_same_second() {
+        let first = Utc
+            .with_ymd_and_hms(2026, 3, 20, 12, 34, 56)
+            .single()
+            .expect("valid datetime")
+            .with_nanosecond(123)
+            .expect("valid nanos");
+        let second = first.with_nanosecond(456).expect("valid nanos");
+
+        let first_name = support_report_file_name(first, "diag-probe", "2dc86012");
+        let second_name = support_report_file_name(second, "diag-probe", "2dc86012");
+
+        assert_ne!(first_name, second_name);
+        assert!(first_name.ends_with(".toml"));
+    }
 }

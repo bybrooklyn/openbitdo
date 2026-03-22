@@ -34,6 +34,21 @@ async fn quick_action_matrix_blocks_update_for_read_only() {
         .iter()
         .find(|a| a.action == QuickAction::RecommendedUpdate)
         .expect("update action");
+    assert!(!update.enabled);
+
+    let mut state = AppState::new(&UiLaunchOptions {
+        allow_unsafe: true,
+        brick_risk_ack: true,
+        ..UiLaunchOptions::default()
+    });
+    let devices = core.list_devices().await.expect("devices");
+    let _ = reduce(&mut state, AppEvent::DevicesLoaded(devices));
+
+    let update = state
+        .quick_actions
+        .iter()
+        .find(|a| a.action == QuickAction::RecommendedUpdate)
+        .expect("update action");
     assert!(update.enabled);
 
     let readonly_idx = state
@@ -52,9 +67,31 @@ async fn quick_action_matrix_blocks_update_for_read_only() {
     assert!(!update.enabled);
 }
 
+#[tokio::test]
+async fn toggling_advanced_mode_updates_core_runtime() {
+    let core = bitdo_app_core::OpenBitdoCore::new(OpenBitdoCoreConfig {
+        mock_mode: true,
+        ..Default::default()
+    });
+    let mut state = AppState::new(&UiLaunchOptions::default());
+
+    assert!(!core.advanced_mode());
+    drive(&core, &mut state, AppEvent::ToggleAdvancedMode).await;
+    assert!(state.advanced_mode);
+    assert!(core.advanced_mode());
+
+    drive(&core, &mut state, AppEvent::ToggleAdvancedMode).await;
+    assert!(!state.advanced_mode);
+    assert!(!core.advanced_mode());
+}
+
 #[test]
 fn mapping_draft_undo_and_reset() {
-    let mut state = AppState::new(&UiLaunchOptions::default());
+    let mut state = AppState::new(&UiLaunchOptions {
+        allow_unsafe: true,
+        brick_risk_ack: true,
+        ..UiLaunchOptions::default()
+    });
     state.screen = Screen::MappingEditor;
     state.mapping_draft_state = Some(MappingDraftState::Jp108 {
         loaded: vec![DedicatedButtonMapping {
@@ -135,7 +172,11 @@ async fn integration_refresh_select_preflight_cancel_path() {
         ..Default::default()
     });
 
-    let mut state = AppState::new(&UiLaunchOptions::default());
+    let mut state = AppState::new(&UiLaunchOptions {
+        allow_unsafe: true,
+        brick_risk_ack: true,
+        ..UiLaunchOptions::default()
+    });
     drive(&core, &mut state, AppEvent::Init).await;
 
     assert!(!state.devices.is_empty());

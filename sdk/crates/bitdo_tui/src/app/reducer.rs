@@ -119,6 +119,9 @@ pub fn reduce(state: &mut AppState, event: AppEvent) -> Vec<Effect> {
             if !state.advanced_mode && state.report_save_mode == crate::ReportSaveMode::Off {
                 state.report_save_mode = crate::ReportSaveMode::FailureOnly;
             }
+            effects.push(Effect::SetAdvancedMode {
+                enabled: state.advanced_mode,
+            });
             state.append_event(
                 EventLevel::Info,
                 if state.advanced_mode {
@@ -536,8 +539,8 @@ fn handle_action(state: &mut AppState, action: QuickAction) -> Vec<Effect> {
                     effects.push(Effect::PreparePreflight {
                         vid_pid,
                         firmware_path_override: state.firmware_path_override.clone(),
-                        allow_unsafe: true,
-                        brick_risk_ack: true,
+                        allow_unsafe: state.allow_unsafe,
+                        brick_risk_ack: state.brick_risk_ack,
                         experimental: state.experimental,
                         chunk_size: state.chunk_size,
                     });
@@ -560,7 +563,7 @@ fn handle_action(state: &mut AppState, action: QuickAction) -> Vec<Effect> {
                     if let Some(plan) = task.plan.as_ref() {
                         effects.push(Effect::StartFirmware {
                             session_id: plan.session_id.clone(),
-                            acknowledged_risk: true,
+                            acknowledged_risk: state.allow_unsafe && state.brick_risk_ack,
                         });
                     }
                 }
@@ -703,8 +706,8 @@ fn handle_action(state: &mut AppState, action: QuickAction) -> Vec<Effect> {
                     effects.push(Effect::PreparePreflight {
                         vid_pid,
                         firmware_path_override: state.firmware_path_override.clone(),
-                        allow_unsafe: true,
-                        brick_risk_ack: true,
+                        allow_unsafe: state.allow_unsafe,
+                        brick_risk_ack: state.brick_risk_ack,
                         experimental: state.experimental,
                         chunk_size: state.chunk_size,
                     });

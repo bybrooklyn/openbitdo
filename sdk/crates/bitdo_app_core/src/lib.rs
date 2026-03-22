@@ -2,7 +2,7 @@ use base64::Engine;
 use bitdo_proto::{
     device_profile_for, enumerate_hid_devices, find_command, BitdoErrorCode, CommandId,
     DeviceSession, DiagProbeResult, DiagSeverity, HidTransport, PidCapability, ProtocolFamily,
-    ResponseStatus, SessionConfig, SupportEvidence, SupportLevel, SupportTier, VidPid,
+    ResponseStatus, SessionConfig, SupportEvidence, SupportLevel, SupportTier, Transport, VidPid,
 };
 use chrono::{DateTime, Utc};
 use ed25519_dalek::{Signature, Verifier, VerifyingKey};
@@ -945,14 +945,10 @@ impl OpenBitdoCore {
         let manifest: FirmwareManifest = toml::from_str(&manifest_raw)
             .map_err(|err| AppCoreError::Manifest(format!("invalid manifest TOML: {err}")))?;
 
-        let profile = device_profile_for(target);
         let artifact = manifest
-            .recommended_for(target, profile.protocol_family)
+            .recommended_for(target)
             .ok_or_else(|| {
-                AppCoreError::Download(format!(
-                    "no stable firmware artifact for pid={:#06x} family={:?}",
-                    target.pid, profile.protocol_family
-                ))
+                AppCoreError::Download(format!("no stable firmware artifact for pid={:#06x}", target.pid))
             })?;
 
         let artifact_bytes = self
@@ -1134,11 +1130,12 @@ impl OpenBitdoCore {
         }
 
         let interval = self.config.progress_interval_ms;
+        let mock_mode = self.config.mock_mode;
         let plan = handle.plan.clone();
         let session_id = plan.session_id.clone();
         let sessions = self.sessions.clone();
         tokio::spawn(async move {
-            run_transfer_task(sessions, handle, interval, session_id).await;
+            run_transfer_task(sessions, handle, interval, session_id, mock_mode).await;
         });
 
         Ok(plan)
@@ -1316,10 +1313,11 @@ async fn verify_artifact_signature(
 }
 
 async fn run_transfer_task(
-    sessions: Arc<RwLock<HashMap<String, Arc<FirmwareSessionHandle>>>>,
+    _sessions: Arc<RwLock<HashMap<String, Arc<FirmwareSessionHandle>>>>,
     handle: Arc<FirmwareSessionHandle>,
     interval_ms: u64,
-    session_id: FirmwareUpdateSessionId,
+    _session_id: FirmwareUpdateSessionId,
+    mock_mode: bool,
 ) {
     let bytes = match tokio::fs::read(&handle.request.firmware_path).await {
         Ok(bytes) => bytes,
@@ -1327,11 +1325,38 @@ async fn run_transfer_task(
             finalize_failure(
                 &handle,
                 BitdoErrorCode::InvalidInput,
+                0,
                 format!("Failed to read firmware image: {err}"),
             )
             .await;
-            let mut map = sessions.write().await;
-            map.remove(&session_id.0);
+            return;
+        }
+    };
+
+    if mock_mode {
+        run_mock_transfer_task(&handle, interval_ms, &bytes).await;
+        return;
+    }
+
+    let mut session = match DeviceSession::new(
+        HidTransport::new(),
+        handle.request.vid_pid,
+        SessionConfig {
+            allow_unsafe: true,
+            brick_risk_ack: true,
+            experimental: handle.request.experimental,
+            ..Default::default()
+        },
+    ) {
+        Ok(session) => session,
+        Err(err) => {
+            finalize_failure(
+                &handle,
+                err.code(),
+                0,
+                format!("Failed to open device session: {err}"),
+            )
+            .await;
             return;
         }
     };
@@ -1339,16 +1364,38 @@ async fn run_transfer_task(
     let mut chunks_sent = 0usize;
     let total_chunks = handle.plan.chunks_total.max(1);
 
-    for (idx, _chunk) in bytes.chunks(handle.plan.chunk_size).enumerate() {
+    emit_event(&handle, "bootloader", 0, "Entering bootloader", false).await;
+    if let Err(err) = session.enter_bootloader() {
+        finalize_failure(
+            &handle,
+            err.code(),
+            0,
+            format!("Failed to enter bootloader: {err}"),
+        )
+        .await;
+        let _ = session.close();
+        return;
+    }
+    for (idx, chunk) in bytes.chunks(handle.plan.chunk_size).enumerate() {
         {
             let runtime = handle.runtime.lock().await;
             if runtime.cancel_requested {
                 drop(runtime);
-                finalize_cancelled(&handle, chunks_sent).await;
-                let mut map = sessions.write().await;
-                map.remove(&session_id.0);
+                cancel_running_transfer(&handle, &mut session, chunks_sent).await;
+                let _ = session.close();
                 return;
             }
+        }
+
+        if let Err(err) = session.send_firmware_chunk(chunk) {
+            let message = firmware_failure_message(
+                &mut session,
+                true,
+                format!("Failed to transfer chunk {}: {err}", idx + 1),
+            );
+            finalize_failure(&handle, err.code(), chunks_sent, message).await;
+            let _ = session.close();
+            return;
         }
 
         chunks_sent = idx + 1;
@@ -1364,6 +1411,32 @@ async fn run_transfer_task(
         sleep(Duration::from_millis(interval_ms)).await;
     }
 
+    emit_event(&handle, "commit", 99, "Committing firmware", false).await;
+    if let Err(err) = session.firmware_commit() {
+        let message = firmware_failure_message(
+            &mut session,
+            true,
+            format!("Firmware commit failed: {err}"),
+        );
+        finalize_failure(&handle, err.code(), chunks_sent, message).await;
+        let _ = session.close();
+        return;
+    }
+
+    emit_event(&handle, "exit", 99, "Leaving bootloader", false).await;
+    if let Err(err) = session.exit_bootloader() {
+        finalize_failure(
+            &handle,
+            err.code(),
+            chunks_sent,
+            format!("Firmware applied but bootloader exit failed: {err}"),
+        )
+        .await;
+        let _ = session.close();
+        return;
+    }
+
+    let _ = session.close();
     emit_event(&handle, "verify", 99, "Verifying firmware", false).await;
     sleep(Duration::from_millis(interval_ms)).await;
 
@@ -1388,9 +1461,65 @@ async fn run_transfer_task(
     emit_event(&handle, "completed", 100, "Firmware update completed", true).await;
 }
 
+async fn run_mock_transfer_task(
+    handle: &Arc<FirmwareSessionHandle>,
+    interval_ms: u64,
+    bytes: &[u8],
+) {
+    let mut chunks_sent = 0usize;
+    let total_chunks = handle.plan.chunks_total.max(1);
+
+    for (idx, _chunk) in bytes.chunks(handle.plan.chunk_size).enumerate() {
+        {
+            let runtime = handle.runtime.lock().await;
+            if runtime.cancel_requested {
+                drop(runtime);
+                finalize_cancelled(handle, chunks_sent).await;
+                return;
+            }
+        }
+
+        chunks_sent = idx + 1;
+        let progress = ((chunks_sent * 100) / total_chunks) as u8;
+        emit_event(
+            handle,
+            "transfer",
+            progress,
+            format!("Transferred chunk {chunks_sent}/{total_chunks}"),
+            false,
+        )
+        .await;
+        sleep(Duration::from_millis(interval_ms)).await;
+    }
+
+    emit_event(handle, "verify", 99, "Verifying firmware", false).await;
+    sleep(Duration::from_millis(interval_ms)).await;
+
+    {
+        let mut runtime = handle.runtime.lock().await;
+        runtime.state = FirmwareSessionState::Completed;
+        runtime.completed_at = Some(Utc::now());
+        let report = FirmwareFinalReport {
+            session_id: handle.plan.session_id.clone(),
+            status: FirmwareOutcome::Completed,
+            started_at: runtime.started_at,
+            completed_at: runtime.completed_at,
+            bytes_total: handle.plan.bytes_total,
+            chunks_total: handle.plan.chunks_total,
+            chunks_sent,
+            error_code: None,
+            message: "Firmware update completed".to_owned(),
+        };
+        runtime.report = Some(report);
+    }
+
+    emit_event(handle, "completed", 100, "Firmware update completed", true).await;
+}
+
 async fn finalize_failure(
     handle: &Arc<FirmwareSessionHandle>,
     code: BitdoErrorCode,
+    chunks_sent: usize,
     message: String,
 ) {
     {
@@ -1404,13 +1533,56 @@ async fn finalize_failure(
             completed_at: runtime.completed_at,
             bytes_total: handle.plan.bytes_total,
             chunks_total: handle.plan.chunks_total,
-            chunks_sent: 0,
+            chunks_sent,
             error_code: Some(code),
             message: message.clone(),
         };
         runtime.report = Some(report);
     }
     emit_event(handle, "failed", 100, message, true).await;
+}
+
+async fn cancel_running_transfer<T: Transport>(
+    handle: &Arc<FirmwareSessionHandle>,
+    session: &mut DeviceSession<T>,
+    chunks_sent: usize,
+) {
+    emit_event(
+        handle,
+        "cancel_recovery",
+        100,
+        "Cancelling transfer and leaving bootloader",
+        false,
+    )
+    .await;
+
+    match session.exit_bootloader() {
+        Ok(()) => finalize_cancelled(handle, chunks_sent).await,
+        Err(err) => {
+            finalize_failure(
+                handle,
+                err.code(),
+                chunks_sent,
+                format!("Firmware update cancelled but bootloader exit failed: {err}"),
+            )
+            .await;
+        }
+    }
+}
+
+fn firmware_failure_message(
+    session: &mut DeviceSession<HidTransport>,
+    entered_bootloader: bool,
+    base: String,
+) -> String {
+    if !entered_bootloader {
+        return base;
+    }
+
+    match session.exit_bootloader() {
+        Ok(()) => base,
+        Err(exit_err) => format!("{base}; recovery exit failed: {exit_err}"),
+    }
 }
 
 async fn finalize_cancelled(handle: &Arc<FirmwareSessionHandle>, chunks_sent: usize) {
@@ -1535,20 +1707,13 @@ pub struct FirmwareManifest {
 }
 
 impl FirmwareManifest {
-    fn recommended_for(&self, target: VidPid, family: ProtocolFamily) -> Option<&FirmwareArtifact> {
+    fn recommended_for(&self, target: VidPid) -> Option<&FirmwareArtifact> {
         self.artifacts
             .iter()
             .find(|entry| {
                 entry.channel.eq_ignore_ascii_case("stable")
                     && entry.vid == target.vid
                     && entry.pid == target.pid
-            })
-            .or_else(|| {
-                self.artifacts.iter().find(|entry| {
-                    entry.channel.eq_ignore_ascii_case("stable")
-                        && entry.vid == target.vid
-                        && entry.protocol_family == family
-                })
             })
     }
 }
@@ -2242,6 +2407,125 @@ mod tests {
             .expect("guided test");
         assert!(result.passed);
         assert!(result.guidance.contains("JP108"));
+    }
+
+    #[test]
+    fn manifest_requires_exact_pid_match() {
+        let manifest = FirmwareManifest {
+            version: 1,
+            artifacts: vec![FirmwareArtifact {
+                vid: 0x2dc8,
+                pid: 0x6013,
+                protocol_family: ProtocolFamily::DInput,
+                version: "1.2.3".to_owned(),
+                channel: "stable".to_owned(),
+                url: "https://example.invalid/fw.bin".to_owned(),
+                sha256: "abc".to_owned(),
+                signature: ManifestSignature {
+                    algorithm: "ed25519".to_owned(),
+                    url: "https://example.invalid/fw.sig".to_owned(),
+                },
+            }],
+        };
+
+        assert!(manifest.recommended_for(VidPid::new(0x2dc8, 0x6012)).is_none());
+    }
+
+    #[tokio::test]
+    async fn cancel_running_firmware_keeps_final_report_available() {
+        let core = OpenBitdoCore::new(OpenBitdoCoreConfig {
+            mock_mode: true,
+            default_chunk_size: 16,
+            progress_interval_ms: 20,
+            ..Default::default()
+        });
+        let path = std::env::temp_dir().join("openbitdo-cancel-running.bin");
+        tokio::fs::write(&path, vec![0xCC; 256]).await.expect("write");
+
+        let preflight = core
+            .preflight_firmware(make_req(path.clone(), 0x6009))
+            .await
+            .expect("preflight");
+        let plan = preflight.plan.expect("plan");
+
+        core.start_firmware(FirmwareStartRequest {
+            session_id: plan.session_id.clone(),
+        })
+        .await
+        .expect("start");
+        core.confirm_firmware(FirmwareConfirmRequest {
+            session_id: plan.session_id.clone(),
+            acknowledged_risk: true,
+        })
+        .await
+        .expect("confirm");
+
+        sleep(Duration::from_millis(25)).await;
+
+        let report = core
+            .cancel_firmware(FirmwareCancelRequest {
+                session_id: plan.session_id.clone(),
+            })
+            .await
+            .expect("cancel");
+        assert_eq!(report.status, FirmwareOutcome::Cancelled);
+
+        let saved = core
+            .firmware_report(&plan.session_id.0)
+            .await
+            .expect("report lookup")
+            .expect("report remains available");
+        assert_eq!(saved.status, FirmwareOutcome::Cancelled);
+
+        let _ = tokio::fs::remove_file(path).await;
+    }
+
+    #[tokio::test]
+    async fn cancel_running_transfer_exits_bootloader_before_reporting_cancelled() {
+        let (sender, _) = broadcast::channel(8);
+        let handle = Arc::new(FirmwareSessionHandle {
+            request: make_req(std::env::temp_dir().join("unused.bin"), 0x6012),
+            plan: FirmwareUpdatePlan {
+                session_id: FirmwareUpdateSessionId("cancel-u2".to_owned()),
+                chunk_size: 32,
+                bytes_total: 128,
+                chunks_total: 4,
+                expected_seconds: 1,
+                warnings: vec![],
+                image_sha256: "abc".to_owned(),
+                current_version: "1.0".to_owned(),
+                target_version: "1.1".to_owned(),
+            },
+            sender,
+            runtime: Mutex::new(FirmwareSessionRuntime {
+                state: FirmwareSessionState::Running,
+                sequence: 0,
+                cancel_requested: true,
+                report: None,
+                started_at: None,
+                completed_at: None,
+            }),
+        });
+        let mut session = DeviceSession::new(
+            bitdo_proto::MockTransport::default(),
+            VidPid::new(0x2dc8, 0x6012),
+            SessionConfig {
+                allow_unsafe: true,
+                brick_risk_ack: true,
+                ..Default::default()
+            },
+        )
+        .expect("session init");
+
+        cancel_running_transfer(&handle, &mut session, 2).await;
+
+        let runtime = handle.runtime.lock().await;
+        let report = runtime.report.clone().expect("cancel report");
+        assert_eq!(report.status, FirmwareOutcome::Cancelled);
+        drop(runtime);
+
+        let transport = session.into_transport();
+        assert_eq!(transport.writes(), &[vec![0x05, 0x00, 0x51, 0x01, 0x00, 0x00]]);
     }
 
     #[test]

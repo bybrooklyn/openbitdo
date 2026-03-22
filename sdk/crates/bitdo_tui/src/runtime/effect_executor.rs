@@ -252,6 +252,10 @@ pub async fn execute_effect(
                 Err(err) => vec![AppEvent::UpdateFailed(err.to_string())],
             }
         }
+        Effect::SetAdvancedMode { enabled } => {
+            core.set_advanced_mode(enabled);
+            Vec::new()
+        }
         Effect::DeleteTempFile { path } => match cleanup_temp_file(&path).await {
             Ok(_) => Vec::new(),
             Err(err) => vec![AppEvent::Error(format!(

@@ -444,6 +444,7 @@ impl AppState {
     }
 
     pub fn recompute_quick_actions(&mut self) {
+        let firmware_enabled = self.allow_unsafe && self.brick_risk_ack;
         self.quick_actions = if matches!(self.screen, Screen::Dashboard) {
             let actions = vec![
                 QuickActionState {
@@ -462,9 +463,12 @@ impl AppState {
                         .selected_device()
                         .map(|d| d.support_tier == SupportTier::Full)
                         .unwrap_or(false)
+                        && firmware_enabled
                         && !self.write_lock_until_restart,
                     reason: self.selected_device().and_then(|d| {
-                        if d.support_tier != SupportTier::Full {
+                        if !firmware_enabled {
+                            Some("Firmware updates require explicit unsafe acknowledgement".to_owned())
+                        } else if d.support_tier != SupportTier::Full {
                             Some("Read-only until hardware confirmation".to_owned())
                         } else if self.write_lock_until_restart {
                             Some("Write locked until restart".to_owned())
@@ -566,8 +570,12 @@ impl AppState {
                 },
                 QuickActionState {
                     action: QuickAction::Firmware,
-                    enabled: !self.write_lock_until_restart,
-                    reason: None,
+                    enabled: firmware_enabled && !self.write_lock_until_restart,
+                    reason: if firmware_enabled {
+                        None
+                    } else {
+                        Some("Firmware updates require explicit unsafe acknowledgement".to_owned())
+                    },
                 },
                 QuickActionState {
                     action: QuickAction::Back,

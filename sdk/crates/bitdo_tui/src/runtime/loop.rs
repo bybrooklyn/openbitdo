@@ -39,10 +39,11 @@ pub async fn run_ui_loop(core: OpenBitdoCore, opts: UiLaunchOptions) -> Result<(
             }
         }
     }
+    core.set_advanced_mode(state.advanced_mode);
 
     let mut terminal = init_terminal()?;
     let mut hit_map = layout::HitMap::default();
-    let mut firmware_events: Option<broadcast::Receiver<FirmwareProgressEvent>> = None;
+    let mut firmware_events: Option<(String, broadcast::Receiver<FirmwareProgressEvent>)> = None;
 
     process_event(&core, &mut state, AppEvent::Init).await;
 
@@ -105,33 +106,43 @@ async fn process_event(core: &OpenBitdoCore, state: &mut AppState, initial: AppE
 async fn ensure_firmware_subscription(
     core: &OpenBitdoCore,
     state: &AppState,
-    receiver: &mut Option<broadcast::Receiver<FirmwareProgressEvent>>,
+    receiver: &mut Option<(String, broadcast::Receiver<FirmwareProgressEvent>)>,
 ) -> Result<()> {
-    if receiver.is_some() {
-        return Ok(());
-    }
-
     let Some(task) = state.task_state.as_ref() else {
+        *receiver = None;
         return Ok(());
     };
 
     if !matches!(task.mode, TaskMode::Updating) {
+        *receiver = None;
         return Ok(());
     }
 
     let Some(plan) = task.plan.as_ref() else {
+        *receiver = None;
         return Ok(());
     };
 
-    *receiver = Some(core.subscribe_events(&plan.session_id.0).await?);
+    if receiver
+        .as_ref()
+        .map(|(session_id, _)| session_id == &plan.session_id.0)
+        .unwrap_or(false)
+    {
+        return Ok(());
+    }
+
+    *receiver = Some((
+        plan.session_id.0.clone(),
+        core.subscribe_events(&plan.session_id.0).await?,
+    ));
     Ok(())
 }
 
 async fn poll_firmware_events(
     state: &mut AppState,
-    receiver: &mut Option<broadcast::Receiver<FirmwareProgressEvent>>,
+    receiver: &mut Option<(String, broadcast::Receiver<FirmwareProgressEvent>)>,
 ) {
-    let Some(rx) = receiver.as_mut() else {
+    let Some((_, rx)) = receiver.as_mut() else {
         return;
     };
 

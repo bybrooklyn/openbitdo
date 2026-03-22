@@ -47,6 +47,9 @@ pub enum Effect {
     PollFirmwareReport {
         session_id: FirmwareUpdateSessionId,
     },
+    SetAdvancedMode {
+        enabled: bool,
+    },
     DeleteTempFile {
         path: PathBuf,
     },

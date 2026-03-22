@@ -1,3 +1,4 @@
+
 use anyhow::Result;
 use bitdo_app_core::{OpenBitdoCore, OpenBitdoCoreConfig};
 use bitdo_tui::{run_ui, UiLaunchOptions};
@@ -58,6 +59,9 @@ async fn main() -> Result<()> {
             build_info: BuildInfo::current().to_tui_info(),
             advanced_mode: settings.advanced_mode,
             report_save_mode: settings.report_save_mode,
+            // The TUI is the interactive acknowledgement surface for unsafe firmware flows.
+            allow_unsafe: true,
+            brick_risk_ack: true,
             settings_path: Some(settings_path),
             ..Default::default()
         },

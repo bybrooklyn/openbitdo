@@ -589,6 +589,15 @@ impl<T: Transport> DeviceSession<T> {
     }
 
     pub fn enter_bootloader(&mut self) -> Result<()> {
+        if self.uses_jp108_firmware_path() {
+            self.send_command(CommandId::Jp108EnterBootloader, None)?;
+            return Ok(());
+        }
+        if self.uses_u2_firmware_path() {
+            self.send_command(CommandId::U2EnterBootloader, None)?;
+            return Ok(());
+        }
+
         self.send_command(CommandId::EnterBootloaderA, None)?;
         self.send_command(CommandId::EnterBootloaderB, None)?;
         self.send_command(CommandId::EnterBootloaderC, None)?;
@@ -607,6 +616,16 @@ impl<T: Transport> DeviceSession<T> {
             ));
         }
 
+        let command = self.firmware_chunk_command();
+        let max_payload = find_command(command)
+            .map(|row| row.request.len().saturating_sub(firmware_chunk_offset(command)))
+            .unwrap_or_default();
+        if max_payload == 0 || chunk_size > max_payload {
+            return Err(BitdoError::InvalidInput(format!(
+                "chunk size {chunk_size} exceeds firmware payload limit {max_payload}"
+            )));
+        }
+
         let chunk_count = image.len().div_ceil(chunk_size);
         if dry_run {
             return Ok(FirmwareTransferReport {
@@ -617,18 +636,11 @@ impl<T: Transport> DeviceSession<T> {
             });
         }
 
-        let row = self.ensure_command_allowed(CommandId::FirmwareChunk)?;
         for chunk in image.chunks(chunk_size) {
-            let mut payload = row.request.to_vec();
-            let offset = 4;
-            let copy_len = chunk.len().min(payload.len().saturating_sub(offset));
-            if copy_len > 0 {
-                payload[offset..offset + copy_len].copy_from_slice(&chunk[..copy_len]);
-            }
-            self.send_row(row, Some(&payload))?;
+            self.send_firmware_chunk(chunk)?;
         }
 
-        self.send_command(CommandId::FirmwareCommit, None)?;
+        self.firmware_commit()?;
         Ok(FirmwareTransferReport {
             bytes_total: image.len(),
             chunk_size,
@@ -637,7 +649,38 @@ impl<T: Transport> DeviceSession<T> {
         })
     }
 
+    pub fn send_firmware_chunk(&mut self, chunk: &[u8]) -> Result<usize> {
+        let command = self.firmware_chunk_command();
+        let row = self.ensure_command_allowed(command)?;
+        let mut payload = row.request.to_vec();
+        let offset = firmware_chunk_offset(command);
+        let copy_len = chunk.len().min(payload.len().saturating_sub(offset));
+        if copy_len == 0 {
+            return Err(BitdoError::InvalidInput(format!(
+                "firmware chunk payload shorter than expected for {command:?}"
+            )));
+        }
+
+        payload[offset..offset + copy_len].copy_from_slice(&chunk[..copy_len]);
+        self.send_row(row, Some(&payload))?;
+        Ok(copy_len)
+    }
+
+    pub fn firmware_commit(&mut self) -> Result<()> {
+        self.send_command(self.firmware_commit_command(), None)?;
+        Ok(())
+    }
+
     pub fn exit_bootloader(&mut self) -> Result<()> {
+        if self.uses_jp108_firmware_path() {
+            self.send_command(CommandId::Jp108ExitBootloader, None)?;
+            return Ok(());
+        }
+        if self.uses_u2_firmware_path() {
+            self.send_command(CommandId::U2ExitBootloader, None)?;
+            return Ok(());
+        }
+
         self.send_command(CommandId::ExitBootloader, None)?;
         Ok(())
     }
@@ -826,6 +869,7 @@ impl<T: Transport> DeviceSession<T> {
 
     fn ensure_command_allowed(&self, command: CommandId) -> Result<&'static CommandRegistryRow> {
         let row = find_command(command).ok_or(BitdoError::UnknownCommand(command))?;
+        let promoted_full_support_path = self.allow_pid_scoped_full_support_path(row);
 
         // Gate 1: confidence/runtime policy.
         // We intentionally keep inferred write/unsafe paths non-executable until
@@ -833,15 +877,17 @@ impl<T: Transport> DeviceSession<T> {
         match row.runtime_policy() {
             CommandRuntimePolicy::EnabledDefault => {}
             CommandRuntimePolicy::ExperimentalGate => {
-                if !self.config.experimental {
+                if !self.config.experimental && !promoted_full_support_path {
                     return Err(BitdoError::ExperimentalRequired { command });
                 }
             }
             CommandRuntimePolicy::BlockedUntilConfirmed => {
-                return Err(BitdoError::UnsupportedForPid {
-                    command,
-                    pid: self.target.pid,
-                });
+                if !promoted_full_support_path {
+                    return Err(BitdoError::UnsupportedForPid {
+                        command,
+                        pid: self.target.pid,
+                    });
+                }
             }
         }
 
@@ -889,6 +935,51 @@ impl<T: Transport> DeviceSession<T> {
         }
 
         Ok(row)
+    }
+
+    fn uses_jp108_firmware_path(&self) -> bool {
+        self.profile.capability.supports_jp108_dedicated_map
+    }
+
+    fn uses_u2_firmware_path(&self) -> bool {
+        self.profile.capability.supports_u2_slot_config && self.profile.capability.supports_u2_button_map
+    }
+
+    fn firmware_chunk_command(&self) -> CommandId {
+        if self.uses_jp108_firmware_path() {
+            CommandId::Jp108FirmwareChunk
+        } else if self.uses_u2_firmware_path() {
+            CommandId::U2FirmwareChunk
+        } else {
+            CommandId::FirmwareChunk
+        }
+    }
+
+    fn firmware_commit_command(&self) -> CommandId {
+        if self.uses_jp108_firmware_path() {
+            CommandId::Jp108FirmwareCommit
+        } else if self.uses_u2_firmware_path() {
+            CommandId::U2FirmwareCommit
+        } else {
+            CommandId::FirmwareCommit
+        }
+    }
+
+    fn allow_pid_scoped_full_support_path(&self, row: &CommandRegistryRow) -> bool {
+        self.profile.support_tier == SupportTier::Full
+            && !row.applies_to.is_empty()
+            && row.applies_to.contains(&self.target.pid)
+            && matches!(
+                row.operation_group,
+                "JP108Dedicated" | "Ultimate2Core" | "Firmware"
+            )
+    }
+}
+
+fn firmware_chunk_offset(command: CommandId) -> usize {
+    match command {
+        CommandId::Jp108FirmwareChunk | CommandId::U2FirmwareChunk => 5,
+        _ => 4,
     }
 }
 

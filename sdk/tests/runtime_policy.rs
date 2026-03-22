@@ -79,3 +79,27 @@ fn diag_probe_marks_inferred_reads_as_experimental() {
         DiagSeverity::Ok | DiagSeverity::Warning | DiagSeverity::NeedsAttention
     ));
 }
+
+#[test]
+fn full_support_pid_scoped_commands_work_without_experimental_mode() {
+    let mut transport = MockTransport::default();
+    transport.push_read_data(vec![0x02, 0x05, 0x00, 0x00, 0x00, 0x02]);
+    transport.push_read_data(vec![0x02, 0x00]);
+
+    let mut session = DeviceSession::new(
+        transport,
+        VidPid::new(0x2dc8, 0x6012),
+        SessionConfig::default(),
+    )
+    .expect("session opens");
+
+    let slot = session
+        .u2_get_current_slot()
+        .expect("pid-scoped read should be available");
+    assert_eq!(slot, 2);
+
+    let mode = session
+        .u2_set_mode(3)
+        .expect("pid-scoped write should be available");
+    assert_eq!(mode.mode, 3);
+}

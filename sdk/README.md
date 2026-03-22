@@ -2,6 +2,12 @@
 
 This workspace contains the OpenBitdo runtime, protocol layer, and release packaging scripts.
 
+## Toolchain
+
+- Rust edition: 2024
+- Minimum supported Rust version: 1.85
+- CI and release builds continue to use the current stable toolchain
+
 ## Crates
 
 - `bitdo_proto`: command registry, transport, session, and diagnostics behavior

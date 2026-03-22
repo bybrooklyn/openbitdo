@@ -20,7 +20,7 @@ OpenBitdo is unofficial and not affiliated with 8BitDo. Firmware updates and dev
 | Homebrew | `brew tap bybrooklyn/openbitdo && brew install openbitdo` | macOS or Linux users who want the standard tap flow |
 | AUR | `paru -S openbitdo-bin` | Arch Linux users who want a prebuilt package |
 | GitHub Releases | Download a release tarball and run `bin/openbitdo` | Users who want a standalone binary without a package manager |
-| From source | `cargo run -p openbitdo --` from `sdk/` | Contributors and local development |
+| From source | `cargo run -p openbitdo --` from `sdk/` with Rust 1.85+ | Contributors and local development |
 
 ## First Run
 
