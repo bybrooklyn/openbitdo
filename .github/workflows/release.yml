@@ -46,6 +46,7 @@ jobs:
           fi
 
       - name: Preflight required publish secrets
+        if: vars.AUR_PUBLISH_ENABLED == '1'
         working-directory: ${{ github.workspace }}
         env:
           AUR_USERNAME: ${{ secrets.AUR_USERNAME }}

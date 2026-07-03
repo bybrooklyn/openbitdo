@@ -7,6 +7,7 @@ This file explains the current user and contributor surface after the CLI and pa
 - `openbitdo` launches the interactive dashboard.
 - `openbitdo --mock` launches the dashboard without real hardware.
 - Historical subcommand-style entry points are no longer part of the supported CLI.
+- Diagnostics, support reports, firmware preflight, and mapping entry points are reached from the TUI, not from public subcommands.
 
 ## Current Packaging Contract
 

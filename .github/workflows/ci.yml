@@ -2,11 +2,7 @@ name: CI
 
 on:
   push:
-    paths:
-      - '**'
   pull_request:
-    paths:
-      - '**'
   schedule:
     # 07:30 UTC is 02:30 America/New_York during standard time.
     # (GitHub cron does not support time zones/DST directly.)

@@ -9,6 +9,7 @@ OpenBitdo is unofficial and not affiliated with 8BitDo. Firmware updates and dev
 
 - Detect connected 8BitDo devices and explain their current support level.
 - Run diagnostics and save support reports.
+- Show a support scorecard for every selected device.
 - Stage verified firmware updates on full-support devices.
 - Edit supported mappings for the currently confirmed JP108 and Ultimate 2 flows.
 - Keep unconfirmed devices in safe read-only or detect-only paths.
@@ -26,9 +27,10 @@ OpenBitdo is unofficial and not affiliated with 8BitDo. Firmware updates and dev
 
 1. Launch `openbitdo`.
 2. If you do not have hardware attached yet, launch `openbitdo --mock` to preview the interface.
-3. Pick a controller from the dashboard.
-4. Use `Diagnose` first if you are unsure what is safe for that device.
-5. Follow the support-tier guidance shown in the UI before attempting update or mapping work.
+3. Pick a controller from the grouped dashboard: supported, read-only candidate, or detect-only.
+4. Run `Diagnose` first. Diagnostics are the safe path for every detected 8BitDo device.
+5. Save the TOML support report when a device is blocked, experimental, or behaving unexpectedly.
+6. Follow the `Works Now`, `Blocked`, `Support Scorecard`, and `Missing Evidence` guidance before attempting update or mapping work.
 
 ## Support Tiers
 
@@ -37,6 +39,15 @@ OpenBitdo is unofficial and not affiliated with 8BitDo. Firmware updates and dev
 | `supported` | Diagnostics, update, and any confirmed mapping flows are available when safety gates are satisfied. |
 | `read-only candidate` | Diagnostics are available, but update and mapping stay blocked until runtime and hardware confirmation are complete. |
 | `detect-only` | OpenBitdo can identify the device, but deeper workflows are intentionally unavailable. |
+
+Candidate-readonly devices may expose a guarded non-firmware write/readback probe for maintainers.
+It requires advanced mode, local write-risk acknowledgement, and a per-PID unlock file; firmware and bootloader writes remain blocked.
+
+## Hardware Verification Without A Lab
+
+If you do not have a controller connected, use `openbitdo --mock` plus the automated test suite to verify the app flow.
+Real-device promotion still requires hardware smoke evidence; mock mode does not prove firmware or mapping safety.
+When a device is not fully supported, run diagnostics and share the generated TOML report instead of attempting writes.
 
 ## macOS Packaging Caveat
 
