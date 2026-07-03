@@ -54,6 +54,7 @@ pub struct SessionConfig {
     pub allow_unsafe: bool,
     pub brick_risk_ack: bool,
     pub experimental: bool,
+    pub candidate_write_unlock: bool,
     pub trace_enabled: bool,
 }
 
@@ -65,6 +66,7 @@ impl Default for SessionConfig {
             allow_unsafe: false,
             brick_risk_ack: false,
             experimental: false,
+            candidate_write_unlock: false,
             trace_enabled: true,
         }
     }
@@ -257,6 +259,7 @@ impl<T: Transport> DeviceSession<T> {
                         self.target.pid,
                         *command,
                         row.safety_class,
+                        false,
                     )
                 {
                     return None;
@@ -870,6 +873,8 @@ impl<T: Transport> DeviceSession<T> {
     fn ensure_command_allowed(&self, command: CommandId) -> Result<&'static CommandRegistryRow> {
         let row = find_command(command).ok_or(BitdoError::UnknownCommand(command))?;
         let promoted_full_support_path = self.allow_pid_scoped_full_support_path(row);
+        let candidate_write_unlock =
+            self.allow_candidate_runtime_write_path(command, row.safety_class);
 
         // Gate 1: confidence/runtime policy.
         // We intentionally keep inferred write/unsafe paths non-executable until
@@ -882,7 +887,7 @@ impl<T: Transport> DeviceSession<T> {
                 }
             }
             CommandRuntimePolicy::BlockedUntilConfirmed => {
-                if !promoted_full_support_path {
+                if !(promoted_full_support_path || candidate_write_unlock) {
                     return Err(BitdoError::UnsupportedForPid {
                         command,
                         pid: self.target.pid,
@@ -904,7 +909,12 @@ impl<T: Transport> DeviceSession<T> {
 
         // Gate 3: support-tier restrictions.
         if self.profile.support_tier == SupportTier::CandidateReadOnly
-            && !is_command_allowed_for_candidate_pid(self.target.pid, command, row.safety_class)
+            && !is_command_allowed_for_candidate_pid(
+                self.target.pid,
+                command,
+                row.safety_class,
+                candidate_write_unlock,
+            )
         {
             return Err(BitdoError::UnsupportedForPid {
                 command,
@@ -927,6 +937,7 @@ impl<T: Transport> DeviceSession<T> {
 
         if row.safety_class == SafetyClass::SafeWrite
             && self.profile.support_tier != SupportTier::Full
+            && !candidate_write_unlock
         {
             return Err(BitdoError::UnsupportedForPid {
                 command,
@@ -973,6 +984,18 @@ impl<T: Transport> DeviceSession<T> {
                 row.operation_group,
                 "JP108Dedicated" | "Ultimate2Core" | "Firmware"
             )
+    }
+
+    fn allow_candidate_runtime_write_path(
+        &self,
+        command: CommandId,
+        safety: SafetyClass,
+    ) -> bool {
+        self.profile.support_tier == SupportTier::CandidateReadOnly
+            && self.config.candidate_write_unlock
+            && self.config.experimental
+            && safety == SafetyClass::SafeWrite
+            && matches!(command, CommandId::SetModeDInput | CommandId::WriteProfile)
     }
 }
 
@@ -1028,11 +1051,12 @@ fn classify_diag_failure(
     DiagSeverity::Warning
 }
 
-fn is_command_allowed_for_candidate_pid(pid: u16, command: CommandId, safety: SafetyClass) -> bool {
-    if safety != SafetyClass::SafeRead {
-        return false;
-    }
-
+fn is_command_allowed_for_candidate_pid(
+    pid: u16,
+    command: CommandId,
+    safety: SafetyClass,
+    write_unlocked: bool,
+) -> bool {
     const BASE_DIAG_READS: &[CommandId] = &[
         CommandId::GetPid,
         CommandId::GetReportRevision,
@@ -1045,6 +1069,16 @@ fn is_command_allowed_for_candidate_pid(pid: u16, command: CommandId, safety: Sa
         0x2101, 0x901a, 0x6006, 0x5203, 0x5204, 0x301a, 0x9028, 0x3026, 0x3027,
     ];
     const JP_CANDIDATE_PIDS: &[u16] = &[0x5200, 0x5201, 0x203a, 0x2049, 0x2028, 0x202e];
+
+    if safety == SafetyClass::SafeWrite {
+        return write_unlocked
+            && STANDARD_CANDIDATE_PIDS.contains(&pid)
+            && matches!(command, CommandId::SetModeDInput | CommandId::WriteProfile);
+    }
+
+    if safety != SafetyClass::SafeRead {
+        return false;
+    }
 
     if BASE_DIAG_READS.contains(&command) {
         return STANDARD_CANDIDATE_PIDS.contains(&pid) || JP_CANDIDATE_PIDS.contains(&pid);

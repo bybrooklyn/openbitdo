@@ -23,6 +23,7 @@ From `cleanroom/sdk`:
 cargo build --workspace
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace --all-targets
+./scripts/check_evidence_readiness.py
 ./scripts/cleanroom_guard.sh
 ```
 
@@ -35,6 +36,11 @@ cargo run -p openbitdo -- --mock
 
 `openbitdo` intentionally exposes a single interactive CLI surface.
 Headless automation remains available through the Rust API in `bitdo_tui`.
+
+The dashboard groups every detected 8BitDo device by support tier and keeps diagnostics as the primary safe workflow.
+Candidate devices show a scorecard with missing static, runtime, hardware, write, backup/readback, and firmware evidence.
+Use mock mode for UI verification when no hardware is attached; use the gated hardware smoke tests only with real lab devices and the required `BITDO_*` expectation variables.
+The candidate write probe is a non-firmware, write/readback probe only; it requires advanced mode, local risk acknowledgement, and a per-PID unlock file under `candidate-unlocks/`.
 
 ## Packaging
 

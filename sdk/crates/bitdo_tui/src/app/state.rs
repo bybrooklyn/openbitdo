@@ -1,11 +1,12 @@
 use crate::{AppDevice, BuildInfo, ReportSaveMode, UiLaunchOptions};
 use bitdo_app_core::{
     ConfigBackupId, DedicatedButtonMapping, FirmwareFinalReport, FirmwareUpdatePlan, U2CoreProfile,
+    RuntimeUnlockReport,
 };
 use bitdo_proto::{DiagCommandStatus, DiagProbeResult, DiagSeverity, SupportTier, VidPid};
 use chrono::Utc;
-use fuzzy_matcher::skim::SkimMatcherV2;
 use fuzzy_matcher::FuzzyMatcher;
+use fuzzy_matcher::skim::SkimMatcherV2;
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 use std::path::PathBuf;
@@ -182,6 +183,7 @@ pub struct AppState {
     pub diagnostics_state: Option<DiagnosticsState>,
     pub mapping_draft_state: Option<MappingDraftState>,
     pub latest_backup: Option<ConfigBackupId>,
+    pub latest_unlock_report: Option<RuntimeUnlockReport>,
     pub write_lock_until_restart: bool,
     pub latest_report_path: Option<PathBuf>,
     pub status_line: String,
@@ -219,6 +221,7 @@ impl AppState {
             diagnostics_state: None,
             mapping_draft_state: None,
             latest_backup: None,
+            latest_unlock_report: None,
             write_lock_until_restart: false,
             latest_report_path: None,
             status_line: "OpenBitdo ready".to_owned(),
@@ -243,7 +246,9 @@ impl AppState {
 
     pub fn filtered_device_indices(&self) -> Vec<usize> {
         if self.device_filter.trim().is_empty() {
-            return (0..self.devices.len()).collect();
+            let mut indices = (0..self.devices.len()).collect::<Vec<_>>();
+            self.sort_device_indices(&mut indices);
+            return indices;
         }
 
         let query = self.device_filter.to_lowercase();
@@ -262,8 +267,28 @@ impl AppState {
                 matcher.fuzzy_match(&text, &query).map(|score| (score, idx))
             })
             .collect();
-        scored.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(&b.1)));
+        scored.sort_by(|a, b| {
+            let left = &self.devices[a.1];
+            let right = &self.devices[b.1];
+            support_tier_rank(left.support_tier)
+                .cmp(&support_tier_rank(right.support_tier))
+                .then_with(|| b.0.cmp(&a.0))
+                .then_with(|| left.name.cmp(&right.name))
+                .then_with(|| a.1.cmp(&b.1))
+        });
         scored.into_iter().map(|(_, idx)| idx).collect()
+    }
+
+    fn sort_device_indices(&self, indices: &mut [usize]) {
+        indices.sort_by(|a, b| {
+            let left = &self.devices[*a];
+            let right = &self.devices[*b];
+            support_tier_rank(left.support_tier)
+                .cmp(&support_tier_rank(right.support_tier))
+                .then_with(|| left.name.cmp(&right.name))
+                .then_with(|| left.vid_pid.pid.cmp(&right.vid_pid.pid))
+                .then_with(|| left.vid_pid.vid.cmp(&right.vid_pid.vid))
+        });
     }
 
     pub fn selected_device(&self) -> Option<&AppDevice> {
@@ -446,41 +471,40 @@ impl AppState {
     pub fn recompute_quick_actions(&mut self) {
         let firmware_enabled = self.allow_unsafe && self.brick_risk_ack;
         self.quick_actions = if matches!(self.screen, Screen::Dashboard) {
+            let selected = self.selected_device();
             let actions = vec![
+                QuickActionState {
+                    action: QuickAction::Diagnose,
+                    enabled: selected.is_some(),
+                    reason: selected
+                        .is_none()
+                        .then(|| "Connect or refresh a controller".to_owned()),
+                },
                 QuickActionState {
                     action: QuickAction::Refresh,
                     enabled: true,
                     reason: None,
                 },
                 QuickActionState {
-                    action: QuickAction::Diagnose,
-                    enabled: self.selected_device().is_some(),
-                    reason: None,
-                },
-                QuickActionState {
                     action: QuickAction::RecommendedUpdate,
-                    enabled: self
-                        .selected_device()
-                        .map(|d| d.support_tier == SupportTier::Full)
+                    enabled: selected
+                        .map(|d| {
+                            d.support_tier == SupportTier::Full && d.capability.supports_firmware
+                        })
                         .unwrap_or(false)
                         && firmware_enabled
                         && !self.write_lock_until_restart,
-                    reason: self.selected_device().and_then(|d| {
-                        if !firmware_enabled {
-                            Some("Firmware updates require explicit unsafe acknowledgement".to_owned())
-                        } else if d.support_tier != SupportTier::Full {
-                            Some("Read-only until hardware confirmation".to_owned())
-                        } else if self.write_lock_until_restart {
-                            Some("Write locked until restart".to_owned())
-                        } else {
-                            None
-                        }
+                    reason: selected.and_then(|d| {
+                        dashboard_firmware_disabled_reason(
+                            d,
+                            firmware_enabled,
+                            self.write_lock_until_restart,
+                        )
                     }),
                 },
                 QuickActionState {
                     action: QuickAction::EditMappings,
-                    enabled: self
-                        .selected_device()
+                    enabled: selected
                         .map(|d| {
                             (d.capability.supports_jp108_dedicated_map
                                 || (d.capability.supports_u2_button_map
@@ -489,7 +513,29 @@ impl AppState {
                                 && !self.write_lock_until_restart
                         })
                         .unwrap_or(false),
-                    reason: None,
+                    reason: selected.and_then(|d| {
+                        dashboard_mapping_disabled_reason(d, self.write_lock_until_restart)
+                    }),
+                },
+                QuickActionState {
+                    action: QuickAction::UnlockWriteProbe,
+                    enabled: selected
+                        .map(|d| {
+                            d.support_tier == SupportTier::CandidateReadOnly
+                                && self.advanced_mode
+                                && self.allow_unsafe
+                                && self.brick_risk_ack
+                                && !self.write_lock_until_restart
+                        })
+                        .unwrap_or(false),
+                    reason: selected.and_then(|d| {
+                        dashboard_unlock_disabled_reason(
+                            d,
+                            self.advanced_mode,
+                            self.allow_unsafe && self.brick_risk_ack,
+                            self.write_lock_until_restart,
+                        )
+                    }),
                 },
                 QuickActionState {
                     action: QuickAction::Settings,
@@ -502,9 +548,6 @@ impl AppState {
                     reason: None,
                 },
             ];
-            if self.selected_action_index >= actions.len() {
-                self.selected_action_index = 0;
-            }
             actions
         } else if matches!(self.screen, Screen::Task) {
             vec![
@@ -615,8 +658,23 @@ impl AppState {
                 },
             ]
         };
+        self.ensure_selected_action_is_enabled();
+    }
+
+    fn ensure_selected_action_is_enabled(&mut self) {
         if self.selected_action_index >= self.quick_actions.len() {
             self.selected_action_index = 0;
+        }
+        if self
+            .quick_actions
+            .get(self.selected_action_index)
+            .map(|action| action.enabled)
+            .unwrap_or(false)
+        {
+            return;
+        }
+        if let Some(index) = self.quick_actions.iter().position(|action| action.enabled) {
+            self.selected_action_index = index;
         }
     }
 
@@ -638,5 +696,67 @@ impl AppState {
             }) => loaded != current,
             None => false,
         }
+    }
+}
+
+fn support_tier_rank(tier: SupportTier) -> u8 {
+    match tier {
+        SupportTier::Full => 0,
+        SupportTier::CandidateReadOnly => 1,
+        SupportTier::DetectOnly => 2,
+    }
+}
+
+fn dashboard_firmware_disabled_reason(
+    device: &AppDevice,
+    firmware_enabled: bool,
+    write_lock_until_restart: bool,
+) -> Option<String> {
+    if device.support_tier != SupportTier::Full {
+        Some("Blocked until runtime and hardware confirmation".to_owned())
+    } else if !device.capability.supports_firmware {
+        Some("No verified firmware path for this PID".to_owned())
+    } else if write_lock_until_restart {
+        Some("Write locked until restart".to_owned())
+    } else if !firmware_enabled {
+        Some("Requires explicit unsafe acknowledgement".to_owned())
+    } else {
+        None
+    }
+}
+
+fn dashboard_mapping_disabled_reason(
+    device: &AppDevice,
+    write_lock_until_restart: bool,
+) -> Option<String> {
+    let has_mapping = device.capability.supports_jp108_dedicated_map
+        || (device.capability.supports_u2_button_map && device.capability.supports_u2_slot_config);
+    if device.support_tier != SupportTier::Full {
+        Some("Blocked until read/write/readback confirmation".to_owned())
+    } else if !has_mapping {
+        Some("No confirmed mapping editor for this PID".to_owned())
+    } else if write_lock_until_restart {
+        Some("Write locked until restart".to_owned())
+    } else {
+        None
+    }
+}
+
+fn dashboard_unlock_disabled_reason(
+    device: &AppDevice,
+    advanced_mode: bool,
+    acknowledged_risk: bool,
+    write_lock_until_restart: bool,
+) -> Option<String> {
+    if device.support_tier != SupportTier::CandidateReadOnly {
+        Some("Only for candidate-readonly devices".to_owned())
+    } else if write_lock_until_restart {
+        Some("Write locked until restart".to_owned())
+    } else if !advanced_mode {
+        Some("Enable advanced mode first".to_owned())
+    } else if !acknowledged_risk {
+        Some("Acknowledge local write risk first".to_owned())
+    } else {
+        None
     }
 }

@@ -1,7 +1,7 @@
 use crate::AppDevice;
 use bitdo_app_core::{
     ConfigBackupId, DedicatedButtonMapping, FirmwareFinalReport, FirmwareProgressEvent,
-    FirmwareUpdatePlan, U2CoreProfile,
+    FirmwareUpdatePlan, RuntimeUnlockReport, U2CoreProfile,
 };
 use bitdo_proto::{DiagProbeResult, VidPid};
 use std::path::PathBuf;
@@ -60,6 +60,8 @@ pub enum AppEvent {
         recovery_lock: bool,
     },
     MappingApplyFailed(String),
+    CandidateWriteProbeCompleted(RuntimeUnlockReport),
+    CandidateWriteProbeFailed(String),
     BackupRestoreCompleted(String),
     BackupRestoreFailed(String),
     PreflightReady {

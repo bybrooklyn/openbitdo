@@ -1,10 +1,12 @@
 use crate::app::state::{AppState, DashboardLayoutMode, PanelFocus};
-use crate::ui::layout::{inner_rect, panel_block, truncate_to_width, HitMap, HitRegion, HitTarget};
+use crate::ui::layout::{HitMap, HitTarget, inner_rect, panel_block, truncate_to_width};
+use bitdo_app_core::SupportScorecard;
+use bitdo_proto::SupportTier;
+use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{List, ListItem, Paragraph};
-use ratatui::Frame;
 
 pub fn render(frame: &mut Frame<'_>, state: &AppState, area: Rect) -> HitMap {
     let mut map = HitMap::default();
@@ -113,7 +115,20 @@ fn render_devices(frame: &mut Frame<'_>, state: &AppState, area: Rect, map: &mut
 
     let filtered = state.filtered_device_indices();
     let mut rows = Vec::new();
-    if filtered.is_empty() {
+    let mut hit_rows = Vec::new();
+    if state.devices.is_empty() {
+        rows.push(ListItem::new(vec![
+            Line::from("No 8BitDo controller detected"),
+            Line::from(Span::styled(
+                "Reconnect over USB/Bluetooth, check HID permissions, then Refresh",
+                crate::ui::theme::subtle_style(),
+            )),
+            Line::from(Span::styled(
+                "Use openbitdo --mock to preview the full workflow without hardware",
+                crate::ui::theme::subtle_style(),
+            )),
+        ]));
+    } else if filtered.is_empty() {
         rows.push(ListItem::new(vec![
             Line::from("No matching devices"),
             Line::from(Span::styled(
@@ -122,8 +137,19 @@ fn render_devices(frame: &mut Frame<'_>, state: &AppState, area: Rect, map: &mut
             )),
         ]));
     } else {
+        let mut last_tier = None;
+        let mut visual_row = 0usize;
+        let visible_rows = inner_rect(chunks[1], 1, 1).height as usize;
         for (display_idx, device_idx) in filtered.iter().copied().enumerate() {
             let dev = &state.devices[device_idx];
+            if last_tier != Some(dev.support_tier) {
+                last_tier = Some(dev.support_tier);
+                rows.push(ListItem::new(Line::from(Span::styled(
+                    group_header(dev.support_tier, group_count(state, dev.support_tier)),
+                    crate::ui::theme::title_style(),
+                ))));
+                visual_row += 1;
+            }
             let selected = state
                 .selected_device_id
                 .map(|id| id == dev.vid_pid)
@@ -154,21 +180,42 @@ fn render_devices(frame: &mut Frame<'_>, state: &AppState, area: Rect, map: &mut
                 ])
                 .style(style),
             );
+            if visual_row < visible_rows {
+                hit_rows.push((display_idx, visual_row, visible_rows - visual_row));
+            }
+            visual_row += 2;
         }
     }
 
-    let list = List::new(rows).block(panel_block("Controllers", Some("detected"), true));
+    let list = List::new(rows).block(panel_block(
+        "Controllers",
+        Some(if state.devices.is_empty() {
+            "connect"
+        } else {
+            "grouped"
+        }),
+        true,
+    ));
     frame.render_widget(list, chunks[1]);
 
-    map.extend(device_regions(
-        chunks[1],
-        state.filtered_device_indices().len(),
-    ));
+    let inner = inner_rect(chunks[1], 1, 1);
+    for (display_idx, row, remaining) in hit_rows {
+        map.push(
+            Rect::new(
+                inner.x,
+                inner.y + row as u16,
+                inner.width,
+                2.min(remaining) as u16,
+            ),
+            HitTarget::DeviceRow(display_idx),
+        );
+    }
 }
 
 fn render_selected_device(frame: &mut Frame<'_>, state: &AppState, area: Rect) {
     let selected = state.selected_device();
     let lines = if let Some(device) = selected {
+        let scorecard = device.scorecard();
         let mut details = vec![
             Line::from(vec![
                 Span::styled(device.name.clone(), crate::ui::theme::screen_title_style()),
@@ -179,37 +226,86 @@ fn render_selected_device(frame: &mut Frame<'_>, state: &AppState, area: Rect) {
                 ),
             ]),
             Line::from(format!(
-                "Support: {}",
-                support_tier_label(device.support_tier)
+                "Support: {}  •  Status: {}",
+                support_tier_label(device.support_tier),
+                device.support_status().as_str()
             )),
             Line::from(format!("Protocol: {:?}", device.protocol_family)),
             Line::from(format!("Evidence: {:?}", device.evidence)),
             Line::from(""),
-            Line::from("Capabilities"),
+            Line::from(Span::styled(
+                "Support Scorecard",
+                crate::ui::theme::title_style(),
+            )),
+            Line::from(Span::styled(
+                format!(
+                    "• {}% complete  •  promotion {}",
+                    scorecard.score_percent,
+                    if scorecard.promotion_ready {
+                        "ready"
+                    } else {
+                        "blocked"
+                    }
+                ),
+                crate::ui::theme::subtle_style(),
+            )),
+            Line::from(""),
+            Line::from(Span::styled("Works Now", crate::ui::theme::title_style())),
         ];
 
-        for capability in capability_lines(device) {
+        for capability in works_now_lines(device) {
             details.push(Line::from(Span::styled(
                 capability,
                 crate::ui::theme::subtle_style(),
             )));
         }
 
-        if device.support_tier != bitdo_proto::SupportTier::Full {
-            details.push(Line::from(""));
+        details.push(Line::from(""));
+        details.push(Line::from(Span::styled(
+            "Blocked",
+            crate::ui::theme::title_style(),
+        )));
+        for blocked in blocked_lines(device) {
             details.push(Line::from(Span::styled(
-                "This device is still read-only here. Safe diagnostics work, but mapping and update stay blocked until hardware confirmation lands.",
-                crate::ui::theme::warning_style(),
+                blocked,
+                if device.support_tier == SupportTier::Full {
+                    crate::ui::theme::subtle_style()
+                } else {
+                    crate::ui::theme::warning_style()
+                },
+            )));
+        }
+
+        details.push(Line::from(""));
+        details.push(Line::from(Span::styled(
+            "Missing Evidence",
+            crate::ui::theme::title_style(),
+        )));
+        for gap in scorecard_gap_lines(&scorecard) {
+            details.push(Line::from(Span::styled(
+                gap,
+                crate::ui::theme::subtle_style(),
             )));
         }
 
         details
     } else {
         vec![
-            Line::from("No controller selected"),
+            Line::from(Span::styled(
+                "No controller selected",
+                crate::ui::theme::screen_title_style(),
+            )),
             Line::from(""),
             Line::from(Span::styled(
-                "Refresh the dashboard or connect a device to continue.",
+                "Connect an 8BitDo controller, then choose Refresh.",
+                crate::ui::theme::subtle_style(),
+            )),
+            Line::from(Span::styled(
+                "If the OS blocks HID access, fix permissions and refresh again.",
+                crate::ui::theme::subtle_style(),
+            )),
+            Line::from(Span::styled(
+                "Use openbitdo --mock to preview supported, read-only, and detect-only flows.",
                 crate::ui::theme::subtle_style(),
             )),
         ]
@@ -310,42 +406,22 @@ fn render_events(frame: &mut Frame<'_>, state: &AppState, area: Rect) {
     frame.render_widget(widget, area);
 }
 
-fn device_regions(list_rect: Rect, total_rows: usize) -> Vec<HitRegion> {
-    let visible_rows = list_rect.height.saturating_sub(2) as usize / 2;
-    let max = total_rows.min(visible_rows);
-    let mut out = Vec::with_capacity(max);
-    for idx in 0..max {
-        let rect = Rect::new(
-            list_rect.x.saturating_add(1),
-            list_rect
-                .y
-                .saturating_add(1 + (idx as u16).saturating_mul(2)),
-            list_rect.width.saturating_sub(2),
-            2,
-        );
-        out.push(HitRegion {
-            rect,
-            target: HitTarget::DeviceRow(idx),
-        });
-    }
-    out
-}
-
 fn truncate_reason(reason: &str) -> String {
     truncate_to_width(reason, 24)
 }
 
 fn action_caption(action: crate::app::action::QuickAction) -> &'static str {
     match action {
-        crate::app::action::QuickAction::Refresh => "look for connected controllers",
-        crate::app::action::QuickAction::Diagnose => {
-            "run safe diagnostics and build a support summary"
-        }
+        crate::app::action::QuickAction::Refresh => "scan USB/HID again",
+        crate::app::action::QuickAction::Diagnose => "run safe reads and build support evidence",
         crate::app::action::QuickAction::RecommendedUpdate => {
-            "download and stage a verified firmware update"
+            "verified firmware for confirmed devices"
         }
         crate::app::action::QuickAction::EditMappings => {
-            "change supported buttons on supported devices"
+            "mapping only after read/write confirmation"
+        }
+        crate::app::action::QuickAction::UnlockWriteProbe => {
+            "guarded candidate write/readback probe"
         }
         crate::app::action::QuickAction::Settings => "report saving and interface preferences",
         crate::app::action::QuickAction::Quit => "close OpenBitdo",
@@ -369,8 +445,28 @@ fn support_tier_short(tier: bitdo_proto::SupportTier) -> &'static str {
     }
 }
 
-fn capability_lines(device: &bitdo_app_core::AppDevice) -> Vec<String> {
+fn group_header(tier: SupportTier, count: usize) -> String {
+    let label = match tier {
+        SupportTier::Full => "Supported now",
+        SupportTier::CandidateReadOnly => "Read-only candidates",
+        SupportTier::DetectOnly => "Detect-only",
+    };
+    format!("{label} ({count})")
+}
+
+fn group_count(state: &AppState, tier: SupportTier) -> usize {
+    state
+        .filtered_device_indices()
+        .into_iter()
+        .filter(|idx| state.devices[*idx].support_tier == tier)
+        .count()
+}
+
+fn works_now_lines(device: &bitdo_app_core::AppDevice) -> Vec<String> {
     let mut lines = Vec::new();
+
+    lines.push("• safe diagnostics and support report".to_owned());
+    lines.push("• device identification and support-state guidance".to_owned());
 
     if device.capability.supports_firmware {
         lines.push("• firmware updates".to_owned());
@@ -387,11 +483,50 @@ fn capability_lines(device: &bitdo_app_core::AppDevice) -> Vec<String> {
     if device.capability.supports_u2_button_map || device.capability.supports_u2_slot_config {
         lines.push("• Ultimate 2 slot and mapping".to_owned());
     }
-    if lines.is_empty() {
-        lines.push("• detection only".to_owned());
-    }
 
     lines
+}
+
+fn blocked_lines(device: &bitdo_app_core::AppDevice) -> Vec<String> {
+    match device.support_tier {
+        SupportTier::Full => {
+            let mut lines = Vec::new();
+            if !device.capability.supports_firmware {
+                lines.push("• firmware update: no verified path for this PID".to_owned());
+            }
+            if !(device.capability.supports_jp108_dedicated_map
+                || (device.capability.supports_u2_button_map
+                    && device.capability.supports_u2_slot_config))
+            {
+                lines.push("• mapping editor: no confirmed mapping surface".to_owned());
+            }
+            if lines.is_empty() {
+                lines.push("• none for confirmed capabilities".to_owned());
+            }
+            lines
+        }
+        SupportTier::CandidateReadOnly => vec![
+            "• firmware writes blocked until runtime traces are confirmed".to_owned(),
+            "• mapping/profile writes blocked until hardware read/write/readback passes".to_owned(),
+        ],
+        SupportTier::DetectOnly => vec![
+            "• diagnostics beyond identification are limited".to_owned(),
+            "• firmware, mapping, profile, and mode writes are not available".to_owned(),
+        ],
+    }
+}
+
+fn scorecard_gap_lines(scorecard: &SupportScorecard) -> Vec<String> {
+    if scorecard.missing_evidence.is_empty() {
+        return vec!["• no blocking evidence gaps for current support tier".to_owned()];
+    }
+
+    scorecard
+        .missing_evidence
+        .iter()
+        .take(4)
+        .map(|gap| format!("• {gap}"))
+        .collect()
 }
 
 fn compact_reason(reason: &str) -> String {

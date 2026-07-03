@@ -282,6 +282,7 @@ async fn maybe_persist_report(
         report.message.clone(),
         None,
         Some(report),
+        None,
     )
     .await;
 }

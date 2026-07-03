@@ -5,6 +5,7 @@ use super::state::{
     AppState, DiagnosticsFilter, DiagnosticsState, EventLevel, MappingDraftState, PanelFocus,
     Screen, TaskMode, TaskState,
 };
+use bitdo_app_core::RuntimeUnlockPolicy;
 
 pub fn reduce(state: &mut AppState, event: AppEvent) -> Vec<Effect> {
     let mut effects = Vec::new();
@@ -204,6 +205,7 @@ pub fn reduce(state: &mut AppState, event: AppEvent) -> Vec<Effect> {
                 state.selected_filtered_index =
                     state.selected_filtered_index.min(filtered.len() - 1);
                 state.selected_device_id = Some(state.devices[selected].vid_pid);
+                state.selected_action_index = 0;
                 state.set_status("Controllers refreshed");
             }
             state.append_event(
@@ -245,6 +247,7 @@ pub fn reduce(state: &mut AppState, event: AppEvent) -> Vec<Effect> {
                     message: summary,
                     diag: Some(result),
                     firmware: None,
+                    runtime_unlock: None,
                 });
             }
             state.recompute_quick_actions();
@@ -273,6 +276,7 @@ pub fn reduce(state: &mut AppState, event: AppEvent) -> Vec<Effect> {
                     message: error,
                     diag: None,
                     firmware: None,
+                    runtime_unlock: None,
                 });
             }
             state.recompute_quick_actions();
@@ -331,6 +335,71 @@ pub fn reduce(state: &mut AppState, event: AppEvent) -> Vec<Effect> {
         AppEvent::MappingApplyFailed(err) => {
             state.set_status(format!("Apply failed: {err}"));
             state.append_event(EventLevel::Error, format!("Apply failed: {err}"));
+        }
+        AppEvent::CandidateWriteProbeCompleted(report) => {
+            let failed = report.allowed && report.write_lock_required;
+            if report.write_lock_required {
+                state.write_lock_until_restart = true;
+            }
+            state.latest_unlock_report = Some(report.clone());
+            state.screen = Screen::Task;
+            state.task_state = Some(TaskState {
+                mode: TaskMode::Final,
+                plan: None,
+                progress: 100,
+                status: report.message.clone(),
+                final_report: None,
+                downloaded_firmware_path: None,
+            });
+            state.set_status(if report.allowed {
+                "Candidate write probe complete"
+            } else {
+                "Candidate write probe blocked"
+            });
+            state.append_event(
+                if failed {
+                    EventLevel::Error
+                } else if report.allowed {
+                    EventLevel::Info
+                } else {
+                    EventLevel::Warning
+                },
+                report.message.clone(),
+            );
+            effects.push(Effect::PersistSupportReport {
+                operation: "candidate-write-probe".to_owned(),
+                vid_pid: Some(report.vid_pid),
+                status: if failed {
+                    "failed".to_owned()
+                } else if report.allowed {
+                    "completed".to_owned()
+                } else {
+                    "blocked".to_owned()
+                },
+                message: report.message.clone(),
+                diag: None,
+                firmware: None,
+                runtime_unlock: Some(Box::new(report)),
+            });
+            state.recompute_quick_actions();
+        }
+        AppEvent::CandidateWriteProbeFailed(err) => {
+            state.write_lock_until_restart = true;
+            state.screen = Screen::Task;
+            state.task_state = Some(TaskState {
+                mode: TaskMode::Final,
+                plan: None,
+                progress: 100,
+                status: format!("Candidate write probe failed: {err}"),
+                final_report: None,
+                downloaded_firmware_path: None,
+            });
+            state.set_status("Candidate write probe failed");
+            state.append_event(
+                EventLevel::Error,
+                format!("Candidate write probe failed: {err}"),
+            );
+            state.recompute_quick_actions();
         }
         AppEvent::BackupRestoreCompleted(message) => {
             state.set_status("Backup restored");
@@ -456,6 +525,7 @@ pub fn reduce(state: &mut AppState, event: AppEvent) -> Vec<Effect> {
                     message: report.message.clone(),
                     diag: None,
                     firmware: Some(report),
+                    runtime_unlock: None,
                 });
             }
             if let Some(path) = downloaded_firmware_path {
@@ -549,6 +619,33 @@ fn handle_action(state: &mut AppState, action: QuickAction) -> Vec<Effect> {
             QuickAction::EditMappings => {
                 if let Some(vid_pid) = state.selected_device().map(|d| d.vid_pid) {
                     effects.push(Effect::LoadMappings { vid_pid });
+                }
+            }
+            QuickAction::UnlockWriteProbe => {
+                if let Some(vid_pid) = state.selected_device().map(|d| d.vid_pid) {
+                    let unlock_file = candidate_unlock_file(state, vid_pid);
+                    let unlock_file_present = unlock_file
+                        .as_deref()
+                        .map(|path| unlock_file_allows_pid(path, vid_pid))
+                        .unwrap_or(false);
+                    state.screen = Screen::Task;
+                    state.task_state = Some(TaskState {
+                        mode: TaskMode::Diagnostics,
+                        plan: None,
+                        progress: 5,
+                        status: format!("Running guarded candidate write probe for {vid_pid}"),
+                        final_report: None,
+                        downloaded_firmware_path: None,
+                    });
+                    effects.push(Effect::RunCandidateWriteProbe {
+                        vid_pid,
+                        policy: RuntimeUnlockPolicy {
+                            advanced_mode: state.advanced_mode,
+                            acknowledged_risk: state.allow_unsafe && state.brick_risk_ack,
+                            unlock_file_present,
+                            unlock_file_path: unlock_file.map(|path| path.display().to_string()),
+                        },
+                    });
                 }
             }
             QuickAction::Settings => {
@@ -651,6 +748,7 @@ fn handle_action(state: &mut AppState, action: QuickAction) -> Vec<Effect> {
                         message: summary,
                         diag: Some(result),
                         firmware: None,
+                        runtime_unlock: None,
                     });
                 }
             }
@@ -757,6 +855,31 @@ fn persist_settings_effect(state: &AppState) -> Option<Effect> {
         })
 }
 
+fn candidate_unlock_file(
+    state: &AppState,
+    vid_pid: bitdo_proto::VidPid,
+) -> Option<std::path::PathBuf> {
+    state.settings_path.as_ref().and_then(|path| {
+        path.parent().map(|parent| {
+            parent.join("candidate-unlocks").join(format!(
+                "{:04x}_{:04x}.toml",
+                vid_pid.vid, vid_pid.pid
+            ))
+        })
+    })
+}
+
+fn unlock_file_allows_pid(path: &std::path::Path, vid_pid: bitdo_proto::VidPid) -> bool {
+    let Ok(raw) = std::fs::read_to_string(path) else {
+        return false;
+    };
+    let pid_line = format!("pid = \"{vid_pid}\"");
+    raw.lines()
+        .map(str::trim)
+        .any(|line| line == "candidate_write_unlock = true")
+        && raw.lines().map(str::trim).any(|line| line == pid_line)
+}
+
 fn mapping_undo(state: &mut AppState) {
     match state.mapping_draft_state.as_mut() {
         Some(MappingDraftState::Jp108 {
@@ -812,26 +935,22 @@ fn adjust_mapping(state: &mut AppState, delta: i32) {
             undo_stack,
             selected_row,
             ..
-        }) => {
-            if *selected_row < current.len() {
-                undo_stack.push(current.clone());
-                let entry = &mut current[*selected_row];
-                entry.target_hid_usage = cycle_jp108(entry.target_hid_usage, delta);
-            }
+        }) if *selected_row < current.len() => {
+            undo_stack.push(current.clone());
+            let entry = &mut current[*selected_row];
+            entry.target_hid_usage = cycle_jp108(entry.target_hid_usage, delta);
         }
         Some(MappingDraftState::Ultimate2 {
             current,
             undo_stack,
             selected_row,
             ..
-        }) => {
-            if *selected_row < current.mappings.len() {
-                undo_stack.push(current.clone());
-                let entry = &mut current.mappings[*selected_row];
-                entry.target_hid_usage = cycle_u2(entry.target_hid_usage, delta);
-            }
+        }) if *selected_row < current.mappings.len() => {
+            undo_stack.push(current.clone());
+            let entry = &mut current.mappings[*selected_row];
+            entry.target_hid_usage = cycle_u2(entry.target_hid_usage, delta);
         }
-        None => {}
+        Some(_) | None => {}
     }
 }
 

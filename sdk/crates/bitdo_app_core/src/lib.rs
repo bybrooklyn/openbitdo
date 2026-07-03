@@ -1,8 +1,9 @@
 use base64::Engine;
 use bitdo_proto::{
     device_profile_for, enumerate_hid_devices, find_command, BitdoErrorCode, CommandId,
-    DeviceSession, DiagProbeResult, DiagSeverity, HidTransport, PidCapability, ProtocolFamily,
-    ResponseStatus, SessionConfig, SupportEvidence, SupportLevel, SupportTier, Transport, VidPid,
+    DeviceSession, DiagProbeResult, DiagSeverity, EvidenceConfidence, HidTransport, PidCapability,
+    ProfileBlob, ProtocolFamily, ResponseStatus, SessionConfig, SupportEvidence, SupportLevel,
+    SupportTier, Transport, VidPid,
 };
 use chrono::{DateTime, Utc};
 use ed25519_dalek::{Signature, Verifier, VerifyingKey};
@@ -262,6 +263,94 @@ impl WriteRecoveryReport {
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub enum EvidenceState {
+    Present,
+    Missing,
+    NotApplicable,
+}
+
+impl EvidenceState {
+    fn is_present(self) -> bool {
+        matches!(self, EvidenceState::Present | EvidenceState::NotApplicable)
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SupportScorecard {
+    pub vid_pid: VidPid,
+    pub support_tier: SupportTier,
+    pub static_evidence: EvidenceState,
+    pub runtime_evidence: EvidenceState,
+    pub hardware_confirmation: EvidenceState,
+    pub safe_read_coverage: EvidenceState,
+    pub safe_write_readiness: EvidenceState,
+    pub backup_readback_readiness: EvidenceState,
+    pub firmware_status: EvidenceState,
+    pub score_percent: u8,
+    pub promotion_ready: bool,
+    pub missing_evidence: Vec<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct RuntimeUnlockPolicy {
+    pub advanced_mode: bool,
+    pub acknowledged_risk: bool,
+    pub unlock_file_present: bool,
+    pub unlock_file_path: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct RuntimeUnlockReport {
+    pub vid_pid: VidPid,
+    pub allowed: bool,
+    pub operation: String,
+    pub commands_attempted: Vec<String>,
+    pub write_applied: bool,
+    pub readback_verified: bool,
+    pub write_lock_required: bool,
+    pub message: String,
+    pub scorecard: SupportScorecard,
+}
+
+impl RuntimeUnlockReport {
+    fn denied(vid_pid: VidPid, scorecard: SupportScorecard, message: impl Into<String>) -> Self {
+        Self {
+            vid_pid,
+            allowed: false,
+            operation: "candidate-write-probe".to_owned(),
+            commands_attempted: Vec::new(),
+            write_applied: false,
+            readback_verified: false,
+            write_lock_required: false,
+            message: message.into(),
+            scorecard,
+        }
+    }
+}
+
+fn blocked_operation_summary(device: &AppDevice) -> &'static str {
+    match device.support_tier {
+        SupportTier::CandidateReadOnly => "firmware, mapping, and profile writes",
+        SupportTier::DetectOnly => {
+            "diagnostics beyond identification, firmware, mapping, and writes"
+        }
+        SupportTier::Full => {
+            if device.capability.supports_firmware
+                && (device.capability.supports_jp108_dedicated_map
+                    || (device.capability.supports_u2_button_map
+                        && device.capability.supports_u2_slot_config))
+            {
+                "none for confirmed capabilities"
+            } else if device.capability.supports_firmware {
+                "mapping writes without a confirmed editor"
+            } else {
+                "firmware without a verified path"
+            }
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct OpenBitdoCore {
     config: OpenBitdoCoreConfig,
@@ -348,6 +437,16 @@ impl OpenBitdoCore {
     pub fn beginner_diag_summary(&self, device: &AppDevice, diag: &DiagProbeResult) -> String {
         let passed = diag.command_checks.iter().filter(|c| c.ok).count();
         let total = diag.command_checks.len();
+        let confirmed_total = diag
+            .command_checks
+            .iter()
+            .filter(|c| c.confidence == EvidenceConfidence::Confirmed)
+            .count();
+        let confirmed_ok = diag
+            .command_checks
+            .iter()
+            .filter(|c| c.confidence == EvidenceConfidence::Confirmed && c.ok)
+            .count();
         let issue_total = diag
             .command_checks
             .iter()
@@ -398,16 +497,17 @@ impl OpenBitdoCore {
         } else {
             "Transport ready: no successful safe-read responses yet."
         };
+        let blocked_hint = format!("Blocked operations: {}.", blocked_operation_summary(device));
 
         match device.support_tier {
             SupportTier::Full => format!(
-                "{passed}/{total} checks passed. {experimental_hint} {status_hint} {transport_hint} {family_hint} This device is full-support."
+                "Checks: {passed}/{total} passed. Confirmed checks: {confirmed_ok}/{confirmed_total} passed. {experimental_hint} {status_hint} {transport_hint} {blocked_hint} {family_hint} This device is full-support."
             ),
             SupportTier::CandidateReadOnly => format!(
-                "{passed}/{total} checks passed. {experimental_hint} {status_hint} {transport_hint} {family_hint} This device is candidate-readonly: update and mapping stay blocked until runtime + hardware confirmation."
+                "Checks: {passed}/{total} passed. Confirmed checks: {confirmed_ok}/{confirmed_total} passed. {experimental_hint} {status_hint} {transport_hint} {blocked_hint} {family_hint} This device is candidate-readonly: update and mapping stay blocked until runtime + hardware confirmation."
             ),
             SupportTier::DetectOnly => format!(
-                "{passed}/{total} checks passed. {experimental_hint} {status_hint} {transport_hint} {family_hint} This device is detect-only: use diagnostics only."
+                "Checks: {passed}/{total} passed. Confirmed checks: {confirmed_ok}/{confirmed_total} passed. {experimental_hint} {status_hint} {transport_hint} {blocked_hint} {family_hint} This device is detect-only: use diagnostics only."
             ),
         }
     }
@@ -836,6 +936,129 @@ impl OpenBitdoCore {
         })
     }
 
+    pub async fn candidate_write_probe(
+        &self,
+        vid_pid: VidPid,
+        policy: RuntimeUnlockPolicy,
+    ) -> AppCoreResult<RuntimeUnlockReport> {
+        let device = app_device_from_profile(vid_pid, None, true);
+        let scorecard = device.scorecard();
+        if device.support_tier != SupportTier::CandidateReadOnly {
+            return Ok(RuntimeUnlockReport::denied(
+                vid_pid,
+                scorecard,
+                "Runtime unlock is only available for candidate-readonly devices.",
+            ));
+        }
+        if !(policy.advanced_mode && policy.acknowledged_risk) {
+            return Ok(RuntimeUnlockReport::denied(
+                vid_pid,
+                scorecard,
+                "Enable advanced mode and acknowledge local write risk before running the probe.",
+            ));
+        }
+        if !policy.unlock_file_present {
+            let path = policy
+                .unlock_file_path
+                .as_deref()
+                .unwrap_or("the per-PID unlock file");
+            return Ok(RuntimeUnlockReport::denied(
+                vid_pid,
+                scorecard,
+                format!("Create {path} with candidate_write_unlock = true before running the probe."),
+            ));
+        }
+        if !(device.capability.supports_mode || device.capability.supports_profile_rw) {
+            return Ok(RuntimeUnlockReport::denied(
+                vid_pid,
+                scorecard,
+                "This candidate has no non-firmware safe-write operation available for probing.",
+            ));
+        }
+
+        if self.config.mock_mode {
+            let mut commands = Vec::new();
+            if device.capability.supports_mode {
+                commands.push("SetModeDInput".to_owned());
+            }
+            if device.capability.supports_profile_rw {
+                commands.push("WriteProfile".to_owned());
+            }
+            return Ok(RuntimeUnlockReport {
+                vid_pid,
+                allowed: true,
+                operation: "candidate-write-probe".to_owned(),
+                commands_attempted: commands,
+                write_applied: true,
+                readback_verified: true,
+                write_lock_required: false,
+                message: "Mock candidate write probe completed with readback verification.".to_owned(),
+                scorecard,
+            });
+        }
+
+        let config = SessionConfig {
+            experimental: true,
+            candidate_write_unlock: true,
+            ..Default::default()
+        };
+        let mut session =
+            DeviceSession::new(HidTransport::new(), vid_pid, config).map_err(AppCoreError::Protocol)?;
+        let mut commands = Vec::new();
+        let mut write_applied = false;
+        let mut readback_verified = false;
+        let mut failure: Option<String> = None;
+
+        if device.capability.supports_mode {
+            match guarded_mode_write_probe(&mut session) {
+                Ok(()) => {
+                    commands.push("SetModeDInput".to_owned());
+                    write_applied = true;
+                    readback_verified = true;
+                }
+                Err(err) => failure = Some(err.to_string()),
+            }
+        }
+
+        if failure.is_none() && device.capability.supports_profile_rw {
+            match guarded_profile_write_probe(&mut session) {
+                Ok(()) => {
+                    commands.push("WriteProfile".to_owned());
+                    write_applied = true;
+                    readback_verified = true;
+                }
+                Err(err) => failure = Some(err.to_string()),
+            }
+        }
+
+        let _ = session.close();
+        if let Some(message) = failure {
+            return Ok(RuntimeUnlockReport {
+                vid_pid,
+                allowed: true,
+                operation: "candidate-write-probe".to_owned(),
+                commands_attempted: commands,
+                write_applied,
+                readback_verified: false,
+                write_lock_required: true,
+                message: format!("Candidate write probe failed: {message}"),
+                scorecard,
+            });
+        }
+
+        Ok(RuntimeUnlockReport {
+            vid_pid,
+            allowed: true,
+            operation: "candidate-write-probe".to_owned(),
+            commands_attempted: commands,
+            write_applied,
+            readback_verified,
+            write_lock_required: false,
+            message: "Candidate write probe completed with readback verification.".to_owned(),
+            scorecard,
+        })
+    }
+
     pub async fn restore_backup(&self, backup_id: ConfigBackupId) -> AppCoreResult<()> {
         let backup = {
             let backups = self.backups.read().await;
@@ -1249,6 +1472,37 @@ impl OpenBitdoCore {
             .cloned()
             .ok_or_else(|| AppCoreError::NotFound(format!("unknown session id: {session_id}")))
     }
+}
+
+fn guarded_mode_write_probe<T: Transport>(session: &mut DeviceSession<T>) -> AppCoreResult<()> {
+    let before = session.get_mode().map_err(AppCoreError::Protocol)?;
+    session
+        .set_mode(before.mode)
+        .map_err(AppCoreError::Protocol)?;
+    let after = session.get_mode().map_err(AppCoreError::Protocol)?;
+    if after.mode != before.mode {
+        return Err(AppCoreError::InvalidState(format!(
+            "mode readback mismatch: before={} after={}",
+            before.mode, after.mode
+        )));
+    }
+    Ok(())
+}
+
+fn guarded_profile_write_probe<T: Transport>(session: &mut DeviceSession<T>) -> AppCoreResult<()> {
+    let before: ProfileBlob = session.read_profile(1).map_err(AppCoreError::Protocol)?;
+    session
+        .write_profile(before.slot, &before)
+        .map_err(AppCoreError::Protocol)?;
+    let after = session
+        .read_profile(before.slot)
+        .map_err(AppCoreError::Protocol)?;
+    if after.payload.is_empty() {
+        return Err(AppCoreError::InvalidState(
+            "profile readback returned an empty payload".to_owned(),
+        ));
+    }
+    Ok(())
 }
 
 async fn verify_artifact_signature(
@@ -1698,6 +1952,131 @@ impl AppDevice {
     pub fn support_status(&self) -> UserSupportStatus {
         support_status_for_tier(self.support_tier)
     }
+
+    pub fn scorecard(&self) -> SupportScorecard {
+        support_scorecard_for_device(self)
+    }
+}
+
+fn app_device_from_profile(vid_pid: VidPid, serial: Option<String>, connected: bool) -> AppDevice {
+    let profile = device_profile_for(vid_pid);
+    AppDevice {
+        vid_pid,
+        name: profile.name,
+        support_level: profile.support_level,
+        support_tier: profile.support_tier,
+        protocol_family: profile.protocol_family,
+        capability: profile.capability,
+        evidence: profile.evidence,
+        serial,
+        connected,
+    }
+}
+
+pub fn support_scorecard_for_device(device: &AppDevice) -> SupportScorecard {
+    let static_evidence = if device.evidence == SupportEvidence::Untested {
+        EvidenceState::Missing
+    } else {
+        EvidenceState::Present
+    };
+    let runtime_evidence = if device.support_tier == SupportTier::Full {
+        EvidenceState::Present
+    } else {
+        EvidenceState::Missing
+    };
+    let hardware_confirmation = if device.support_tier == SupportTier::Full {
+        EvidenceState::Present
+    } else {
+        EvidenceState::Missing
+    };
+    let safe_read_coverage = if device.capability.supports_mode
+        || device.capability.supports_profile_rw
+        || device.support_tier != SupportTier::DetectOnly
+    {
+        EvidenceState::Present
+    } else {
+        EvidenceState::Missing
+    };
+    let safe_write_readiness = if device.support_tier == SupportTier::Full {
+        EvidenceState::Present
+    } else if device.capability.supports_mode || device.capability.supports_profile_rw {
+        EvidenceState::Missing
+    } else {
+        EvidenceState::NotApplicable
+    };
+    let backup_readback_readiness = if device.support_tier == SupportTier::Full {
+        EvidenceState::Present
+    } else if device.capability.supports_profile_rw
+        || device.capability.supports_jp108_dedicated_map
+        || device.capability.supports_u2_button_map
+    {
+        EvidenceState::Missing
+    } else {
+        EvidenceState::NotApplicable
+    };
+    let firmware_status = if device.capability.supports_firmware {
+        if device.support_tier == SupportTier::Full {
+            EvidenceState::Present
+        } else {
+            EvidenceState::Missing
+        }
+    } else {
+        EvidenceState::NotApplicable
+    };
+    let states = [
+        static_evidence,
+        runtime_evidence,
+        hardware_confirmation,
+        safe_read_coverage,
+        safe_write_readiness,
+        backup_readback_readiness,
+        firmware_status,
+    ];
+    let score_percent =
+        ((states.iter().filter(|state| state.is_present()).count() * 100) / states.len()) as u8;
+    let mut missing_evidence = Vec::new();
+    if static_evidence == EvidenceState::Missing {
+        missing_evidence.push("sanitized static dossier/spec evidence".to_owned());
+    }
+    if runtime_evidence == EvidenceState::Missing {
+        missing_evidence.push("runtime request/response trace report".to_owned());
+    }
+    if hardware_confirmation == EvidenceState::Missing {
+        missing_evidence.push("hardware smoke confirmation from attached device".to_owned());
+    }
+    if safe_read_coverage == EvidenceState::Missing {
+        missing_evidence.push("repeatable safe-read diagnostics".to_owned());
+    }
+    if safe_write_readiness == EvidenceState::Missing {
+        missing_evidence.push("guarded safe-write runtime probe".to_owned());
+    }
+    if backup_readback_readiness == EvidenceState::Missing {
+        missing_evidence.push("backup and readback verification".to_owned());
+    }
+    if firmware_status == EvidenceState::Missing {
+        missing_evidence.push("firmware preflight and hardware confirmation".to_owned());
+    }
+    let promotion_ready = device.support_tier == SupportTier::Full
+        || (static_evidence == EvidenceState::Present
+            && runtime_evidence == EvidenceState::Present
+            && hardware_confirmation == EvidenceState::Present
+            && safe_write_readiness.is_present()
+            && backup_readback_readiness.is_present());
+
+    SupportScorecard {
+        vid_pid: device.vid_pid,
+        support_tier: device.support_tier,
+        static_evidence,
+        runtime_evidence,
+        hardware_confirmation,
+        safe_read_coverage,
+        safe_write_readiness,
+        backup_readback_readiness,
+        firmware_status,
+        score_percent,
+        promotion_ready,
+        missing_evidence,
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -1928,36 +2307,22 @@ fn mock_device(vid_pid: VidPid, full: bool) -> AppDevice {
     let profile = device_profile_for(vid_pid);
     AppDevice {
         vid_pid,
-        name: if full {
-            profile.name
-        } else {
-            "PID_MockDetectOnly".to_owned()
-        },
-        support_level: if full {
-            SupportLevel::Full
-        } else {
-            SupportLevel::DetectOnly
-        },
-        support_tier: if full {
-            SupportTier::Full
-        } else {
-            SupportTier::DetectOnly
-        },
+        name: profile.name,
+        support_level: profile.support_level,
+        support_tier: profile.support_tier,
         protocol_family: profile.protocol_family,
-        capability: if full {
+        capability: if full || profile.support_tier == SupportTier::CandidateReadOnly {
             profile.capability
         } else {
             PidCapability::identify_only()
         },
-        evidence: if full {
-            SupportEvidence::Confirmed
-        } else {
-            SupportEvidence::Inferred
-        },
+        evidence: profile.evidence,
         serial: Some(if full {
-            "MOCK-FULL-6009".to_owned()
+            format!("MOCK-FULL-{:04x}", vid_pid.pid)
+        } else if profile.support_tier == SupportTier::CandidateReadOnly {
+            format!("MOCK-CANDIDATE-{:04x}", vid_pid.pid)
         } else {
-            "MOCK-DETECT-2100".to_owned()
+            format!("MOCK-DETECT-{:04x}", vid_pid.pid)
         }),
         connected: true,
     }
@@ -2238,9 +2603,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn preflight_blocks_detect_only_pid() {
+    async fn preflight_blocks_candidate_pid_without_hardware_confirmation() {
         let core = OpenBitdoCore::new(OpenBitdoCoreConfig::default());
-        let path = std::env::temp_dir().join("openbitdo-detect-only.bin");
+        let path = std::env::temp_dir().join("openbitdo-candidate-no-hardware.bin");
         tokio::fs::write(&path, vec![1u8; 256])
             .await
             .expect("write");
@@ -2252,6 +2617,82 @@ mod tests {
             Some(AppPolicyGateReason::NotHardwareConfirmed)
         );
         let _ = tokio::fs::remove_file(path).await;
+    }
+
+    #[test]
+    fn candidate_scorecard_keeps_runtime_and_hardware_gaps_visible() {
+        let device = app_device_from_profile(VidPid::new(0x2dc8, 0x6002), None, true);
+        let scorecard = device.scorecard();
+
+        assert_eq!(scorecard.support_tier, SupportTier::CandidateReadOnly);
+        assert_eq!(scorecard.static_evidence, EvidenceState::Present);
+        assert_eq!(scorecard.runtime_evidence, EvidenceState::Missing);
+        assert_eq!(scorecard.hardware_confirmation, EvidenceState::Missing);
+        assert_eq!(scorecard.safe_write_readiness, EvidenceState::Missing);
+        assert!(!scorecard.promotion_ready);
+        assert!(
+            scorecard
+                .missing_evidence
+                .iter()
+                .any(|gap| gap.contains("runtime"))
+        );
+    }
+
+    #[tokio::test]
+    async fn candidate_write_probe_requires_explicit_unlock_file() {
+        let core = OpenBitdoCore::new(OpenBitdoCoreConfig {
+            mock_mode: true,
+            ..Default::default()
+        });
+
+        let report = core
+            .candidate_write_probe(
+                VidPid::new(0x2dc8, 0x6002),
+                RuntimeUnlockPolicy {
+                    advanced_mode: true,
+                    acknowledged_risk: true,
+                    unlock_file_present: false,
+                    unlock_file_path: Some("/tmp/openbitdo-candidate-unlock.toml".to_owned()),
+                },
+            )
+            .await
+            .expect("probe report");
+
+        assert!(!report.allowed);
+        assert!(!report.write_applied);
+        assert!(report.commands_attempted.is_empty());
+        assert!(report.message.contains("candidate_write_unlock = true"));
+    }
+
+    #[tokio::test]
+    async fn candidate_write_probe_mock_completes_non_firmware_readback() {
+        let core = OpenBitdoCore::new(OpenBitdoCoreConfig {
+            mock_mode: true,
+            ..Default::default()
+        });
+
+        let report = core
+            .candidate_write_probe(
+                VidPid::new(0x2dc8, 0x6002),
+                RuntimeUnlockPolicy {
+                    advanced_mode: true,
+                    acknowledged_risk: true,
+                    unlock_file_present: true,
+                    unlock_file_path: Some("/tmp/openbitdo-candidate-unlock.toml".to_owned()),
+                },
+            )
+            .await
+            .expect("probe report");
+
+        assert!(report.allowed);
+        assert!(report.write_applied);
+        assert!(report.readback_verified);
+        assert!(!report.write_lock_required);
+        assert_eq!(
+            report.commands_attempted,
+            vec!["SetModeDInput".to_owned(), "WriteProfile".to_owned()]
+        );
+        assert_eq!(report.scorecard.support_tier, SupportTier::CandidateReadOnly);
     }
 
     #[tokio::test]

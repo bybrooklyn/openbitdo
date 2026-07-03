@@ -1,7 +1,7 @@
 use crate::{DashboardLayoutMode, PanelFocus, ReportSaveMode};
 use bitdo_app_core::{
     ConfigBackupId, DedicatedButtonMapping, FirmwareFinalReport, FirmwareUpdateSessionId,
-    U2CoreProfile,
+    RuntimeUnlockPolicy, RuntimeUnlockReport, U2CoreProfile,
 };
 use bitdo_proto::DiagProbeResult;
 use bitdo_proto::VidPid;
@@ -25,6 +25,10 @@ pub enum Effect {
     ApplyMappings {
         vid_pid: VidPid,
         draft: MappingApplyDraft,
+    },
+    RunCandidateWriteProbe {
+        vid_pid: VidPid,
+        policy: RuntimeUnlockPolicy,
     },
     RestoreBackup {
         backup_id: ConfigBackupId,
@@ -68,5 +72,6 @@ pub enum Effect {
         message: String,
         diag: Option<DiagProbeResult>,
         firmware: Option<FirmwareFinalReport>,
+        runtime_unlock: Option<Box<RuntimeUnlockReport>>,
     },
 }

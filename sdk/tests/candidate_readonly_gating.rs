@@ -67,6 +67,47 @@ fn candidate_standard_pid_allows_diag_read_but_blocks_write_and_unsafe() {
 }
 
 #[test]
+fn candidate_standard_pid_allows_safe_write_only_with_runtime_unlock() {
+    let pid = 0x6002;
+    let mut transport = MockTransport::default();
+    transport.push_read_data({
+        let mut response = vec![0u8; 64];
+        response[0] = 0x02;
+        response
+    });
+    transport.push_read_data({
+        let mut response = vec![0u8; 64];
+        response[0] = 0x02;
+        response[1] = 0x05;
+        response[5] = 1;
+        response
+    });
+
+    let mut session = DeviceSession::new(
+        transport,
+        VidPid::new(0x2dc8, pid),
+        SessionConfig {
+            experimental: true,
+            candidate_write_unlock: true,
+            ..Default::default()
+        },
+    )
+    .expect("open session");
+
+    let mode = session
+        .set_mode(1)
+        .expect("candidate mode write should execute with runtime unlock");
+    assert_eq!(mode.mode, 1);
+
+    let unsafe_err = session
+        .enter_bootloader()
+        .expect_err("candidate unsafe command must remain blocked");
+    assert!(matches!(unsafe_err, BitdoError::UnsupportedForPid { .. }));
+
+    let _ = session.close();
+}
+
+#[test]
 fn candidate_jp_pid_remains_diag_only() {
     let pid = 0x5200;
     let mut transport = MockTransport::default();

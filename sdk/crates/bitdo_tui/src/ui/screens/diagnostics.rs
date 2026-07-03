@@ -1,14 +1,14 @@
 use crate::app::action::QuickAction;
 use crate::app::state::{AppState, DiagnosticsFilter};
 use crate::ui::layout::{
-    action_grid_height, inner_rect, panel_block, render_action_strip, truncate_to_width,
-    ActionDescriptor, HitMap, HitTarget,
+    ActionDescriptor, HitMap, HitTarget, action_grid_height, inner_rect, panel_block,
+    render_action_strip, truncate_to_width,
 };
+use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{List, ListItem, Paragraph};
-use ratatui::Frame;
 
 pub fn render(frame: &mut Frame<'_>, state: &AppState, area: Rect) -> HitMap {
     let action_height = action_grid_height(area.width, state.quick_actions.len()).max(4);
@@ -91,6 +91,30 @@ fn render_summary(frame: &mut Frame<'_>, state: &AppState, area: Rect) {
         .iter()
         .filter(|check| check.is_experimental)
         .count();
+    let experimental_passed = diagnostics
+        .result
+        .command_checks
+        .iter()
+        .filter(|check| check.is_experimental && check.ok)
+        .count();
+    let confirmed = diagnostics
+        .result
+        .command_checks
+        .iter()
+        .filter(|check| check.confidence == bitdo_proto::EvidenceConfidence::Confirmed)
+        .count();
+    let confirmed_passed = diagnostics
+        .result
+        .command_checks
+        .iter()
+        .filter(|check| check.confidence == bitdo_proto::EvidenceConfidence::Confirmed && check.ok)
+        .count();
+    let attention = diagnostics
+        .result
+        .command_checks
+        .iter()
+        .filter(|check| check.severity == bitdo_proto::DiagSeverity::NeedsAttention)
+        .count();
 
     let transport = if diagnostics.result.transport_ready {
         "ready"
@@ -108,7 +132,26 @@ fn render_summary(frame: &mut Frame<'_>, state: &AppState, area: Rect) {
             Span::styled(format!("{issues} issues"), severity_style(issues > 0)),
             Span::raw("  •  "),
             Span::styled(
-                format!("{experimental} experimental"),
+                format!("{attention} attention"),
+                severity_style(attention > 0),
+            ),
+        ]),
+        Line::from(vec![
+            Span::styled(
+                format!("Confirmed {confirmed_passed}/{confirmed}"),
+                crate::ui::theme::subtle_style(),
+            ),
+            Span::raw("  •  "),
+            Span::styled(
+                format!("Experimental {experimental_passed}/{experimental}"),
+                crate::ui::theme::subtle_style(),
+            ),
+            Span::raw("  •  "),
+            Span::styled(
+                format!(
+                    "Blocked: {}",
+                    blocked_summary(diagnostics.result.support_tier)
+                ),
                 crate::ui::theme::subtle_style(),
             ),
         ]),
@@ -485,6 +528,14 @@ fn recommended_next_action(diagnostics: &crate::app::state::DiagnosticsState) ->
         bitdo_proto::SupportTier::DetectOnly => {
             "Use diagnostics only. This device is not ready for update or mapping flows."
         }
+    }
+}
+
+fn blocked_summary(tier: bitdo_proto::SupportTier) -> &'static str {
+    match tier {
+        bitdo_proto::SupportTier::Full => "none for confirmed paths",
+        bitdo_proto::SupportTier::CandidateReadOnly => "writes until hardware confirmation",
+        bitdo_proto::SupportTier::DetectOnly => "writes and deeper workflows",
     }
 }
 

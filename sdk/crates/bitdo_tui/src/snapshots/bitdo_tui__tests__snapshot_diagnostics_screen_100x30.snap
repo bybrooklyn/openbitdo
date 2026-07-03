@@ -6,9 +6,9 @@ expression: rendered
 │OpenBitDo  Diagnostics  •  3/5 passed  •  reports fail-only  •  safe                              │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭Diagnostics  summary──────────────────────────────────────────────────────────────────────────────╮
-│3/5 passed  •  2 issues  •  2 experimental                                                        │
+│3/5 passed  •  2 issues  •  1 attention                                                           │
+│Confirmed 2/3  •  Experimental 1/2  •  Blocked: none for confirmed paths                          │
 │Tier: supported  •  Family: Standard64  •  Transport: ready                                       │
-│                                                                                                  │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭Filter  All──╮╭Filter  Issu╮╭Filter  Exper╮╭Selected Check  detail────────────────────────────────╮
 │All          ││Issues      ││Experimental ││GetPid  OK                                            │
@@ -22,7 +22,7 @@ expression: rendered
 │                                          │╰──────────────────────────────────────────────────────╯
 │                                          │╭Next Steps  guidance──────────────────────────────────╮
 │                                          ││Action: Return to the dashboard for update or mapp…   │
-│                                          ││Summary: 3/5 checks passed. Experimental checks: 1…   │
+│                                          ││Summary: Checks: 3/5 passed. Confirmed checks: 2/3…   │
 │                                          ││Saved report: not yet saved in this screen            │
 │                                          ││                                                      │
 │                                          ││                                                      │

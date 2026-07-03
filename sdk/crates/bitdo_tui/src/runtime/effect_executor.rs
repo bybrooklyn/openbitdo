@@ -117,6 +117,13 @@ pub async fn execute_effect(
                 Err(err) => vec![AppEvent::MappingApplyFailed(err.to_string())],
             },
         },
+        Effect::RunCandidateWriteProbe { vid_pid, policy } => match core
+            .candidate_write_probe(vid_pid, policy)
+            .await
+        {
+            Ok(report) => vec![AppEvent::CandidateWriteProbeCompleted(report)],
+            Err(err) => vec![AppEvent::CandidateWriteProbeFailed(err.to_string())],
+        },
         Effect::RestoreBackup { backup_id } => match core.restore_backup(backup_id).await {
             Ok(_) => vec![AppEvent::BackupRestoreCompleted(
                 "Backup restore completed".to_owned(),
@@ -288,6 +295,7 @@ pub async fn execute_effect(
             message,
             diag,
             firmware,
+            runtime_unlock,
         } => {
             let device = vid_pid.and_then(|id| state.devices.iter().find(|d| d.vid_pid == id));
             match persist_support_report(
@@ -297,6 +305,7 @@ pub async fn execute_effect(
                 message,
                 diag.as_ref(),
                 firmware.as_ref(),
+                runtime_unlock.as_deref(),
             )
             .await
             {

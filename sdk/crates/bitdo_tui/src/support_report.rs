@@ -1,6 +1,6 @@
 use crate::AppDevice;
-use anyhow::{anyhow, Result};
-use bitdo_app_core::FirmwareFinalReport;
+use anyhow::{Result, anyhow};
+use bitdo_app_core::{FirmwareFinalReport, RuntimeUnlockReport, SupportScorecard};
 use bitdo_proto::{DiagProbeResult, SupportLevel, SupportTier};
 use chrono::Utc;
 use serde::Serialize;
@@ -18,8 +18,10 @@ struct SupportReport {
     device: Option<SupportReportDevice>,
     status: String,
     message: String,
+    scorecard: Option<SupportScorecard>,
     diag: Option<DiagProbeResult>,
     firmware: Option<FirmwareFinalReport>,
+    runtime_unlock: Option<RuntimeUnlockReport>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -32,6 +34,11 @@ struct SupportReportDevice {
     serial: Option<String>,
     support_level: String,
     support_tier: String,
+    protocol_family: String,
+    evidence: String,
+    works_now: Vec<String>,
+    blocked_operations: Vec<String>,
+    missing_evidence: Vec<String>,
 }
 
 /// Persist a troubleshooting report as TOML.
@@ -45,10 +52,11 @@ pub(crate) async fn persist_support_report(
     message: String,
     diag: Option<&DiagProbeResult>,
     firmware: Option<&FirmwareFinalReport>,
+    runtime_unlock: Option<&RuntimeUnlockReport>,
 ) -> Result<PathBuf> {
     let now = Utc::now();
     let report = SupportReport {
-        schema_version: 1,
+        schema_version: 2,
         generated_at_utc: now.to_rfc3339(),
         operation: operation.to_owned(),
         device: device.map(|d| SupportReportDevice {
@@ -67,11 +75,18 @@ pub(crate) async fn persist_support_report(
                 SupportTier::CandidateReadOnly => "candidate-readonly".to_owned(),
                 SupportTier::DetectOnly => "detect-only".to_owned(),
             },
+            protocol_family: format!("{:?}", d.protocol_family),
+            evidence: format!("{:?}", d.evidence),
+            works_now: report_works_now(d),
+            blocked_operations: report_blocked_operations(d),
+            missing_evidence: report_missing_evidence(d),
         }),
         status: status.to_owned(),
         message,
+        scorecard: device.map(|d| d.scorecard()),
         diag: diag.cloned(),
         firmware: firmware.cloned(),
+        runtime_unlock: runtime_unlock.cloned(),
     };
 
     let report_dir = default_report_directory();
@@ -125,6 +140,68 @@ fn sanitize_token(value: &str) -> String {
     }
 
     out.trim_matches('_').to_owned()
+}
+
+fn report_works_now(device: &AppDevice) -> Vec<String> {
+    let mut out = vec![
+        "safe diagnostics".to_owned(),
+        "support report generation".to_owned(),
+        "device identification".to_owned(),
+    ];
+    if device.capability.supports_mode {
+        out.push("mode read/switch where policy allows".to_owned());
+    }
+    if device.capability.supports_profile_rw {
+        out.push("profile read/write where policy allows".to_owned());
+    }
+    if device.capability.supports_firmware {
+        out.push("verified firmware preflight/update".to_owned());
+    }
+    if device.capability.supports_jp108_dedicated_map {
+        out.push("JP108 dedicated mapping".to_owned());
+    }
+    if device.capability.supports_u2_button_map || device.capability.supports_u2_slot_config {
+        out.push("Ultimate 2 slot and mapping".to_owned());
+    }
+    out
+}
+
+fn report_blocked_operations(device: &AppDevice) -> Vec<String> {
+    match device.support_tier {
+        SupportTier::Full => {
+            let mut out = Vec::new();
+            if !device.capability.supports_firmware {
+                out.push("firmware update: no verified path for this PID".to_owned());
+            }
+            if !(device.capability.supports_jp108_dedicated_map
+                || (device.capability.supports_u2_button_map
+                    && device.capability.supports_u2_slot_config))
+            {
+                out.push("mapping editor: no confirmed mapping surface".to_owned());
+            }
+            if out.is_empty() {
+                out.push("none for confirmed capabilities".to_owned());
+            }
+            out
+        }
+        SupportTier::CandidateReadOnly => vec![
+            "firmware writes blocked until runtime traces are confirmed".to_owned(),
+            "mapping/profile writes blocked until hardware read/write/readback passes".to_owned(),
+        ],
+        SupportTier::DetectOnly => vec![
+            "diagnostics beyond identification are limited".to_owned(),
+            "firmware, mapping, profile, and mode writes are unavailable".to_owned(),
+        ],
+    }
+}
+
+fn report_missing_evidence(device: &AppDevice) -> Vec<String> {
+    let missing = device.scorecard().missing_evidence;
+    if missing.is_empty() {
+        vec!["no blocking evidence gaps for current support tier".to_owned()]
+    } else {
+        missing
+    }
 }
 
 fn support_report_file_name(now: chrono::DateTime<Utc>, operation: &str, token: &str) -> String {

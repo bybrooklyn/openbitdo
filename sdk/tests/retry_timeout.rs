@@ -27,6 +27,7 @@ fn retries_after_timeout_then_succeeds() {
         allow_unsafe: false,
         brick_risk_ack: false,
         experimental: false,
+        candidate_write_unlock: false,
         trace_enabled: true,
     };
     let mut session =
@@ -71,6 +72,7 @@ fn retries_after_malformed_then_succeeds() {
         allow_unsafe: false,
         brick_risk_ack: false,
         experimental: false,
+        candidate_write_unlock: false,
         trace_enabled: true,
     };
     let mut session =

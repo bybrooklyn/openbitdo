@@ -13,8 +13,8 @@ use bitdo_proto::{
     EvidenceConfidence, ResponseStatus, SupportTier, VidPid,
 };
 use insta::assert_snapshot;
-use ratatui::backend::TestBackend;
 use ratatui::Terminal;
+use ratatui::backend::TestBackend;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
@@ -65,6 +65,167 @@ async fn quick_action_matrix_blocks_update_for_read_only() {
         .find(|a| a.action == QuickAction::RecommendedUpdate)
         .expect("update action");
     assert!(!update.enabled);
+}
+
+#[tokio::test]
+async fn dashboard_prioritizes_diagnostics_when_device_detected() {
+    let core = bitdo_app_core::OpenBitdoCore::new(OpenBitdoCoreConfig {
+        mock_mode: true,
+        ..Default::default()
+    });
+
+    let mut state = AppState::new(&UiLaunchOptions::default());
+    let devices = core.list_devices().await.expect("devices");
+    let _ = reduce(&mut state, AppEvent::DevicesLoaded(devices));
+
+    assert_eq!(state.quick_actions[0].action, QuickAction::Diagnose);
+    assert!(state.quick_actions[0].enabled);
+    assert_eq!(state.selected_action(), Some(QuickAction::Diagnose));
+}
+
+#[tokio::test]
+async fn dashboard_candidate_write_probe_uses_per_pid_unlock_file() {
+    let core = bitdo_app_core::OpenBitdoCore::new(OpenBitdoCoreConfig {
+        mock_mode: true,
+        ..Default::default()
+    });
+    let unique = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("clock")
+        .as_nanos();
+    let test_dir = std::env::temp_dir().join(format!("openbitdo-tui-unlock-{unique}"));
+    let settings_path = test_dir.join("ui-state.toml");
+    let unlock_dir = test_dir.join("candidate-unlocks");
+    std::fs::create_dir_all(&unlock_dir).expect("unlock dir");
+    std::fs::write(
+        unlock_dir.join("2dc8_2100.toml"),
+        "pid = \"2dc8:2100\"\ncandidate_write_unlock = true\n",
+    )
+    .expect("unlock file");
+
+    let mut state = AppState::new(&UiLaunchOptions {
+        advanced_mode: true,
+        settings_path: Some(settings_path),
+        allow_unsafe: true,
+        brick_risk_ack: true,
+        ..UiLaunchOptions::default()
+    });
+    drive(&core, &mut state, AppEvent::Init).await;
+
+    let candidate_display_index = state
+        .filtered_device_indices()
+        .iter()
+        .position(|idx| state.devices[*idx].vid_pid == VidPid::new(0x2dc8, 0x2100))
+        .expect("candidate display index");
+    drive(
+        &core,
+        &mut state,
+        AppEvent::SelectFilteredDevice(candidate_display_index),
+    )
+    .await;
+
+    let probe = state
+        .quick_actions
+        .iter()
+        .find(|action| action.action == QuickAction::UnlockWriteProbe)
+        .expect("probe action");
+    assert!(probe.enabled);
+
+    drive(
+        &core,
+        &mut state,
+        AppEvent::TriggerAction(QuickAction::UnlockWriteProbe),
+    )
+    .await;
+
+    let report = state
+        .latest_unlock_report
+        .as_ref()
+        .expect("unlock report");
+    assert!(report.allowed);
+    assert!(report.readback_verified);
+    assert_eq!(report.vid_pid, VidPid::new(0x2dc8, 0x2100));
+    assert_eq!(state.screen, Screen::Task);
+    assert_eq!(
+        state.task_state.as_ref().map(|task| task.mode),
+        Some(TaskMode::Final)
+    );
+
+    if let Some(path) = state.latest_report_path.take() {
+        assert!(path.exists());
+        let body = std::fs::read_to_string(&path).expect("support report");
+        assert!(body.contains("runtime_unlock"));
+        assert!(body.contains("candidate-write-probe"));
+        let _ = std::fs::remove_file(path);
+    }
+    let _ = std::fs::remove_dir_all(test_dir);
+}
+
+#[tokio::test]
+async fn dashboard_candidate_write_probe_requires_advanced_and_ack() {
+    let core = bitdo_app_core::OpenBitdoCore::new(OpenBitdoCoreConfig {
+        mock_mode: true,
+        ..Default::default()
+    });
+    let mut state = AppState::new(&UiLaunchOptions::default());
+    drive(&core, &mut state, AppEvent::Init).await;
+
+    let candidate_display_index = state
+        .filtered_device_indices()
+        .iter()
+        .position(|idx| state.devices[*idx].vid_pid == VidPid::new(0x2dc8, 0x2100))
+        .expect("candidate display index");
+    drive(
+        &core,
+        &mut state,
+        AppEvent::SelectFilteredDevice(candidate_display_index),
+    )
+    .await;
+
+    let probe = state
+        .quick_actions
+        .iter()
+        .find(|action| action.action == QuickAction::UnlockWriteProbe)
+        .expect("probe action");
+    assert!(!probe.enabled);
+    assert_eq!(probe.reason.as_deref(), Some("Enable advanced mode first"));
+
+    state.advanced_mode = true;
+    state.recompute_quick_actions();
+    let probe = state
+        .quick_actions
+        .iter()
+        .find(|action| action.action == QuickAction::UnlockWriteProbe)
+        .expect("probe action");
+    assert!(!probe.enabled);
+    assert_eq!(
+        probe.reason.as_deref(),
+        Some("Acknowledge local write risk first")
+    );
+}
+
+#[test]
+fn dashboard_no_device_selects_refresh() {
+    let mut state = AppState::new(&UiLaunchOptions::default());
+    let _ = reduce(&mut state, AppEvent::DevicesLoaded(Vec::new()));
+
+    assert_eq!(state.quick_actions[0].action, QuickAction::Diagnose);
+    assert!(!state.quick_actions[0].enabled);
+    assert_eq!(state.selected_action(), Some(QuickAction::Refresh));
+}
+
+#[test]
+fn dashboard_groups_devices_by_support_tier() {
+    let state = snapshot_state();
+    let ordered = state
+        .filtered_device_indices()
+        .into_iter()
+        .map(|idx| state.devices[idx].support_tier)
+        .collect::<Vec<_>>();
+
+    assert_eq!(ordered[0], SupportTier::Full);
+    assert_eq!(ordered[1], SupportTier::CandidateReadOnly);
+    assert_eq!(ordered.last().copied(), Some(SupportTier::DetectOnly));
 }
 
 #[tokio::test]
@@ -331,6 +492,11 @@ async fn manual_save_report_updates_diagnostics_state() {
         .and_then(|diagnostics| diagnostics.latest_report_path.clone())
         .expect("saved diagnostics report path");
     assert!(saved_path.exists());
+    let report = std::fs::read_to_string(&saved_path).expect("read report");
+    assert!(report.contains("schema_version = 2"));
+    assert!(report.contains("protocol_family = \"Standard64\""));
+    assert!(report.contains("blocked_operations"));
+    assert!(report.contains("missing_evidence"));
 
     let _ = std::fs::remove_file(saved_path);
 }
@@ -542,6 +708,17 @@ fn snapshot_state() -> AppState {
                 serial: None,
                 connected: true,
             },
+            bitdo_app_core::AppDevice {
+                vid_pid: VidPid::new(0x2dc8, 0x2056),
+                name: "Detect Only".to_owned(),
+                support_level: bitdo_proto::SupportLevel::DetectOnly,
+                support_tier: bitdo_proto::SupportTier::DetectOnly,
+                protocol_family: bitdo_proto::ProtocolFamily::Unknown,
+                capability: bitdo_proto::PidCapability::identify_only(),
+                evidence: bitdo_proto::SupportEvidence::Untested,
+                serial: None,
+                connected: true,
+            },
         ]),
     );
     state.event_log.clear();
@@ -552,7 +729,7 @@ fn snapshot_state() -> AppState {
 fn sample_diagnostics_state(report_path: Option<PathBuf>) -> DiagnosticsState {
     DiagnosticsState {
         result: sample_diagnostics_result(),
-        summary: "3/5 checks passed. Experimental checks: 1/2 passed. Issues: 2 total, 1 need attention. Transport ready: yes. Standard64 diagnostics are available. This device is full-support.".to_owned(),
+        summary: "Checks: 3/5 passed. Confirmed checks: 2/3 passed. Experimental checks: 1/2 passed. Issues: 2 total, 1 need attention. Transport ready: yes. Blocked operations: none for confirmed capabilities. Standard64 diagnostics are available. This device is full-support.".to_owned(),
         selected_check_index: 0,
         active_filter: DiagnosticsFilter::All,
         latest_report_path: report_path,
