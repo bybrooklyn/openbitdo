@@ -1,5 +1,5 @@
 use bitdo_proto::{
-    find_command, CommandId, DeviceSession, MockTransport, SafetyClass, SessionConfig, VidPid,
+    CommandId, DeviceSession, MockTransport, SafetyClass, SessionConfig, VidPid, find_command,
 };
 
 #[test]
@@ -26,10 +26,11 @@ fn diag_probe_expands_to_safe_read_commands_and_parsed_facts() {
             .map(|row| row.safety_class == SafetyClass::SafeRead)
             .unwrap_or(false)
     }));
-    assert!(diag
-        .command_checks
-        .iter()
-        .any(|check| check.command == CommandId::U2GetCurrentSlot));
+    assert!(
+        diag.command_checks
+            .iter()
+            .any(|check| check.command == CommandId::U2GetCurrentSlot)
+    );
 
     let pid_check = diag
         .command_checks

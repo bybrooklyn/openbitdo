@@ -1,4 +1,4 @@
-use bitdo_proto::{find_pid, pid_registry, ProtocolFamily, SupportLevel, SupportTier};
+use bitdo_proto::{ProtocolFamily, SupportLevel, SupportTier, find_pid, pid_registry};
 use std::collections::HashSet;
 use std::fs;
 use std::path::PathBuf;

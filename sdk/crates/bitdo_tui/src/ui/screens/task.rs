@@ -1,12 +1,12 @@
 use crate::app::state::{AppState, TaskMode};
 use crate::ui::layout::{
-    action_grid_height, panel_block, render_action_strip, ActionDescriptor, HitMap,
+    ActionDescriptor, HitMap, action_grid_height, panel_block, render_action_strip,
 };
+use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Gauge, Paragraph};
-use ratatui::Frame;
 
 pub fn render(frame: &mut Frame<'_>, state: &AppState, area: Rect) -> HitMap {
     let action_height = action_grid_height(area.width, state.quick_actions.len()).max(4);

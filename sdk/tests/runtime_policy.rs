@@ -1,6 +1,6 @@
 use bitdo_proto::{
-    find_command, BitdoError, CommandId, CommandRuntimePolicy, DeviceSession, DiagSeverity,
-    EvidenceConfidence, MockTransport, ResponseStatus, SessionConfig, VidPid,
+    BitdoError, CommandId, CommandRuntimePolicy, DeviceSession, DiagSeverity, EvidenceConfidence,
+    MockTransport, ResponseStatus, SessionConfig, VidPid, find_command,
 };
 
 #[test]

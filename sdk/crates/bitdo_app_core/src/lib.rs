@@ -1,9 +1,9 @@
 use base64::Engine;
 use bitdo_proto::{
-    device_profile_for, enumerate_hid_devices, find_command, BitdoErrorCode, CommandId,
-    DeviceSession, DiagProbeResult, DiagSeverity, EvidenceConfidence, HidTransport, PidCapability,
-    ProfileBlob, ProtocolFamily, ResponseStatus, SessionConfig, SupportEvidence, SupportLevel,
-    SupportTier, Transport, VidPid,
+    BitdoErrorCode, CommandId, DeviceSession, DiagProbeResult, DiagSeverity, EvidenceConfidence,
+    HidTransport, PidCapability, ProfileBlob, ProtocolFamily, ResponseStatus, SessionConfig,
+    SupportEvidence, SupportLevel, SupportTier, Transport, VidPid, device_profile_for,
+    enumerate_hid_devices, find_command,
 };
 use chrono::{DateTime, Utc};
 use ed25519_dalek::{Signature, Verifier, VerifyingKey};
@@ -11,11 +11,11 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use thiserror::Error;
-use tokio::sync::{broadcast, Mutex, RwLock};
-use tokio::time::{sleep, Duration};
+use tokio::sync::{Mutex, RwLock, broadcast};
+use tokio::time::{Duration, sleep};
 use uuid::Uuid;
 
 const DEFAULT_MANIFEST_URL: &str =
@@ -117,42 +117,63 @@ impl DedicatedButtonId {
 pub enum U2ButtonId {
     A,
     B,
-    K1,
-    K2,
-    K3,
-    K4,
-    K5,
-    K6,
-    K7,
-    K8,
+    X,
+    Y,
+    L1,
+    R1,
+    L2,
+    R2,
+    L3,
+    R3,
+    Select,
+    Start,
+    Home,
+    DPadUp,
+    DPadDown,
+    DPadLeft,
+    DPadRight,
 }
 
 impl U2ButtonId {
-    pub const ALL: [U2ButtonId; 10] = [
+    pub const ALL: [U2ButtonId; 17] = [
         U2ButtonId::A,
         U2ButtonId::B,
-        U2ButtonId::K1,
-        U2ButtonId::K2,
-        U2ButtonId::K3,
-        U2ButtonId::K4,
-        U2ButtonId::K5,
-        U2ButtonId::K6,
-        U2ButtonId::K7,
-        U2ButtonId::K8,
+        U2ButtonId::X,
+        U2ButtonId::Y,
+        U2ButtonId::L1,
+        U2ButtonId::R1,
+        U2ButtonId::L2,
+        U2ButtonId::R2,
+        U2ButtonId::L3,
+        U2ButtonId::R3,
+        U2ButtonId::Select,
+        U2ButtonId::Start,
+        U2ButtonId::Home,
+        U2ButtonId::DPadUp,
+        U2ButtonId::DPadDown,
+        U2ButtonId::DPadLeft,
+        U2ButtonId::DPadRight,
     ];
 
     fn wire_index(self) -> u8 {
         match self {
             U2ButtonId::A => 0,
             U2ButtonId::B => 1,
-            U2ButtonId::K1 => 2,
-            U2ButtonId::K2 => 3,
-            U2ButtonId::K3 => 4,
-            U2ButtonId::K4 => 5,
-            U2ButtonId::K5 => 6,
-            U2ButtonId::K6 => 7,
-            U2ButtonId::K7 => 8,
-            U2ButtonId::K8 => 9,
+            U2ButtonId::X => 2,
+            U2ButtonId::Y => 3,
+            U2ButtonId::L1 => 4,
+            U2ButtonId::R1 => 5,
+            U2ButtonId::L2 => 6,
+            U2ButtonId::R2 => 7,
+            U2ButtonId::L3 => 8,
+            U2ButtonId::R3 => 9,
+            U2ButtonId::Select => 10,
+            U2ButtonId::Start => 11,
+            U2ButtonId::Home => 12,
+            U2ButtonId::DPadUp => 13,
+            U2ButtonId::DPadDown => 14,
+            U2ButtonId::DPadLeft => 15,
+            U2ButtonId::DPadRight => 16,
         }
     }
 
@@ -965,7 +986,9 @@ impl OpenBitdoCore {
             return Ok(RuntimeUnlockReport::denied(
                 vid_pid,
                 scorecard,
-                format!("Create {path} with candidate_write_unlock = true before running the probe."),
+                format!(
+                    "Create {path} with candidate_write_unlock = true before running the probe."
+                ),
             ));
         }
         if !(device.capability.supports_mode || device.capability.supports_profile_rw) {
@@ -992,7 +1015,8 @@ impl OpenBitdoCore {
                 write_applied: true,
                 readback_verified: true,
                 write_lock_required: false,
-                message: "Mock candidate write probe completed with readback verification.".to_owned(),
+                message: "Mock candidate write probe completed with readback verification."
+                    .to_owned(),
                 scorecard,
             });
         }
@@ -1002,8 +1026,8 @@ impl OpenBitdoCore {
             candidate_write_unlock: true,
             ..Default::default()
         };
-        let mut session =
-            DeviceSession::new(HidTransport::new(), vid_pid, config).map_err(AppCoreError::Protocol)?;
+        let mut session = DeviceSession::new(HidTransport::new(), vid_pid, config)
+            .map_err(AppCoreError::Protocol)?;
         let mut commands = Vec::new();
         let mut write_applied = false;
         let mut readback_verified = false;
@@ -1168,11 +1192,12 @@ impl OpenBitdoCore {
         let manifest: FirmwareManifest = toml::from_str(&manifest_raw)
             .map_err(|err| AppCoreError::Manifest(format!("invalid manifest TOML: {err}")))?;
 
-        let artifact = manifest
-            .recommended_for(target)
-            .ok_or_else(|| {
-                AppCoreError::Download(format!("no stable firmware artifact for pid={:#06x}", target.pid))
-            })?;
+        let artifact = manifest.recommended_for(target).ok_or_else(|| {
+            AppCoreError::Download(format!(
+                "no stable firmware artifact for pid={:#06x}",
+                target.pid
+            ))
+        })?;
 
         let artifact_bytes = self
             .http
@@ -1667,11 +1692,8 @@ async fn run_transfer_task(
 
     emit_event(&handle, "commit", 99, "Committing firmware", false).await;
     if let Err(err) = session.firmware_commit() {
-        let message = firmware_failure_message(
-            &mut session,
-            true,
-            format!("Firmware commit failed: {err}"),
-        );
+        let message =
+            firmware_failure_message(&mut session, true, format!("Firmware commit failed: {err}"));
         finalize_failure(&handle, err.code(), chunks_sent, message).await;
         let _ = session.close();
         return;
@@ -2087,13 +2109,11 @@ pub struct FirmwareManifest {
 
 impl FirmwareManifest {
     fn recommended_for(&self, target: VidPid) -> Option<&FirmwareArtifact> {
-        self.artifacts
-            .iter()
-            .find(|entry| {
-                entry.channel.eq_ignore_ascii_case("stable")
-                    && entry.vid == target.vid
-                    && entry.pid == target.pid
-            })
+        self.artifacts.iter().find(|entry| {
+            entry.channel.eq_ignore_ascii_case("stable")
+                && entry.vid == target.vid
+                && entry.pid == target.pid
+        })
     }
 }
 
@@ -2692,7 +2712,10 @@ mod tests {
             report.commands_attempted,
             vec!["SetModeDInput".to_owned(), "WriteProfile".to_owned()]
         );
-        assert_eq!(report.scorecard.support_tier, SupportTier::CandidateReadOnly);
+        assert_eq!(
+            report.scorecard.support_tier,
+            SupportTier::CandidateReadOnly
+        );
     }
 
     #[tokio::test]
@@ -2869,7 +2892,11 @@ mod tests {
             }],
         };
 
-        assert!(manifest.recommended_for(VidPid::new(0x2dc8, 0x6012)).is_none());
+        assert!(
+            manifest
+                .recommended_for(VidPid::new(0x2dc8, 0x6012))
+                .is_none()
+        );
     }
 
     #[tokio::test]
@@ -2881,7 +2908,9 @@ mod tests {
             ..Default::default()
         });
         let path = std::env::temp_dir().join("openbitdo-cancel-running.bin");
-        tokio::fs::write(&path, vec![0xCC; 256]).await.expect("write");
+        tokio::fs::write(&path, vec![0xCC; 256])
+            .await
+            .expect("write");
 
         let preflight = core
             .preflight_firmware(make_req(path.clone(), 0x6009))
@@ -2966,7 +2995,10 @@ mod tests {
         drop(runtime);
 
         let transport = session.into_transport();
-        assert_eq!(transport.writes(), &[vec![0x05, 0x00, 0x51, 0x01, 0x00, 0x00]]);
+        assert_eq!(
+            transport.writes(),
+            &[vec![0x05, 0x00, 0x51, 0x01, 0x00, 0x00]]
+        );
     }
 
     #[test]

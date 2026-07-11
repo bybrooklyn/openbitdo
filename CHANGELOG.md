@@ -4,6 +4,20 @@ All notable changes to OpenBitdo are tracked here.
 
 ## Unreleased
 
+## v0.0.2
+
+### Added
+
+- Expanded `U2ButtonId` mapping to support all 17 keys for Ultimate 2 controllers.
+- Added mapping and slot configuration support for Ultimate 2 and JP108 candidate-readonly PIDs.
+- Promoted Ultimate 2 Bluetooth variant and receiver PIDs `0x600f` and `0x6011` to the full support tier.
+- Added candidate write/readback validation tests.
+
+### Fixed
+
+- Resolved Homebrew tap publishing CI failures by updating access token scopes and handling.
+
+
 ## v0.0.1-rc.4
 
 ### Changed

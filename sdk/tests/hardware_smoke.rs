@@ -1,6 +1,6 @@
 use bitdo_proto::{
-    device_profile_for, enumerate_hid_devices, DeviceSession, HidTransport, ProtocolFamily,
-    SessionConfig, VidPid,
+    DeviceSession, HidTransport, ProtocolFamily, SessionConfig, VidPid, device_profile_for,
+    enumerate_hid_devices,
 };
 
 fn hardware_enabled() -> bool {

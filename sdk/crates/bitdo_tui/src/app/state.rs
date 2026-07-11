@@ -1,7 +1,7 @@
 use crate::{AppDevice, BuildInfo, ReportSaveMode, UiLaunchOptions};
 use bitdo_app_core::{
-    ConfigBackupId, DedicatedButtonMapping, FirmwareFinalReport, FirmwareUpdatePlan, U2CoreProfile,
-    RuntimeUnlockReport,
+    ConfigBackupId, DedicatedButtonMapping, FirmwareFinalReport, FirmwareUpdatePlan,
+    RuntimeUnlockReport, U2CoreProfile,
 };
 use bitdo_proto::{DiagCommandStatus, DiagProbeResult, DiagSeverity, SupportTier, VidPid};
 use chrono::Utc;

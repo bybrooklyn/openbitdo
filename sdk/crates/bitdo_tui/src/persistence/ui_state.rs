@@ -1,5 +1,5 @@
 use crate::{DashboardLayoutMode, PanelFocus, ReportSaveMode};
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
@@ -40,7 +40,7 @@ pub fn load_ui_state(path: &Path) -> Result<PersistedUiState> {
     let raw = match std::fs::read_to_string(path) {
         Ok(raw) => raw,
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
-            return Ok(PersistedUiState::default())
+            return Ok(PersistedUiState::default());
         }
         Err(err) => return Err(err.into()),
     };

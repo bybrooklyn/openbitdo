@@ -138,10 +138,7 @@ async fn dashboard_candidate_write_probe_uses_per_pid_unlock_file() {
     )
     .await;
 
-    let report = state
-        .latest_unlock_report
-        .as_ref()
-        .expect("unlock report");
+    let report = state.latest_unlock_report.as_ref().expect("unlock report");
     assert!(report.allowed);
     assert!(report.readback_verified);
     assert_eq!(report.vid_pid, VidPid::new(0x2dc8, 0x2100));

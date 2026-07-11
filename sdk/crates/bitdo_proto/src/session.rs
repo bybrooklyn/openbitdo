@@ -3,7 +3,7 @@ use crate::error::{BitdoError, BitdoErrorCode, Result};
 use crate::frame::{CommandFrame, ResponseFrame, ResponseStatus};
 use crate::profile::ProfileBlob;
 use crate::registry::{
-    command_applies_to_pid, device_profile_for, find_command, find_pid, CommandRegistryRow,
+    CommandRegistryRow, command_applies_to_pid, device_profile_for, find_command, find_pid,
 };
 use crate::transport::Transport;
 use crate::types::{
@@ -621,7 +621,11 @@ impl<T: Transport> DeviceSession<T> {
 
         let command = self.firmware_chunk_command();
         let max_payload = find_command(command)
-            .map(|row| row.request.len().saturating_sub(firmware_chunk_offset(command)))
+            .map(|row| {
+                row.request
+                    .len()
+                    .saturating_sub(firmware_chunk_offset(command))
+            })
             .unwrap_or_default();
         if max_payload == 0 || chunk_size > max_payload {
             return Err(BitdoError::InvalidInput(format!(
@@ -953,7 +957,8 @@ impl<T: Transport> DeviceSession<T> {
     }
 
     fn uses_u2_firmware_path(&self) -> bool {
-        self.profile.capability.supports_u2_slot_config && self.profile.capability.supports_u2_button_map
+        self.profile.capability.supports_u2_slot_config
+            && self.profile.capability.supports_u2_button_map
     }
 
     fn firmware_chunk_command(&self) -> CommandId {
@@ -986,16 +991,22 @@ impl<T: Transport> DeviceSession<T> {
             )
     }
 
-    fn allow_candidate_runtime_write_path(
-        &self,
-        command: CommandId,
-        safety: SafetyClass,
-    ) -> bool {
+    fn allow_candidate_runtime_write_path(&self, command: CommandId, safety: SafetyClass) -> bool {
         self.profile.support_tier == SupportTier::CandidateReadOnly
             && self.config.candidate_write_unlock
             && self.config.experimental
             && safety == SafetyClass::SafeWrite
-            && matches!(command, CommandId::SetModeDInput | CommandId::WriteProfile)
+            && matches!(
+                command,
+                CommandId::SetModeDInput
+                    | CommandId::WriteProfile
+                    | CommandId::U2WriteButtonMap
+                    | CommandId::U2WriteConfigSlot
+                    | CommandId::U2SetMode
+                    | CommandId::Jp108WriteDedicatedMapping
+                    | CommandId::Jp108WriteFeatureFlags
+                    | CommandId::Jp108WriteVoice
+            )
     }
 }
 
@@ -1072,8 +1083,18 @@ fn is_command_allowed_for_candidate_pid(
 
     if safety == SafetyClass::SafeWrite {
         return write_unlocked
-            && STANDARD_CANDIDATE_PIDS.contains(&pid)
-            && matches!(command, CommandId::SetModeDInput | CommandId::WriteProfile);
+            && (STANDARD_CANDIDATE_PIDS.contains(&pid) || JP_CANDIDATE_PIDS.contains(&pid))
+            && matches!(
+                command,
+                CommandId::SetModeDInput
+                    | CommandId::WriteProfile
+                    | CommandId::U2WriteButtonMap
+                    | CommandId::U2WriteConfigSlot
+                    | CommandId::U2SetMode
+                    | CommandId::Jp108WriteDedicatedMapping
+                    | CommandId::Jp108WriteFeatureFlags
+                    | CommandId::Jp108WriteVoice
+            );
     }
 
     if safety != SafetyClass::SafeRead {
@@ -1087,7 +1108,21 @@ fn is_command_allowed_for_candidate_pid(
     if STANDARD_CANDIDATE_PIDS.contains(&pid) {
         return matches!(
             command,
-            CommandId::GetMode | CommandId::GetModeAlt | CommandId::ReadProfile
+            CommandId::GetMode
+                | CommandId::GetModeAlt
+                | CommandId::ReadProfile
+                | CommandId::U2GetCurrentSlot
+                | CommandId::U2ReadConfigSlot
+                | CommandId::U2ReadButtonMap
+        );
+    }
+
+    if JP_CANDIDATE_PIDS.contains(&pid) {
+        return matches!(
+            command,
+            CommandId::Jp108ReadDedicatedMappings
+                | CommandId::Jp108ReadFeatureFlags
+                | CommandId::Jp108ReadVoice
         );
     }
 
@@ -1211,13 +1246,22 @@ pub fn validate_response(command: CommandId, response: &[u8]) -> ResponseStatus 
                 ResponseStatus::Invalid
             }
         }
+        CommandId::U2GetCurrentSlot => {
+            if response.len() < 6 {
+                return ResponseStatus::Malformed;
+            }
+            if response[0] == 0x02 && response[1] == 0x05 {
+                ResponseStatus::Ok
+            } else {
+                ResponseStatus::Invalid
+            }
+        }
         CommandId::Jp108ReadDedicatedMappings
         | CommandId::Jp108ReadFeatureFlags
         | CommandId::Jp108ReadVoice
         | CommandId::U2ReadConfigSlot
-        | CommandId::U2ReadButtonMap
-        | CommandId::U2GetCurrentSlot => {
-            if response.len() < 6 {
+        | CommandId::U2ReadButtonMap => {
+            if response.len() < 12 {
                 return ResponseStatus::Malformed;
             }
             if response[0] == 0x02 && response[1] == 0x05 {

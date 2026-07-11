@@ -1,4 +1,4 @@
-use bitdo_proto::{validate_response, CommandId, ResponseStatus};
+use bitdo_proto::{CommandId, ResponseStatus, validate_response};
 
 #[test]
 fn malformed_response_is_rejected() {

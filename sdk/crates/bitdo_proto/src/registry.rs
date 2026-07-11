@@ -77,7 +77,24 @@ pub fn find_command(id: CommandId) -> Option<&'static CommandRegistryRow> {
 }
 
 pub fn command_applies_to_pid(row: &CommandRegistryRow, pid: u16) -> bool {
-    row.applies_to.is_empty() || row.applies_to.contains(&pid)
+    if row.applies_to.is_empty() || row.applies_to.contains(&pid) {
+        return true;
+    }
+    if let Some(target_row) = find_pid(pid) {
+        let cap = default_capability_for(
+            target_row.pid,
+            target_row.support_tier,
+            target_row.protocol_family,
+        );
+        match row.operation_group {
+            "Ultimate2Core" => cap.supports_u2_slot_config || cap.supports_u2_button_map,
+            "JP108Dedicated" => cap.supports_jp108_dedicated_map,
+            "Firmware" => cap.supports_firmware || cap.supports_boot,
+            _ => false,
+        }
+    } else {
+        false
+    }
 }
 
 pub fn default_capability_for(
@@ -105,14 +122,12 @@ pub fn default_capability_for(
         | (SupportTier::CandidateReadOnly, 0x3004)
         | (SupportTier::CandidateReadOnly, 0x3019)
         | (SupportTier::CandidateReadOnly, 0x3100)
-        | (SupportTier::CandidateReadOnly, 0x3105)
         | (SupportTier::CandidateReadOnly, 0x2100)
         | (SupportTier::CandidateReadOnly, 0x2101)
         | (SupportTier::CandidateReadOnly, 0x901a)
         | (SupportTier::CandidateReadOnly, 0x6006)
         | (SupportTier::CandidateReadOnly, 0x5203)
         | (SupportTier::CandidateReadOnly, 0x5204)
-        | (SupportTier::CandidateReadOnly, 0x301a)
         | (SupportTier::CandidateReadOnly, 0x9028)
         | (SupportTier::CandidateReadOnly, 0x3026)
         | (SupportTier::CandidateReadOnly, 0x3027) => PidCapability {
@@ -124,6 +139,17 @@ pub fn default_capability_for(
             supports_u2_slot_config: false,
             supports_u2_button_map: false,
         },
+        (SupportTier::CandidateReadOnly, 0x3105) | (SupportTier::CandidateReadOnly, 0x301a) => {
+            PidCapability {
+                supports_mode: true,
+                supports_profile_rw: true,
+                supports_boot: false,
+                supports_firmware: false,
+                supports_jp108_dedicated_map: false,
+                supports_u2_slot_config: true,
+                supports_u2_button_map: true,
+            }
+        }
         (SupportTier::CandidateReadOnly, 0x5200)
         | (SupportTier::CandidateReadOnly, 0x5201)
         | (SupportTier::CandidateReadOnly, 0x203a)
@@ -134,7 +160,7 @@ pub fn default_capability_for(
             supports_profile_rw: false,
             supports_boot: false,
             supports_firmware: false,
-            supports_jp108_dedicated_map: false,
+            supports_jp108_dedicated_map: true,
             supports_u2_slot_config: false,
             supports_u2_button_map: false,
         },
@@ -169,7 +195,7 @@ pub fn default_capability_for(
             supports_u2_slot_config: false,
             supports_u2_button_map: false,
         },
-        (_, 0x6012) | (_, 0x6013) => PidCapability {
+        (_, 0x6012) | (_, 0x6013) | (_, 0x600f) | (_, 0x6011) => PidCapability {
             supports_mode: true,
             supports_profile_rw: true,
             supports_boot: true,

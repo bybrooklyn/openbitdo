@@ -1,6 +1,6 @@
 use bitdo_proto::{
-    device_profile_for, BitdoError, DeviceSession, MockTransport, SessionConfig, SupportLevel,
-    SupportTier, VidPid,
+    BitdoError, DeviceSession, MockTransport, SessionConfig, SupportLevel, SupportTier, VidPid,
+    device_profile_for,
 };
 
 const CANDIDATE_READONLY_PIDS: &[u16] = &[
@@ -174,4 +174,77 @@ fn wave2_candidate_standard_pid_allows_safe_reads_only() {
     assert!(matches!(write_err, BitdoError::UnsupportedForPid { .. }));
 
     let _ = session.close();
+}
+
+#[test]
+fn candidate_ultimate2_allows_slot_read_and_conditional_write() {
+    let pid = 0x3105;
+    let mut transport = MockTransport::default();
+
+    transport.push_read_data({
+        let mut response = vec![0u8; 64];
+        response[0] = 0x02;
+        response[1] = 0x05;
+        response[5] = 1;
+        response
+    });
+
+    transport.push_read_data({
+        let mut response = vec![0u8; 64];
+        response[0] = 0x02;
+        response[1] = 0x05;
+        response[5] = 1;
+        response[6] = 128;
+        response[7] = 128;
+        response
+    });
+
+    let mut session = DeviceSession::new(
+        transport,
+        VidPid::new(0x2dc8, pid),
+        SessionConfig {
+            experimental: true,
+            ..Default::default()
+        },
+    )
+    .expect("open session");
+
+    let slot = session
+        .u2_get_current_slot()
+        .expect("u2_get_current_slot allowed");
+    assert_eq!(slot, 1);
+    let config = session
+        .u2_read_config_slot(slot)
+        .expect("u2_read_config_slot allowed");
+    assert!(!config.is_empty());
+
+    let write_err = session
+        .u2_write_config_slot(slot, &config)
+        .expect_err("u2_write_config_slot must be blocked without unlock");
+    assert!(matches!(write_err, BitdoError::UnsupportedForPid { .. }));
+    let _ = session.close();
+
+    let mut transport_unlocked = MockTransport::default();
+    transport_unlocked.push_read_data({
+        let mut response = vec![0u8; 64];
+        response[0] = 0x02;
+        response
+    });
+
+    let mut session_unlocked = DeviceSession::new(
+        transport_unlocked,
+        VidPid::new(0x2dc8, pid),
+        SessionConfig {
+            experimental: true,
+            candidate_write_unlock: true,
+            ..Default::default()
+        },
+    )
+    .expect("open session");
+
+    session_unlocked
+        .u2_write_config_slot(slot, &config)
+        .expect("u2_write_config_slot allowed with write unlock");
+
+    let _ = session_unlocked.close();
 }

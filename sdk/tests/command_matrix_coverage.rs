@@ -1,4 +1,4 @@
-use bitdo_proto::{command_registry, CommandRuntimePolicy};
+use bitdo_proto::{CommandRuntimePolicy, command_registry};
 use std::fs;
 use std::path::PathBuf;
 

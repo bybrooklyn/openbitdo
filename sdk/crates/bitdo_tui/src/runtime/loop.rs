@@ -1,20 +1,20 @@
 use super::effect_executor::execute_effect;
+use crate::UiLaunchOptions;
 use crate::app::event::AppEvent;
 use crate::app::reducer::reduce;
 use crate::app::state::{AppState, EventLevel, Screen, TaskMode};
 use crate::persistence::ui_state::load_ui_state;
 use crate::support_report::prune_reports_on_startup;
 use crate::ui::layout::{self, HitTarget};
-use crate::UiLaunchOptions;
 use anyhow::Result;
 use bitdo_app_core::{FirmwareProgressEvent, OpenBitdoCore};
 use crossterm::event::{self, Event as CEvent, KeyCode, MouseButton, MouseEvent, MouseEventKind};
 use crossterm::execute;
 use crossterm::terminal::{
-    disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
+    EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
 };
-use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
+use ratatui::backend::CrosstermBackend;
 use std::collections::VecDeque;
 use std::io::Stdout;
 use tokio::sync::broadcast;

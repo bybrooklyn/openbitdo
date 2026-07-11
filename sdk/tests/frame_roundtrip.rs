@@ -1,4 +1,4 @@
-use bitdo_proto::{command_registry, CommandFrame, CommandId, Report64};
+use bitdo_proto::{CommandFrame, CommandId, Report64, command_registry};
 use std::collections::HashSet;
 
 #[test]

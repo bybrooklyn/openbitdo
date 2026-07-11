@@ -861,10 +861,9 @@ fn candidate_unlock_file(
 ) -> Option<std::path::PathBuf> {
     state.settings_path.as_ref().and_then(|path| {
         path.parent().map(|parent| {
-            parent.join("candidate-unlocks").join(format!(
-                "{:04x}_{:04x}.toml",
-                vid_pid.vid, vid_pid.pid
-            ))
+            parent
+                .join("candidate-unlocks")
+                .join(format!("{:04x}_{:04x}.toml", vid_pid.vid, vid_pid.pid))
         })
     })
 }

@@ -1,13 +1,13 @@
 use crate::support_report::persist_support_report;
-use crate::{should_save_support_report, HeadlessOutputMode, RunLaunchOptions};
-use anyhow::{anyhow, Result};
+use crate::{HeadlessOutputMode, RunLaunchOptions, should_save_support_report};
+use anyhow::{Result, anyhow};
 use bitdo_app_core::{
     FirmwareCancelRequest, FirmwareConfirmRequest, FirmwareFinalReport, FirmwareOutcome,
     FirmwarePreflightRequest, FirmwareStartRequest, OpenBitdoCore,
 };
 use serde::Serialize;
 use std::path::Path;
-use tokio::time::{sleep, Duration};
+use tokio::time::{Duration, sleep};
 
 #[derive(Serialize)]
 struct JsonProgress<'a> {

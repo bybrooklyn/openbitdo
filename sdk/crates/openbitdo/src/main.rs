@@ -1,9 +1,8 @@
-
 use anyhow::Result;
 use bitdo_app_core::{OpenBitdoCore, OpenBitdoCoreConfig};
-use bitdo_tui::{run_ui, UiLaunchOptions};
+use bitdo_tui::{UiLaunchOptions, run_ui};
 use clap::Parser;
-use openbitdo::{load_user_settings, user_settings_path, BuildInfo, UserSettings};
+use openbitdo::{BuildInfo, UserSettings, load_user_settings, user_settings_path};
 
 const CLI_AFTER_HELP: &str = "\
 Examples:

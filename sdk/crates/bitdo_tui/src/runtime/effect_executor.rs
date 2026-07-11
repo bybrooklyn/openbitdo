@@ -117,13 +117,12 @@ pub async fn execute_effect(
                 Err(err) => vec![AppEvent::MappingApplyFailed(err.to_string())],
             },
         },
-        Effect::RunCandidateWriteProbe { vid_pid, policy } => match core
-            .candidate_write_probe(vid_pid, policy)
-            .await
-        {
-            Ok(report) => vec![AppEvent::CandidateWriteProbeCompleted(report)],
-            Err(err) => vec![AppEvent::CandidateWriteProbeFailed(err.to_string())],
-        },
+        Effect::RunCandidateWriteProbe { vid_pid, policy } => {
+            match core.candidate_write_probe(vid_pid, policy).await {
+                Ok(report) => vec![AppEvent::CandidateWriteProbeCompleted(report)],
+                Err(err) => vec![AppEvent::CandidateWriteProbeFailed(err.to_string())],
+            }
+        }
         Effect::RestoreBackup { backup_id } => match core.restore_backup(backup_id).await {
             Ok(_) => vec![AppEvent::BackupRestoreCompleted(
                 "Backup restore completed".to_owned(),
@@ -161,7 +160,7 @@ pub async fn execute_effect(
                         Err(err) => {
                             return vec![AppEvent::PreflightBlocked(format!(
                                 "Recommended firmware unavailable: {err}"
-                            ))]
+                            ))];
                         }
                     }
                 };

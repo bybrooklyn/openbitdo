@@ -1,9 +1,9 @@
 use crate::app::action::QuickAction;
 use crate::app::state::{AppState, DiagnosticsFilter, Screen};
+use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Borders, Paragraph};
-use ratatui::Frame;
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use super::screens::{dashboard, diagnostics, mapping_editor, recovery, settings, task};

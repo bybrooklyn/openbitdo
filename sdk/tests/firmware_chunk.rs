@@ -57,9 +57,15 @@ fn full_support_u2_firmware_transfer_uses_pid_specific_frames() {
 
     let transport = session.into_transport();
     assert_eq!(transport.writes().len(), 6);
-    assert_eq!(transport.writes()[0], vec![0x05, 0x00, 0x50, 0x01, 0x00, 0x00]);
+    assert_eq!(
+        transport.writes()[0],
+        vec![0x05, 0x00, 0x50, 0x01, 0x00, 0x00]
+    );
     assert_eq!(&transport.writes()[1][..5], &[0x81, 0x60, 0x10, 0x60, 0x12]);
     assert_eq!(&transport.writes()[1][5..37], &image[..32]);
     assert_eq!(&transport.writes()[4][..5], &[0x81, 0x60, 0x11, 0x60, 0x12]);
-    assert_eq!(transport.writes()[5], vec![0x05, 0x00, 0x51, 0x01, 0x00, 0x00]);
+    assert_eq!(
+        transport.writes()[5],
+        vec![0x05, 0x00, 0x51, 0x01, 0x00, 0x00]
+    );
 }
