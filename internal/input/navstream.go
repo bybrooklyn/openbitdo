@@ -3,6 +3,8 @@ package input
 import (
 	"context"
 	"fmt"
+	"os"
+	"runtime/debug"
 	"time"
 
 	"github.com/karalabe/hid"
@@ -74,6 +76,22 @@ func Start(ctx context.Context) StartResult {
 }
 
 func streamDevice(ctx context.Context, device *hid.Device, pid uint16, fields []Field, out chan<- NavEvent) {
+	// This goroutine runs detached from Bubbletea's Cmd system (started via
+	// a bare 'go' statement in Start), so an unrecovered panic here would
+	// crash the whole process -- Bubbletea's own panic recovery only wraps
+	// goroutines it spawns itself. Report decoding is untested against real
+	// 8BitDo hardware (only synthetic descriptors and non-8BitDo devices so
+	// far), so a decode panic on an unexpected real report shape is a real
+	// possibility, not a theoretical one. Nav is best-effort: recovering and
+	// dropping just this device's stream (others keep working) is strictly
+	// better than taking down the entire running program over an input
+	// decode bug.
+	defer func() {
+		if r := recover(); r != nil {
+			fmt.Fprintf(os.Stderr, "gamepad nav: recovered from panic decoding pid=%#04x: %v\n%s\n", pid, r, debug.Stack())
+		}
+	}()
+
 	// karalabe/hid's Read has no timeout; Close() on ctx cancellation is
 	// what unblocks a pending Read (hidapi's read returns an error once the
 	// handle is closed), matching the same pattern internal/protocol's HID

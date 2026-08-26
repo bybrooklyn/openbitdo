@@ -115,6 +115,19 @@ func (h *HidTransport) Read(ctx context.Context, length int, timeoutMs uint64) (
 	}
 	resultCh := make(chan result, 1)
 	go func() {
+		// This goroutine is independent of Bubbletea's Cmd system, so an
+		// unrecovered panic here would crash the whole process. The main
+		// risk is device.Read returning n > len(buf), which would panic on
+		// buf[:n] below -- trusting a value the underlying cgo library
+		// returns, not something this code fully controls.
+		defer func() {
+			if r := recover(); r != nil {
+				select {
+				case resultCh <- result{err: errTransport("internal error during read: %v", r)}:
+				default:
+				}
+			}
+		}()
 		buf := make([]byte, length)
 		n, err := device.Read(buf)
 		if err != nil {
