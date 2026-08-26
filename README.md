@@ -24,6 +24,8 @@ OpenBitdo is unofficial and not affiliated with 8BitDo. Firmware updates and dev
 | GitHub Releases | Download a release tarball and run `bin/openbitdo` | Users who want a standalone binary without a package manager |
 | From source | `go build -o openbitdo ./cmd/openbitdo` with Go 1.27+ | Contributors and local development |
 
+Contributors: [`justfile`](justfile) has common dev commands (`just build`, `just test`, `just run-mock`, `just check` before pushing) — install [`just`](https://github.com/casey/just) and run `just` with no arguments to list them.
+
 ## First Run
 
 1. Launch `openbitdo`.
@@ -49,6 +51,16 @@ It requires advanced mode, local write-risk acknowledgement, and a per-PID unloc
 If you do not have a controller connected, use `openbitdo --mock` plus the automated test suite to verify the app flow.
 Real-device promotion still requires hardware smoke evidence; mock mode does not prove firmware or mapping safety.
 When a device is not fully supported, run diagnostics and share the generated TOML report instead of attempting writes.
+
+## Shell Completions
+
+Completion scripts for the CLI's flags live in [completions/](completions/):
+
+| Shell | Install |
+| --- | --- |
+| bash | `source completions/openbitdo.bash` (e.g. from `~/.bashrc`), or copy it into your `bash-completion` directory |
+| zsh | Copy `completions/openbitdo.zsh` as `_openbitdo` onto a directory in your `$fpath`, added before `compinit` runs |
+| fish | Copy `completions/openbitdo.fish` into `~/.config/fish/completions/` |
 
 ## macOS Packaging Caveat
 
