@@ -562,6 +562,87 @@ func TestScreenHelp_DevicesScreenMentionsRightTabForActions(t *testing.T) {
 	}
 }
 
+// countConsecutiveBlankLines returns the length of the longest run of
+// consecutive blank lines in s, after stripping ANSI codes and the panel's
+// left-bar border glyph (leftBar in theme.go applies "┃ " to every line of
+// a bordered block uniformly, including logically-blank ones, so a plain
+// TrimSpace would never see an empty line and silently detect nothing).
+func countConsecutiveBlankLines(s string) int {
+	lines := strings.Split(ansi.Strip(s), "\n")
+	isBlank := func(line string) bool { return strings.Trim(line, " ┃") == "" }
+
+	// Trim trailing blank lines first -- panels are rendered at a fixed
+	// Height() that pads sparse content out with blank filler lines to
+	// reach the bottom of the box, which is expected and not what this is
+	// checking for. Only gaps between actual content lines count.
+	end := len(lines)
+	for end > 0 && isBlank(lines[end-1]) {
+		end--
+	}
+	lines = lines[:end]
+
+	longest, current := 0, 0
+	for _, line := range lines {
+		if isBlank(line) {
+			current++
+			if current > longest {
+				longest = current
+			}
+		} else {
+			current = 0
+		}
+	}
+	return longest
+}
+
+// TestViewDeviceDetail_NoDoubleBlankLineBeforeActions guards the spacing
+// density fix: each optional section (Blocked, candidate-tier explanation)
+// used to end with its own trailing blank line, and the following section
+// (or the unconditional "Actions" heading) added its own leading blank line
+// on top of that — a real double blank line, not just visual "spacing
+// preference," reproducible any time Blocked is shown. Checked on a
+// full-tier device with a Blocked reason, the exact case the density dump
+// caught it in.
+func TestViewDeviceDetail_NoDoubleBlankLineBeforeActions(t *testing.T) {
+	m, c := newTestModel(t, filepath.Join(t.TempDir(), "config.toml"))
+	m = loadDevices(t, m, c)
+
+	view := m.viewDeviceDetail(50, 30)
+	if !strings.Contains(ansi.Strip(view), "Blocked:") {
+		t.Fatalf("expected the default selected mock device to show a Blocked section, got:\n%s", ansi.Strip(view))
+	}
+	if got := countConsecutiveBlankLines(view); got > 1 {
+		t.Fatalf("expected at most one consecutive blank line, found a run of %d, in:\n%s", got, ansi.Strip(view))
+	}
+}
+
+// TestViewFirmware_NoDoubleBlankLineWhenNoWarnings guards the same class of
+// bug on the Firmware screen: the Chunks line unconditionally ended with a
+// blank line, and "Press enter…" unconditionally started with one, so
+// skipping the optional Warnings block (no warnings) left two blank lines
+// between them instead of one.
+func TestViewFirmware_NoDoubleBlankLineWhenNoWarnings(t *testing.T) {
+	m, _ := newTestModel(t, filepath.Join(t.TempDir(), "config.toml"))
+	m.fw = firmwareState{
+		device: core.AppDevice{Name: "JP108"},
+		stage:  fwStageReadyToConfirm,
+		preflight: core.FirmwarePreflightResult{
+			Plan: core.FirmwareUpdatePlan{
+				BytesTotal: 1024, ChunksTotal: 4, ChunkSize: 256, ExpectedSeconds: 5,
+				// Warnings deliberately empty -- this is the case that broke.
+			},
+		},
+	}
+
+	view := m.viewFirmware(30)
+	if !strings.Contains(ansi.Strip(view), "Press enter to begin") {
+		t.Fatalf("expected the ready-to-confirm prompt to render, got:\n%s", ansi.Strip(view))
+	}
+	if got := countConsecutiveBlankLines(view); got > 1 {
+		t.Fatalf("expected at most one consecutive blank line, found a run of %d, in:\n%s", got, ansi.Strip(view))
+	}
+}
+
 func hex4(v uint16) string {
 	const hexdigits = "0123456789abcdef"
 	return string([]byte{

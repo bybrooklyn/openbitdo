@@ -339,23 +339,30 @@ func (m Model) viewDeviceDetail(width, height int) string {
 	var b strings.Builder
 	b.WriteString(stylePanelTitle.Render(device.Name) + "\n")
 	b.WriteString(styleFaint.Render(pidLabel(device.VidPid)+" · "+string(device.ProtocolFamily)) + "\n\n")
-	b.WriteString(styleBody.Render("Status: "+string(device.SupportStatus())) + "\n")
-	b.WriteString(styleBody.Render("Evidence: "+string(device.Evidence)) + "\n\n")
+
+	// Blocks joined by exactly one blank line each, rather than each piece
+	// manually tracking its own leading/trailing newlines — the latter
+	// previously produced a double blank line before "Actions" whenever the
+	// Blocked/candidate-tier sections had already ended with their own
+	// trailing blank (both applied on top of Actions' own leading blank).
+	var blocks []string
+	blocks = append(blocks, styleBody.Render("Status: "+string(device.SupportStatus()))+"\n"+styleBody.Render("Evidence: "+string(device.Evidence)))
 
 	if blocked := blockedLinesForDevice(device, m.acknowledgedRisk, m.advancedMode, m.acknowledgedRisk, m.writeLockUntilRestart); len(blocked) > 0 {
-		b.WriteString(styleWarning.Render("Blocked:") + "\n")
+		var blockedText strings.Builder
+		blockedText.WriteString(styleWarning.Render("Blocked:"))
 		for _, line := range blocked {
-			b.WriteString(styleFaint.Render("  · "+line) + "\n")
+			blockedText.WriteString("\n" + styleFaint.Render("  · "+line))
 		}
-		b.WriteString("\n")
+		blocks = append(blocks, blockedText.String())
 	}
 
 	if device.SupportTier != protocol.TierFull {
-		b.WriteString(candidateTierExplanation(device))
-		b.WriteString("\n")
+		blocks = append(blocks, candidateTierExplanation(device))
 	}
 
-	b.WriteString("\n" + stylePanelTitle.Render("Actions") + "\n")
+	var actions strings.Builder
+	actions.WriteString(stylePanelTitle.Render("Actions"))
 	items := m.actionsForSelectedDevice()
 	for i, item := range items {
 		label := item.label
@@ -369,8 +376,11 @@ func (m Model) viewDeviceDetail(width, height int) string {
 		} else {
 			label = "  " + label
 		}
-		b.WriteString(style.Render(label) + "\n")
+		actions.WriteString("\n" + style.Render(label))
 	}
+	blocks = append(blocks, actions.String())
+
+	b.WriteString(strings.Join(blocks, "\n\n"))
 
 	style := stylePanel
 	if m.devices.pane == paneActions {

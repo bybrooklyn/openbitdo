@@ -164,8 +164,15 @@ func (m Model) viewFirmware(height int) string {
 		b.WriteString(styleDangerBlock.Render(styleDanger.Render(fmt.Sprintf("Error: %v", m.fw.err))))
 	case fwStageReadyToConfirm:
 		plan := m.fw.preflight.Plan
-		fmt.Fprintf(&b, "Image: %s (%d bytes, sha256 %s)\n", m.fw.download.Version, plan.BytesTotal, shortHash(plan.ImageSHA256))
-		fmt.Fprintf(&b, "Chunks: %d × %d bytes  ·  estimated %ds\n\n", plan.ChunksTotal, plan.ChunkSize, plan.ExpectedSeconds)
+		// Blocks joined by exactly one blank line each, rather than each
+		// piece manually tracking its own leading/trailing newlines — the
+		// latter previously produced a double blank line whenever
+		// plan.Warnings was empty (both the Chunks line's own trailing
+		// blank and the "Press enter" line's leading blank applied).
+		var blocks []string
+		blocks = append(blocks, fmt.Sprintf("Image: %s (%d bytes, sha256 %s)\nChunks: %d × %d bytes  ·  estimated %ds",
+			m.fw.download.Version, plan.BytesTotal, shortHash(plan.ImageSHA256),
+			plan.ChunksTotal, plan.ChunkSize, plan.ExpectedSeconds))
 		if len(plan.Warnings) > 0 {
 			var warnings strings.Builder
 			for i, w := range plan.Warnings {
@@ -174,9 +181,10 @@ func (m Model) viewFirmware(height int) string {
 				}
 				warnings.WriteString(styleWarning.Render(IconWarn + " " + w))
 			}
-			b.WriteString(styleWarningBlock.Render(warnings.String()) + "\n")
+			blocks = append(blocks, styleWarningBlock.Render(warnings.String()))
 		}
-		b.WriteString("\n" + stylePositive.Render("Press enter to begin — do not disconnect the device."))
+		blocks = append(blocks, stylePositive.Render("Press enter to begin — do not disconnect the device."))
+		b.WriteString(strings.Join(blocks, "\n\n"))
 	case fwStageConfirming:
 		b.WriteString(styleFaint.Render("Starting transfer…"))
 	case fwStageRunning:

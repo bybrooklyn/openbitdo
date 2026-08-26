@@ -30,10 +30,10 @@ func (m Model) updateRecovery(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m Model) viewRecovery(height int) string {
 	var b strings.Builder
 	b.WriteString(styleDanger.Render("Write lock active") + "\n\n")
-	b.WriteString(m.recoveryReason + "\n\n")
-	b.WriteString("To protect your device, further writes, mapping, and firmware\n")
-	b.WriteString("operations are disabled for the rest of this session. Restart\n")
-	b.WriteString("OpenBitdo once you're ready to try again.\n\n")
+	b.WriteString(styleBody.Render(m.recoveryReason) + "\n\n")
+	b.WriteString(styleBody.Render("To protect your device, further writes, mapping, and firmware\n"+
+		"operations are disabled for the rest of this session. Restart\n"+
+		"OpenBitdo once you're ready to try again.") + "\n\n")
 
 	if m.recoveryHasBackup {
 		switch {
