@@ -35,6 +35,17 @@ Contributors: [`justfile`](justfile) has common dev commands (`just build`, `jus
 5. Save the TOML support report when a device is blocked, experimental, or behaving unexpectedly.
 6. Follow the `Works Now`, `Blocked`, `Support Scorecard`, and `Missing Evidence` guidance before attempting update or mapping work.
 
+OpenBitdo enables mouse support for clicking and scrolling, which by default
+intercepts click-drag so your terminal can't use it for normal text
+selection. To copy text (a PID, an error message, a support-request report)
+anyway, hold your terminal's selection-override modifier while you
+click-drag — on Ghostty this is **Shift** (`mouse-shift-capture` in
+`ghostty.5`); other terminals commonly use Option or Shift instead. Check
+your terminal's own mouse/selection settings if holding a modifier doesn't
+work, or if you'd rather disable mouse reporting for OpenBitdo entirely (most
+terminals, including Ghostty's `mouse-reporting`, let you turn this off
+app-wide).
+
 ## Support Tiers
 
 | Tier | What it means |
