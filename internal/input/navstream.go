@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"runtime"
 	"runtime/debug"
 	"time"
 
@@ -11,6 +12,33 @@ import (
 )
 
 const bitdoVID = 0x2dc8
+
+// linuxUdevHint mirrors internal/protocol's hint of the same name (not
+// shared across packages — these two packages are deliberately decoupled,
+// per navstream's own design, and this is a few lines, not worth a shared
+// dependency for). karalabe/hid's Open() returns a hardcoded generic error
+// on any failure, with no OS errno passthrough on any platform, so this
+// can't reliably distinguish "permission denied" from any other cause —
+// phrased as a likely cause and a thing to try, not a certainty.
+const linuxUdevHint = ` (if this is a permission error: openbitdo talks to devices via libusb, ` +
+	`so a udev rule targeting the "usb" subsystem is usually the fix -- see ` +
+	`packaging/linux/99-openbitdo.rules, or add ` +
+	`'SUBSYSTEM=="usb", ATTR{idVendor}=="2dc8", TAG+="uaccess"' ` +
+	`to /etc/udev/rules.d/ and reconnect the device)`
+
+func linuxOpenHintSuffix() string {
+	return openHintSuffixForGOOS(runtime.GOOS)
+}
+
+// openHintSuffixForGOOS is linuxOpenHintSuffix's testable core — goos is
+// passed in explicitly so tests can exercise the linux/non-linux branches
+// without needing to actually run on Linux.
+func openHintSuffixForGOOS(goos string) string {
+	if goos != "linux" {
+		return ""
+	}
+	return linuxUdevHint
+}
 
 // NavEventKind distinguishes the three navigation-relevant transitions a
 // device stream reports.
@@ -65,7 +93,8 @@ func Start(ctx context.Context) StartResult {
 		}
 		device, err := info.Open()
 		if err != nil {
-			notes = append(notes, fmt.Sprintf("pid=%#04x: gamepad nav unavailable (open failed: %v)", info.ProductID, err))
+			notes = append(notes, fmt.Sprintf("pid=%#04x: gamepad nav unavailable (open failed: %v)%s",
+				info.ProductID, err, linuxOpenHintSuffix()))
 			continue
 		}
 		notes = append(notes, fmt.Sprintf("pid=%#04x: gamepad nav active", info.ProductID))

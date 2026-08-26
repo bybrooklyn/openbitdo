@@ -2,11 +2,39 @@ package protocol
 
 import (
 	"context"
+	"runtime"
 	"sync"
 	"time"
 
 	"github.com/karalabe/hid"
 )
+
+// linuxUdevHint is appended to a device-open failure on Linux. karalabe/hid
+// (see its Open() in hid_enabled.go) returns a hardcoded generic error on
+// any failure -- the underlying C library's errno is never surfaced to Go,
+// on any platform -- so this can't reliably distinguish "permission denied"
+// from "device busy" or any other cause. Rather than overclaim a precise
+// diagnosis it can't actually deliver, this is phrased as a likely cause and
+// a thing to try, not a certainty.
+const linuxUdevHint = ` (if this is a permission error: openbitdo talks to devices via libusb, ` +
+	`so a udev rule targeting the "usb" subsystem is usually the fix -- see ` +
+	`packaging/linux/99-openbitdo.rules, or add ` +
+	`'SUBSYSTEM=="usb", ATTR{idVendor}=="2dc8", TAG+="uaccess"' ` +
+	`to /etc/udev/rules.d/ and reconnect the device)`
+
+func withLinuxOpenHint(err error) error {
+	return withOpenHintForGOOS(err, runtime.GOOS)
+}
+
+// withOpenHintForGOOS is withLinuxOpenHint's testable core — goos is passed
+// in explicitly so tests can exercise the linux/non-linux branches without
+// needing to actually run on Linux.
+func withOpenHintForGOOS(err error, goos string) error {
+	if err == nil || goos != "linux" {
+		return err
+	}
+	return errTransport("%v%s", err, linuxUdevHint)
+}
 
 // EnumeratedDevice is one HID device discovered on the system.
 type EnumeratedDevice struct {
@@ -55,7 +83,7 @@ func (h *HidTransport) Open(ctx context.Context, target VidPid) error {
 	}
 	device, err := infos[0].Open()
 	if err != nil {
-		return errTransport("open failed for %s: %v", target, err)
+		return withLinuxOpenHint(errTransport("open failed for %s: %v", target, err))
 	}
 
 	h.mu.Lock()
