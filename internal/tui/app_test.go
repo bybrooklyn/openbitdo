@@ -414,6 +414,40 @@ func TestView_ModalDimsBackgroundInsteadOfReplacingIt(t *testing.T) {
 	}
 }
 
+// TestView_PanelsUseLeftBarNotRoundedBox proves the border-style change
+// actually rendered, on two different screens: the rounded box's unique
+// corner glyphs (╭╮╰╯, from lipgloss.RoundedBorder — not used anywhere else
+// in this codebase) must be entirely gone, and the new left-only bar
+// character must be present instead.
+func TestView_PanelsUseLeftBarNotRoundedBox(t *testing.T) {
+	roundedCorners := []string{"╭", "╮", "╰", "╯"}
+
+	assertLeftBarNotRoundedBox := func(t *testing.T, screenName, rendered string) {
+		t.Helper()
+		for _, corner := range roundedCorners {
+			if strings.Contains(rendered, corner) {
+				t.Fatalf("%s: expected no rounded-box corner glyphs, found %q", screenName, corner)
+			}
+		}
+		if !strings.Contains(rendered, "┃") {
+			t.Fatalf("%s: expected the new left-bar glyph ┃ to be present", screenName)
+		}
+	}
+
+	m, c := newTestModel(t, filepath.Join(t.TempDir(), "config.toml"))
+	m = loadDevices(t, m, c)
+	assertLeftBarNotRoundedBox(t, "Devices", m.View())
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRight}) // select JP108, into actions pane
+	m = next.(Model)
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // Diagnose
+	m = next.(Model)
+	if m.screen != screenDiagnostics {
+		t.Fatalf("expected Diagnose to move to the diagnostics screen, got %v", m.screen)
+	}
+	assertLeftBarNotRoundedBox(t, "Diagnostics", m.View())
+}
+
 func hex4(v uint16) string {
 	const hexdigits = "0123456789abcdef"
 	return string([]byte{
