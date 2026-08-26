@@ -39,20 +39,44 @@ and does not touch the clean-room evidence boundary.
      (one button index per bit-width chunk) or as individual variable bits,
      as a set of pressed button-usage IDs.
 
-3. **Descriptor acquisition** (`internal/input/navstream.go`) — the one
-   real platform limitation: `github.com/karalabe/hid` does not expose a
-   device's report descriptor through its Go API, and there is no portable
-   Go way to fetch it. On Linux, the kernel exposes it directly as a file
-   (`/sys/class/hidraw/<N>/device/report_descriptor`), so descriptor-driven
-   decoding works there. On other platforms (including macOS, where this
-   rewrite was built and where no 8BitDo hardware was available to validate
-   against — see `MIGRATION.md`/the RC checklist for the current hardware
-   validation gap), the nav manager cannot obtain a descriptor through
-   `karalabe/hid` alone; it degrades to keyboard-only navigation rather than
-   guessing a byte layout it has no evidence for. Closing that gap on macOS
-   needs either an IOKit (`IOHIDDeviceGetReportDescriptor`) cgo binding or a
-   HID library that exposes it directly — tracked as follow-up work, not
-   something this rewrite fabricates a workaround for.
+3. **Descriptor acquisition** — `github.com/karalabe/hid` does not expose a
+   device's report descriptor through its Go API, so each platform has its
+   own acquisition file behind a `fetchReportDescriptor(info hid.DeviceInfo)
+   ([]byte, error)` build-tagged function (`internal/input/descriptor_*.go`),
+   feeding the same platform-agnostic parser above:
+   - **Linux** (`descriptor_linux.go`): the kernel exposes it directly as a
+     file, `/sys/class/hidraw/<N>/device/report_descriptor`, derived from
+     `info.Path` (karalabe/hid gives `/dev/hidrawN` paths on Linux).
+   - **macOS** (`descriptor_darwin.go`): reads it via IOKit's `IOHIDManager`
+     — re-enumerates devices independently (`IOHIDManagerCreate` /
+     `SetDeviceMatching` / `Open` / `CopyDevices`) and matches by
+     vendor/product/usage-page/usage (all reliably populated by
+     `hid.DeviceInfo` on this platform), then reads the device's
+     `ReportDescriptor` property (`kIOHIDReportDescriptorKey`) directly via
+     `IOHIDDeviceGetProperty`. **Deliberately does not use `info.Path`**:
+     karalabe/hid's vendored hidapi C backend resolves a device's
+     `io_service_t` via `dlopen("/System/Library/IOKit.framework/IOKit",
+     ...)` + `dlsym("IOHIDDeviceGetService")` — an OS X 10.5-era shim for
+     detecting whether the modern API exists at runtime. That hardcoded
+     framework path no longer resolves on modern macOS (confirmed directly:
+     the `dlopen` call fails, reporting the library isn't in the dyld
+     shared cache), so it silently falls through to a stale struct-offset
+     hack that hasn't matched the real `IOHIDDevice` layout since OS X 10.5
+     and produces a garbage `io_service_t` — meaning `Path` is empty for
+     *every* device on a modern macOS system, not just non-8BitDo ones.
+     Verified end-to-end against real hardware (no 8BitDo controller is
+     available in this project's environment, but real IOKit HID devices
+     are): `internal/input/descriptor_darwin_test.go` genuinely acquires
+     and parses report descriptors from whatever real HID devices exist on
+     the machine running it. **If a future change ever "simplifies" this
+     back to using `info.Path` on darwin, it will silently break** — this
+     isn't a style preference, `Path` is broken at the dependency level.
+   - **Other platforms** (`descriptor_other.go`, e.g. Windows): still
+     unimplemented — there is no release artifact for these platforms
+     currently (see `RC_CHECKLIST.md`), so this degrades to keyboard-only
+     navigation there by design, not by oversight. See `MIGRATION.md` for
+     the still-outstanding real-8BitDo-hardware validation gap that applies
+     across all platforms regardless of acquisition method.
 
 4. **Nav-only, separate from the command session**: the nav stream opens a
    read-only input-report loop on every enumerated `vid==0x2dc8` device at
