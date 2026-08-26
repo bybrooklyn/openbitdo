@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -446,6 +447,71 @@ func TestView_PanelsUseLeftBarNotRoundedBox(t *testing.T) {
 		t.Fatalf("expected Diagnose to move to the diagnostics screen, got %v", m.screen)
 	}
 	assertLeftBarNotRoundedBox(t, "Diagnostics", m.View())
+}
+
+// TestStylePanelTitleAndStyleAccentAreDistinct guards against the exact
+// regression that caused the user-reported "it's weird to tell what button
+// I'm selecting" bug: stylePanelTitle (headings) and styleAccent were
+// byte-for-byte identical lipgloss styles, so a heading and an
+// accent-styled selected row rendered indistinguishably. This doesn't just
+// eyeball the definitions — it renders the same text through both and
+// checks the actual output bytes differ.
+func TestStylePanelTitleAndStyleAccentAreDistinct(t *testing.T) {
+	// See TestView_ModalDimsBackgroundInsteadOfReplacingIt's comment: lipgloss
+	// downgrades to no-SGR-codes-at-all under `go test`'s non-tty stdout
+	// unless a color profile is forced, which would make every style render
+	// as identical plain text regardless of this fix.
+	prevProfile := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.ANSI256)
+	t.Cleanup(func() { lipgloss.SetColorProfile(prevProfile) })
+
+	const sample = "Sample"
+	if stylePanelTitle.Render(sample) == styleAccent.Render(sample) {
+		t.Fatal("expected stylePanelTitle and styleAccent to render differently, got identical output")
+	}
+}
+
+// TestMappingEditorSelectionIsDistinctFromHeading renders a real Mapping
+// Editor frame and checks that the selected row's styling is NOT the same
+// escape sequence as the panel heading's — i.e. the fix actually reaches the
+// screen that prompted it, not just the theme.go definitions in isolation.
+func TestMappingEditorSelectionIsDistinctFromHeading(t *testing.T) {
+	prevProfile := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.ANSI256)
+	t.Cleanup(func() { lipgloss.SetColorProfile(prevProfile) })
+
+	m, _ := newTestModel(t, filepath.Join(t.TempDir(), "config.toml"))
+	m.width = 100
+	m.mapping = mappingState{
+		device: core.AppDevice{Name: "JP108", VidPid: protocol.VidPid{VID: 0x2dc8, PID: 0x5203}},
+		kind:   core.KindJP108,
+		jp108Draft: []core.DedicatedButtonMapping{
+			{Button: core.DedicatedButtonID(0), TargetHIDUsage: 0x0004},
+			{Button: core.DedicatedButtonID(1), TargetHIDUsage: 0x0005},
+		},
+		cursor: 0,
+	}
+
+	view := m.viewMapping(30)
+
+	headingRendered := stylePanelTitle.Render("JP108 Dedicated Mapping: JP108")
+	if !strings.Contains(view, headingRendered) {
+		t.Fatalf("expected the panel heading to use stylePanelTitle, got:\n%s", view)
+	}
+
+	selectedRowRendered := styleSelectedRow.Render("› " + fmt.Sprintf("%-14s → %s", fmt.Sprintf("%v", core.DedicatedButtonID(0)), jp108TargetLabel(0x0004)) + "  (←/→ to change)")
+	if !strings.Contains(view, selectedRowRendered) {
+		t.Fatalf("expected the selected row to use styleSelectedRow, got:\n%s", view)
+	}
+
+	// The actual regression: the selected row's rendered bytes must not be
+	// producible by stylePanelTitle on the same visible text (they no
+	// longer share a definition, but this checks it end to end on the real
+	// screen, not just the two style variables in isolation).
+	headingStyleOnRowText := stylePanelTitle.Render("› " + fmt.Sprintf("%-14s → %s", fmt.Sprintf("%v", core.DedicatedButtonID(0)), jp108TargetLabel(0x0004)) + "  (←/→ to change)")
+	if strings.Contains(view, headingStyleOnRowText) {
+		t.Fatal("selected row must not render with heading styling")
+	}
 }
 
 func hex4(v uint16) string {

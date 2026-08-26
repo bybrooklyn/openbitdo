@@ -411,7 +411,8 @@ func (m Model) viewMapping(height int) string {
 			b.WriteString(styleDanger.Render("Error: " + m.mapping.u2PreviewErr.Error()))
 		default:
 			for _, row := range m.mapping.u2PreviewResult.Mappings {
-				fmt.Fprintf(&b, "%-14s → %s (0x%04x)\n", fmt.Sprintf("%v", row.Button), u2TargetLabel(row.TargetHIDUsage), row.TargetHIDUsage)
+				line := fmt.Sprintf("%-14s → %s (0x%04x)", fmt.Sprintf("%v", row.Button), u2TargetLabel(row.TargetHIDUsage), row.TargetHIDUsage)
+				b.WriteString(styleBody.Render(line) + "\n")
 			}
 			b.WriteString("\n" + styleWarning.Render("This is a read-only preview — nothing has changed yet."))
 			b.WriteString("\n" + styleFaint.Render("enter to load this slot into the editor · esc to dismiss · p for the next slot"))
@@ -433,46 +434,57 @@ func (m Model) viewMapping(height int) string {
 		}
 		line := fmt.Sprintf("%-14s → %s", label, value)
 		if i == m.mapping.cursor {
-			line = styleAccent.Render("› " + line + "  (←/→ to change)")
+			// One Render call over the whole plain-text row (no embedded
+			// styling within line/value to clash with) so styleSelectedRow's
+			// inverted background isn't cut short by an inner reset code —
+			// see styleSelectedRow's doc comment in theme.go.
+			b.WriteString(styleSelectedRow.Render("› "+line+"  (←/→ to change)") + "\n")
 		} else {
-			line = "  " + line
+			b.WriteString("  " + styleBody.Render(line) + "\n")
 		}
-		b.WriteString(line + "\n")
 	}
 
 	b.WriteString("\n")
-	applyLine := "Apply Changes"
+	applyText := "Apply Changes"
+	applySuffix := ""
 	if !m.mapping.dirty() {
-		applyLine += styleFaint.Render("  (no changes)")
+		applySuffix = "  (no changes)"
 	}
 	if m.mapping.applying {
-		applyLine = "Applying…"
+		applyText = "Applying…"
+		applySuffix = ""
 	}
 	if m.mapping.cursor == buttonRows {
-		applyLine = styleAccent.Render("› " + applyLine)
+		b.WriteString(styleSelectedRow.Render("› "+applyText+applySuffix) + "\n")
 	} else {
-		applyLine = "  " + applyLine
+		line := styleBody.Render(applyText)
+		if applySuffix != "" {
+			line += styleFaint.Render(applySuffix)
+		}
+		b.WriteString("  " + line + "\n")
 	}
-	b.WriteString(applyLine + "\n")
 
-	undoLine := "Undo Last Edit"
+	undoText := "Undo Last Edit"
+	undoSuffix := ""
 	if !m.mapping.canUndo() {
-		undoLine += styleFaint.Render("  (nothing to undo)")
+		undoSuffix = "  (nothing to undo)"
 	}
 	if m.mapping.cursor == buttonRows+1 {
-		undoLine = styleAccent.Render("› " + undoLine)
+		b.WriteString(styleSelectedRow.Render("› "+undoText+undoSuffix) + "\n")
 	} else {
-		undoLine = "  " + undoLine
+		line := styleBody.Render(undoText)
+		if undoSuffix != "" {
+			line += styleFaint.Render(undoSuffix)
+		}
+		b.WriteString("  " + line + "\n")
 	}
-	b.WriteString(undoLine + "\n")
 
-	resetLine := "Reset Draft"
+	resetText := "Reset Draft"
 	if m.mapping.cursor == buttonRows+2 {
-		resetLine = styleAccent.Render("› " + resetLine)
+		b.WriteString(styleSelectedRow.Render("› "+resetText) + "\n")
 	} else {
-		resetLine = "  " + resetLine
+		b.WriteString("  " + styleBody.Render(resetText) + "\n")
 	}
-	b.WriteString(resetLine + "\n")
 
 	if m.mapping.kind == core.KindUltimate2 {
 		b.WriteString("\n" + styleHelp.Render("p to preview another slot before loading it into the editor"))

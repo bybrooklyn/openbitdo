@@ -73,9 +73,9 @@ func (m Model) viewSettings(height int) string {
 	}
 	for i, row := range rows {
 		if i == m.settingsCursor {
-			b.WriteString(styleAccent.Render("› "+row) + "\n")
+			b.WriteString(styleSelectedRow.Render("› "+row) + "\n")
 		} else {
-			b.WriteString("  " + row + "\n")
+			b.WriteString("  " + styleBody.Render(row) + "\n")
 		}
 	}
 

@@ -62,6 +62,11 @@ func barred(c lipgloss.Color) lipgloss.Style {
 var (
 	styleTitle = lipgloss.NewStyle().Foreground(theme.Accent).Bold(true)
 
+	// styleBody is the default style for plain informational body text —
+	// status/detail lines, unselected list rows, diagnostic detail fields —
+	// anywhere content isn't already carrying a more specific semantic style
+	// (Faint, Warning, Danger, Positive, Accent). Applied consistently
+	// across every screen, not just the one call site it started in.
 	styleBody = lipgloss.NewStyle().Foreground(theme.Text)
 
 	styleFaint = lipgloss.NewStyle().Foreground(theme.TextFaint)
@@ -70,6 +75,11 @@ var (
 	styleWarning  = lipgloss.NewStyle().Foreground(theme.Warning).Bold(true)
 	styleDanger   = lipgloss.NewStyle().Foreground(theme.Danger).Bold(true)
 
+	// styleAccent is for genuinely one-off accent-colored emphasis that
+	// isn't a list selection (a modal's title, a firmware progress bar) —
+	// selection has its own dedicated styleSelectedRow/styleSelectedMarker
+	// now (see below), specifically so this and stylePanelTitle can never
+	// silently drift back into being byte-identical the way they used to.
 	styleAccent = lipgloss.NewStyle().Foreground(theme.Accent).Bold(true)
 
 	// stylePanel/stylePanelActive: left-bar only, no full box — see the
@@ -79,9 +89,38 @@ var (
 	stylePanel       = barred(theme.BorderDim)
 	stylePanelActive = barred(theme.Accent)
 
-	stylePanelTitle = lipgloss.NewStyle().Foreground(theme.Accent).Bold(true)
+	// stylePanelTitle marks section/panel headings. Underlined, on top of
+	// Accent+Bold, specifically so it is never byte-identical to
+	// styleAccent again (see styleAccent's own comment below) — a heading
+	// and a selected row rendered with the same style is what caused the
+	// user-reported "it's weird to tell what button I'm selecting" bug.
+	stylePanelTitle = lipgloss.NewStyle().Foreground(theme.Accent).Bold(true).Underline(true)
 
+	// styleSelectedRow is this app's one "this is the current cursor
+	// selection" visual idiom, used everywhere a list has a keyboard-movable
+	// cursor: the Devices device list and Actions pane, Mapping Editor rows,
+	// and Settings rows. Inverted (dark text on an Accent background)
+	// specifically so a selected row can never be confused with
+	// stylePanelTitle's plain underlined heading text at a glance. Wrap the
+	// row's full plain-text content in one Render call so the inverted
+	// background isn't cut short by an embedded style's own reset code —
+	// see styleSelectedMarker below for the one case (Diagnostics) where a
+	// row's content already carries its own embedded styling and this
+	// whole-row wrap isn't safe to use.
 	styleSelectedRow = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("235")).
+				Background(theme.Accent).
+				Bold(true)
+
+	// styleSelectedMarker is styleSelectedRow's marker-only counterpart: it
+	// highlights just a leading "›" rather than the whole row. Use this
+	// instead of styleSelectedRow when the row's own content already
+	// contains embedded ANSI styling (e.g. Diagnostics' colored pass/fail
+	// icon) — wrapping already-styled content in styleSelectedRow.Render
+	// would have the inner content's own reset code cut the outer
+	// background off partway through the row, a real (if subtle) rendering
+	// bug, not just a style-consistency nicety.
+	styleSelectedMarker = lipgloss.NewStyle().
 				Foreground(lipgloss.Color("235")).
 				Background(theme.Accent).
 				Bold(true)

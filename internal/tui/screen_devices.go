@@ -339,8 +339,8 @@ func (m Model) viewDeviceDetail(width, height int) string {
 	var b strings.Builder
 	b.WriteString(stylePanelTitle.Render(device.Name) + "\n")
 	b.WriteString(styleFaint.Render(pidLabel(device.VidPid)+" · "+string(device.ProtocolFamily)) + "\n\n")
-	b.WriteString("Status: " + string(device.SupportStatus()) + "\n")
-	b.WriteString("Evidence: " + string(device.Evidence) + "\n\n")
+	b.WriteString(styleBody.Render("Status: "+string(device.SupportStatus())) + "\n")
+	b.WriteString(styleBody.Render("Evidence: "+string(device.Evidence)) + "\n\n")
 
 	if blocked := blockedLinesForDevice(device, m.acknowledgedRisk, m.advancedMode, m.acknowledgedRisk, m.writeLockUntilRestart); len(blocked) > 0 {
 		b.WriteString(styleWarning.Render("Blocked:") + "\n")
@@ -364,7 +364,7 @@ func (m Model) viewDeviceDetail(width, height int) string {
 			style = styleFaint
 			label += "  (" + item.reason + ")"
 		} else if m.devices.pane == paneActions && i == m.devices.actionIdx {
-			style = styleAccent
+			style = styleSelectedRow
 			label = "› " + label
 		} else {
 			label = "  " + label
