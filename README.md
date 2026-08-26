@@ -22,7 +22,7 @@ OpenBitdo is unofficial and not affiliated with 8BitDo. Firmware updates and dev
 | Homebrew | `brew tap bybrooklyn/openbitdo && brew install openbitdo` | macOS or Linux users who want the standard tap flow |
 | AUR | `paru -S openbitdo-bin` | Arch Linux users who want a prebuilt package |
 | GitHub Releases | Download a release tarball and run `bin/openbitdo` | Users who want a standalone binary without a package manager |
-| From source | `go build -o openbitdo ./cmd/openbitdo` with Go 1.27+ | Contributors and local development |
+| From source | `go build -o openbitdo ./cmd/openbitdo` with Go 1.24+ | Contributors and local development |
 
 Contributors: [`justfile`](justfile) has common dev commands (`just build`, `just test`, `just run-mock`, `just check` before pushing) — install [`just`](https://github.com/casey/just) and run `just` with no arguments to list them.
 
@@ -89,3 +89,4 @@ OpenBitdo is licensed under the [GNU General Public License v3.0 or later](LICEN
 - Protocol overview: [docs/spec/protocol_spec.md](docs/spec/protocol_spec.md)
 - Contributing (build/test, the clean-room rule, code style, PR process): [CONTRIBUTING.md](CONTRIBUTING.md)
 - Reporting a security issue: [SECURITY.md](SECURITY.md)
+- The prior Rust/ratatui implementation (superseded by this Go/Bubbletea rewrite as of `v0.1.0`) is preserved, unmaintained, on the [`legacy/rust-tui`](https://github.com/bybrooklyn/openbitdo/tree/legacy/rust-tui) branch.

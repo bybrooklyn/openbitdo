@@ -24,6 +24,10 @@ unchanged. What changed:
   not migrated; if present and unparseable against the new schema, OpenBitdo warns and falls back
   to defaults.
 
+The Rust implementation itself is preserved, unmaintained, on the
+[`legacy/rust-tui`](https://github.com/bybrooklyn/openbitdo/tree/legacy/rust-tui) branch — it's
+buildable at that branch's tip if you need to compare behavior against the pre-rewrite version.
+
 ## Current CLI Contract
 
 - `openbitdo` launches the interactive dashboard.
