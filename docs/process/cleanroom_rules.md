@@ -2,8 +2,8 @@
 
 ## Allowed Inputs
 
-- `cleanroom/spec/**`
-- `cleanroom/process/**`
+- `docs/spec/**`
+- `docs/process/**`
 - approved harness fixtures and generated release artifacts
 
 ## Forbidden Inputs
@@ -14,7 +14,7 @@
 
 ## Enforcement
 
-- `cleanroom/scripts/cleanroom_guard.sh` scans for forbidden references
+- `scripts/cleanroom_guard.sh` scans for forbidden references
 - CI runs the guard before packaging and test jobs
 
 ## Commit Hygiene
