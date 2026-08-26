@@ -1,6 +1,9 @@
 target/
 dist/
 
+# Local build output (`just build`)
+/openbitdo
+
 # Reports
 docs/clean-room-evidence/reports/*.json
 
