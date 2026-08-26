@@ -421,6 +421,17 @@ func (m Model) viewMapping(height int) string {
 	}
 
 	buttonRows := m.mapping.rowCount() - 3
+
+	diagramSelectedIdx := -1
+	if m.mapping.cursor < buttonRows {
+		if m.mapping.kind == core.KindJP108 {
+			diagramSelectedIdx = int(m.mapping.jp108Draft[m.mapping.cursor].Button.WireIndex())
+		} else {
+			diagramSelectedIdx = int(m.mapping.u2Draft.Mappings[m.mapping.cursor].Button.WireIndex())
+		}
+	}
+	b.WriteString(renderControllerDiagram(m.mapping.kind, diagramSelectedIdx) + "\n\n")
+
 	for i := 0; i < buttonRows; i++ {
 		var label, value string
 		if m.mapping.kind == core.KindJP108 {

@@ -21,6 +21,22 @@ var AllDedicatedButtons = []DedicatedButtonID{
 	ButtonA, ButtonB, ButtonK1, ButtonK2, ButtonK3, ButtonK4, ButtonK5, ButtonK6, ButtonK7, ButtonK8,
 }
 
+// dedicatedButtonNames mirrors u2TargetLabel's approach in internal/tui for
+// the physical-button (not remap-target) side: a small, explicit name table
+// rather than relying on Stringer codegen for 10 fixed values.
+var dedicatedButtonNames = [...]string{"A", "B", "K1", "K2", "K3", "K4", "K5", "K6", "K7", "K8"}
+
+// String returns this button's short display name (e.g. "K3"). Used by the
+// Mapping Editor's row labels and controller diagram — before this existed,
+// %v formatting fell back to the raw underlying int, showing "0".."9"
+// instead of a name.
+func (b DedicatedButtonID) String() string {
+	if int(b) >= 0 && int(b) < len(dedicatedButtonNames) {
+		return dedicatedButtonNames[b]
+	}
+	return "?"
+}
+
 // WireIndex returns the protocol byte index for this button.
 func (b DedicatedButtonID) WireIndex() byte { return byte(b) }
 
@@ -59,6 +75,25 @@ const (
 var AllU2Buttons = []U2ButtonID{
 	U2A, U2B, U2X, U2Y, U2L1, U2R1, U2L2, U2R2, U2L3, U2R3,
 	U2Select, U2Start, U2Home, U2DPadUp, U2DPadDown, U2DPadLeft, U2DPadRight,
+}
+
+// u2ButtonNames mirrors u2TargetLabel's naming exactly (internal/tui) for
+// the physical-button side, since AllU2Buttons and the target-usage table
+// (0x0100.."A"..0x0110.."DPadRight") name the same 17 logical positions.
+var u2ButtonNames = [...]string{
+	"A", "B", "X", "Y", "L1", "R1", "L2", "R2", "L3", "R3",
+	"Select", "Start", "Home", "DPadUp", "DPadDown", "DPadLeft", "DPadRight",
+}
+
+// String returns this button's short display name (e.g. "L2"). Used by the
+// Mapping Editor's row labels and controller diagram — before this existed,
+// %v formatting fell back to the raw underlying int, showing "0".."16"
+// instead of a name.
+func (b U2ButtonID) String() string {
+	if int(b) >= 0 && int(b) < len(u2ButtonNames) {
+		return u2ButtonNames[b]
+	}
+	return "?"
 }
 
 // WireIndex returns the protocol byte index for this button.
