@@ -17,12 +17,13 @@ const (
 )
 
 type diagnosticsState struct {
-	device  core.AppDevice
-	loading bool
-	result  protocol.DiagProbeResult
-	err     error
-	cursor  int
-	filter  diagFilter
+	device             core.AppDevice
+	loading            bool
+	result             protocol.DiagProbeResult
+	err                error
+	cursor             int
+	filter             diagFilter
+	showSupportRequest bool
 }
 
 func newDiagnosticsState() diagnosticsState { return diagnosticsState{} }
@@ -62,9 +63,20 @@ func (m Model) updateDiagnostics(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, saveCmd
 
 	case tea.KeyMsg:
+		if m.diag.showSupportRequest {
+			if msg.String() == "esc" {
+				m.diag.showSupportRequest = false
+			}
+			return m, nil
+		}
 		switch msg.String() {
 		case "esc":
 			m.screen = screenDevices
+			return m, nil
+		case "s":
+			if m.diag.device.SupportTier != protocol.TierFull {
+				m.diag.showSupportRequest = true
+			}
 			return m, nil
 		case "up", "k":
 			if m.diag.cursor > 0 {
@@ -106,9 +118,16 @@ func (m Model) viewDiagnostics(height int) string {
 		return stylePanel.Width(m.width - 2).Height(height - 2).Render(b.String())
 	}
 
+	if m.diag.showSupportRequest {
+		b.WriteString(stylePanelTitle.Render("Support request — select and copy the text below") + "\n\n")
+		b.WriteString(supportRequestBody(m.diag.device, m.diag.result))
+		b.WriteString("\n" + styleHelp.Render("esc to go back"))
+		return stylePanel.Width(m.width - 2).Height(height - 2).Render(b.String())
+	}
+
 	if m.diag.device.SupportTier != protocol.TierFull {
 		b.WriteString(candidateTierExplanation(m.diag.device))
-		b.WriteString("\n\n")
+		b.WriteString("\n" + styleFaint.Render("Press s to generate a support-request report you can paste into a new GitHub issue.") + "\n\n")
 	}
 
 	passed, total := 0, len(m.diag.result.CommandChecks)
