@@ -8,6 +8,7 @@ package tui
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/bybrooklyn/openbitdo/internal/core"
 	"github.com/bybrooklyn/openbitdo/internal/input"
@@ -325,11 +326,50 @@ func hint(key, label string) string {
 	return styleKey.Render(key) + " " + label
 }
 
+// Switch-vs-Xbox button-layout awareness (physical A/B/X/Y swapped) was
+// investigated and found not currently feasible: GetMode's response does
+// carry a real, parsed "mode" byte (validation.go: parsed["mode"] =
+// response[5]), but nothing in this codebase, docs/spec/*, or the dirty-room
+// evidence dossiers documents what specific values mean, and
+// docs/spec/device_name_catalog.md lists every known PID's ProtocolFamily
+// as "DInput" uniformly — no separate Switch-layout protocol family exists
+// in the evidence at all. Inventing a mode-value-to-layout mapping without
+// hardware-confirmed evidence would be exactly the kind of guessed byte
+// layout this project's own conventions deliberately avoid (see
+// internal/input/descriptor_other.go's comment on the same principle) — so
+// this scopes down to just the connected/not-connected label-hiding below,
+// per gamepadConnected. Revisit if a future dossier documents this.
+
+// gamepadConnected reports whether a gamepad's nav stream was actually
+// wired up at startup, from internal/input.Start's per-device Notes (the
+// same data already surfaced verbatim on the Settings screen — see
+// screen_settings.go's "Gamepad Navigation" section). This is a
+// startup-time snapshot, not a live connect/disconnect signal:
+// internal/input.NavEvent has no Connected/Disconnected kind, only
+// DPadChanged/ButtonDown/ButtonUp, so a controller plugged in after launch
+// won't flip this until restart. That's an existing limitation of what
+// internal/input tracks, not something screenHelp/viewFooter can see past —
+// it's still the right, honest signal for "should the footer show
+// controller-specific key hints," since a keyboard-only user should never
+// see "A"/"B" glyphs that mean nothing to them.
+func (m Model) gamepadConnected() bool {
+	for _, note := range m.navNotes {
+		if strings.Contains(note, "gamepad nav active") {
+			return true
+		}
+	}
+	return false
+}
+
 func (m Model) screenHelp() string {
-	nav := hint("↑↓/dpad", "move") + "  " + hint("enter/A", "select") + "  " + hint("esc/B", "back") + "  " + hint("ctrl+c", "quit")
+	moveLabel, selectLabel, backLabel := "↑↓", "enter", "esc"
+	if m.gamepadConnected() {
+		moveLabel, selectLabel, backLabel = "↑↓/dpad", "enter/A", "esc/B"
+	}
+	nav := hint(moveLabel, "move") + "  " + hint(selectLabel, "select") + "  " + hint(backLabel, "back") + "  " + hint("ctrl+c", "quit")
 	switch m.screen {
 	case screenDevices:
-		return hint("/", "filter") + "  " + hint("r", "rescan") + "  " + nav
+		return hint("/", "filter") + "  " + hint("r", "rescan") + "  " + hint("right/tab", "actions") + "  " + nav
 	case screenDiagnostics:
 		extra := hint("tab", "toggle filter") + "  " + hint("r", "rerun")
 		if m.diag.device.SupportTier != protocol.TierFull {

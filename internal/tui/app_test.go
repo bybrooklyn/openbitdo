@@ -514,6 +514,54 @@ func TestMappingEditorSelectionIsDistinctFromHeading(t *testing.T) {
 	}
 }
 
+// TestScreenHelp_ControllerHintsOnlyShownWhenGamepadConnected guards the fix
+// for "people are gonna be confused seeing B or A on their keyboard" — the
+// footer's controller glyphs (A/B/dpad) must only appear when
+// internal/input actually wired up a gamepad nav stream at startup.
+func TestScreenHelp_ControllerHintsOnlyShownWhenGamepadConnected(t *testing.T) {
+	m, _ := newTestModel(t, filepath.Join(t.TempDir(), "config.toml"))
+
+	help := m.screenHelp()
+	if strings.Contains(help, "enter/A") || strings.Contains(help, "esc/B") || strings.Contains(help, "dpad") {
+		t.Fatalf("expected no controller glyphs with no gamepad connected, got: %s", help)
+	}
+	if !strings.Contains(help, "enter") || !strings.Contains(help, "esc") {
+		t.Fatalf("expected plain keyboard-only hints, got: %s", help)
+	}
+
+	m.navNotes = []string{"pid=0x6012: gamepad nav active"}
+	help = m.screenHelp()
+	if !strings.Contains(help, "enter/A") || !strings.Contains(help, "esc/B") || !strings.Contains(help, "dpad") {
+		t.Fatalf("expected controller glyphs once a gamepad is connected, got: %s", help)
+	}
+}
+
+// TestScreenHelp_UnavailableNavNoteDoesNotCountAsConnected makes sure
+// gamepadConnected distinguishes "gamepad nav active" from "gamepad nav
+// unavailable" notes — internal/input.Start emits both shapes, and matching
+// the wrong substring would show controller hints for a device nav
+// explicitly failed to wire up.
+func TestScreenHelp_UnavailableNavNoteDoesNotCountAsConnected(t *testing.T) {
+	m, _ := newTestModel(t, filepath.Join(t.TempDir(), "config.toml"))
+	m.navNotes = []string{"pid=0x6012: gamepad nav unavailable (open failed: no device)"}
+	if m.gamepadConnected() {
+		t.Fatal("expected an 'unavailable' nav note not to count as a connected gamepad")
+	}
+}
+
+// TestScreenHelp_DevicesScreenMentionsRightTabForActions guards the Devices
+// footer omission: right/tab is the real key that moves focus into the
+// Actions pane (screen_devices.go's "right", "tab" case), but the footer
+// never told users that.
+func TestScreenHelp_DevicesScreenMentionsRightTabForActions(t *testing.T) {
+	m, _ := newTestModel(t, filepath.Join(t.TempDir(), "config.toml"))
+	m.screen = screenDevices
+	help := m.screenHelp()
+	if !strings.Contains(help, "right/tab") {
+		t.Fatalf("expected the Devices footer to mention right/tab for the Actions pane, got: %s", help)
+	}
+}
+
 func hex4(v uint16) string {
 	const hexdigits = "0123456789abcdef"
 	return string([]byte{
