@@ -77,10 +77,20 @@ func IsDevicePresent(target VidPid) bool {
 	return false
 }
 
+// hidDevice is the read/write/close surface HidTransport needs from an
+// opened device handle — satisfied by both *hid.Device (openHidDevice on
+// non-darwin platforms) and *machid.Device (openHidDevice on darwin; see
+// hid_device_darwin.go for why darwin needs a different Open path).
+type hidDevice interface {
+	Read([]byte) (int, error)
+	Write([]byte) (int, error)
+	Close() error
+}
+
 // HidTransport is the real hidapi-backed Transport.
 type HidTransport struct {
 	mu     sync.Mutex
-	device *hid.Device
+	device hidDevice
 	target VidPid
 }
 
@@ -97,7 +107,7 @@ func (h *HidTransport) Open(ctx context.Context, target VidPid) error {
 	if len(infos) == 0 {
 		return errTransport("no HID device found for %s", target)
 	}
-	device, err := infos[0].Open()
+	device, err := openHidDevice(infos[0])
 	if err != nil {
 		return withLinuxOpenHint(errTransport("open failed for %s: %v", target, err))
 	}

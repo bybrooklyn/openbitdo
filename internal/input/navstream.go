@@ -72,6 +72,15 @@ type StartResult struct {
 	Notes  []string
 }
 
+// navDevice is the read/close surface streamDevice needs from an opened
+// device handle — satisfied by both *hid.Device (openNavDevice on
+// non-darwin platforms) and *machid.Device (openNavDevice on darwin; see
+// navdevice_darwin.go for why darwin needs a different Open path).
+type navDevice interface {
+	Read([]byte) (int, error)
+	Close() error
+}
+
 // Start opens a read-only, nav-only input stream on every enumerated
 // vid==0x2dc8 HID device and returns a single merged event channel. Streams
 // stop when ctx is cancelled.
@@ -91,7 +100,7 @@ func Start(ctx context.Context) StartResult {
 			notes = append(notes, fmt.Sprintf("pid=%#04x: gamepad nav unavailable (bad report descriptor: %v)", info.ProductID, err))
 			continue
 		}
-		device, err := info.Open()
+		device, err := openNavDevice(info)
 		if err != nil {
 			notes = append(notes, fmt.Sprintf("pid=%#04x: gamepad nav unavailable (open failed: %v)%s",
 				info.ProductID, err, linuxOpenHintSuffix()))
@@ -104,7 +113,7 @@ func Start(ctx context.Context) StartResult {
 	return StartResult{Events: events, Notes: notes}
 }
 
-func streamDevice(ctx context.Context, device *hid.Device, pid uint16, fields []Field, out chan<- NavEvent) {
+func streamDevice(ctx context.Context, device navDevice, pid uint16, fields []Field, out chan<- NavEvent) {
 	// This goroutine runs detached from Bubbletea's Cmd system (started via
 	// a bare 'go' statement in Start), so an unrecovered panic here would
 	// crash the whole process -- Bubbletea's own panic recovery only wraps
