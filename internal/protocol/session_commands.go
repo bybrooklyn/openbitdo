@@ -17,6 +17,27 @@ func (s *DeviceSession) GetMode(ctx context.Context) (ModeState, error) {
 	return ModeState{Mode: byte(resp.ParsedFields["mode"]), Source: "GetModeAlt"}, nil
 }
 
+// GetControllerVersion reads the device's reported firmware version,
+// formatted the same way diagnostics does (e.g. "firmware 1.23"), falling
+// back to CommandVersion if CommandGetControllerVersion doesn't respond.
+func (s *DeviceSession) GetControllerVersion(ctx context.Context) (string, error) {
+	resp, err := s.SendCommand(ctx, CommandGetControllerVersion, nil)
+	if err != nil {
+		resp, err = s.SendCommand(ctx, CommandVersion, nil)
+		if err != nil {
+			return "", err
+		}
+	}
+	version, hasVersion := resp.ParsedFields["version_x100"]
+	if !hasVersion {
+		return "", errInvalidInput("controller version response missing version field")
+	}
+	if beta, hasBeta := resp.ParsedFields["beta"]; hasBeta {
+		return formatFirmwareVersion(version, &beta), nil
+	}
+	return formatFirmwareVersion(version, nil), nil
+}
+
 // SetMode writes a new device mode via SetModeDInput, then reads it back.
 func (s *DeviceSession) SetMode(ctx context.Context, mode byte) (ModeState, error) {
 	row, err := s.ensureCommandAllowed(CommandSetModeDInput)

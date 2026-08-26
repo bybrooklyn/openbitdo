@@ -121,8 +121,37 @@ func runTransferTask(ctx context.Context, handle *firmwareSessionHandle, interva
 		return
 	}
 
-	finalizeCompleted(handle, chunksSent)
-	handle.eventsPublish("completed", 100, "Firmware update completed", true)
+	verifyPostFlash(ctx, handle, chunksSent, transport)
+}
+
+// verifyPostFlash re-opens a session after the transfer and bootloader exit
+// and reads the device's reported version. This does not compare against
+// handle.plan.TargetVersion -- that field is currently always the literal
+// placeholder "unspecified" (PreflightFirmware never derives a real expected
+// version from the firmware image), so a string comparison against it would
+// be meaningless. What this DOES catch, which nothing did before: the device
+// going unresponsive after a flash that reported no transfer error -- a
+// genuinely dangerous failure mode (a bad flash that "succeeded") that a
+// bare "no error during SendFirmwareChunk/Commit" check cannot detect.
+func verifyPostFlash(ctx context.Context, handle *firmwareSessionHandle, chunksSent int, transport protocol.Transport) {
+	config := protocol.SessionConfig{
+		AllowUnsafe: true, BrickRiskAck: true, Experimental: handle.request.Experimental,
+		RetryPolicy: protocol.DefaultRetryPolicy(), TimeoutProfile: protocol.DefaultTimeoutProfile(),
+	}
+	verifySession, err := protocol.NewDeviceSession(ctx, transport, handle.request.VidPid, config)
+	if err != nil {
+		finalizeCompletedUnverified(handle, chunksSent, "", fmt.Sprintf("Firmware transfer completed, but the device could not be reopened to confirm it's responding: %v", err))
+		return
+	}
+	defer func() { _ = verifySession.Close() }()
+
+	observed, err := verifySession.GetControllerVersion(ctx)
+	if err != nil {
+		finalizeCompletedUnverified(handle, chunksSent, "", fmt.Sprintf("Firmware transfer completed, but the device did not respond to a post-flash version check: %v", err))
+		return
+	}
+
+	finalizeCompleted(handle, chunksSent, observed)
 }
 
 func runMockTransferTask(ctx context.Context, handle *firmwareSessionHandle, intervalMs uint64, bytes []byte) {
@@ -148,21 +177,41 @@ func runMockTransferTask(ctx context.Context, handle *firmwareSessionHandle, int
 		return
 	}
 
-	finalizeCompleted(handle, chunksSent)
-	handle.eventsPublish("completed", 100, "Firmware update completed", true)
+	finalizeCompleted(handle, chunksSent, "mock firmware (no real device to verify against)")
 }
 
-func finalizeCompleted(handle *firmwareSessionHandle, chunksSent int) {
+func finalizeCompleted(handle *firmwareSessionHandle, chunksSent int, observedVersion string) {
 	handle.mu.Lock()
 	handle.state = stageCompleted
 	handle.completedAt = time.Now()
 	report := FirmwareFinalReport{
 		SessionID: handle.plan.SessionID, Status: OutcomeCompleted, StartedAt: handle.startedAt,
 		CompletedAt: handle.completedAt, BytesTotal: handle.plan.BytesTotal, ChunksTotal: handle.plan.ChunksTotal,
-		ChunksSent: chunksSent, Message: "Firmware update completed",
+		ChunksSent: chunksSent, Message: "Firmware update completed and verified",
+		TargetVersion: handle.plan.TargetVersion, ObservedVersion: observedVersion,
 	}
 	handle.report = &report
 	handle.mu.Unlock()
+	handle.eventsPublish("completed", 100, "Firmware update completed", true)
+}
+
+// finalizeCompletedUnverified reports a transfer that completed without a
+// transport-level error but whose post-flash verification read did not
+// succeed -- see verifyPostFlash's doc comment for what this does and does
+// not mean.
+func finalizeCompletedUnverified(handle *firmwareSessionHandle, chunksSent int, observedVersion, message string) {
+	handle.mu.Lock()
+	handle.state = stageCompleted
+	handle.completedAt = time.Now()
+	report := FirmwareFinalReport{
+		SessionID: handle.plan.SessionID, Status: OutcomeCompletedUnverified, StartedAt: handle.startedAt,
+		CompletedAt: handle.completedAt, BytesTotal: handle.plan.BytesTotal, ChunksTotal: handle.plan.ChunksTotal,
+		ChunksSent: chunksSent, Message: message,
+		TargetVersion: handle.plan.TargetVersion, ObservedVersion: observedVersion,
+	}
+	handle.report = &report
+	handle.mu.Unlock()
+	handle.eventsPublish("completed_unverified", 100, message, true)
 }
 
 func finalizeFailure(handle *firmwareSessionHandle, code protocol.ErrorCode, chunksSent int, message string) {

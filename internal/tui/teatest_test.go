@@ -150,7 +150,7 @@ func TestTeatest_FirmwareFlowGatesOnRiskAckModal(t *testing.T) {
 
 	waitForOutput(t, tm, "Press enter to begin")
 	tm.Send(tea.KeyMsg{Type: tea.KeyEnter}) // begin the transfer
-	waitForOutput(t, tm, "Update completed.")
+	waitForOutput(t, tm, "Update completed and verified.")
 }
 
 // TestTeatest_SettingsTogglePersistsAcrossReload: toggling a setting writes

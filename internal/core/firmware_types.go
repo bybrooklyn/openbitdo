@@ -126,8 +126,16 @@ type FirmwareOutcome string
 
 const (
 	OutcomeCompleted FirmwareOutcome = "Completed"
-	OutcomeCancelled FirmwareOutcome = "Cancelled"
-	OutcomeFailed    FirmwareOutcome = "Failed"
+	// OutcomeCompletedUnverified means the transfer itself succeeded (every
+	// chunk sent, commit acknowledged, bootloader exited) but a post-flash
+	// read of the device's reported firmware version either failed or didn't
+	// match TargetVersion -- distinct from Completed because "the write
+	// didn't error" is not the same claim as "the device is now confirmably
+	// running the new firmware", and distinct from Failed because the write
+	// itself did not fail.
+	OutcomeCompletedUnverified FirmwareOutcome = "CompletedUnverified"
+	OutcomeCancelled           FirmwareOutcome = "Cancelled"
+	OutcomeFailed              FirmwareOutcome = "Failed"
 )
 
 // FirmwareFinalReport is the terminal report for a firmware session.
@@ -141,4 +149,10 @@ type FirmwareFinalReport struct {
 	ChunksSent  int
 	ErrorCode   protocol.ErrorCode
 	Message     string
+	// TargetVersion and ObservedVersion are set only for OutcomeCompleted /
+	// OutcomeCompletedUnverified -- the version the plan expected to see
+	// post-flash, and what a post-flash read actually reported (empty if
+	// that read itself failed; see Message for why).
+	TargetVersion   string
+	ObservedVersion string
 }

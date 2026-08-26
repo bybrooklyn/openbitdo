@@ -142,6 +142,8 @@ func (m Model) finishFirmware(report *core.FirmwareFinalReport) (tea.Model, tea.
 			status, message = "attention", "Firmware update failed: "+report.Message
 		case core.OutcomeCancelled:
 			status, message = "cancelled", "Firmware update cancelled."
+		case core.OutcomeCompletedUnverified:
+			status, message = "attention", "Firmware update completed but could not be verified: "+report.Message
 		}
 	}
 	return m, cmdSaveReport(m.settings.ReportSaveMode, m.settingsPath, "firmware-update", &device, status, message, nil, report, nil)
@@ -178,9 +180,16 @@ func (m Model) viewFirmware(height int) string {
 		report := m.fw.finalReport
 		switch report.Status {
 		case core.OutcomeCompleted:
-			b.WriteString(stylePositive.Render("Update completed."))
+			b.WriteString(stylePositive.Render("Update completed and verified."))
+			if report.ObservedVersion != "" {
+				b.WriteString("\n" + styleFaint.Render("Device now reports: "+report.ObservedVersion))
+			}
 		case core.OutcomeCancelled:
 			b.WriteString(styleWarning.Render("Update cancelled."))
+		case core.OutcomeCompletedUnverified:
+			b.WriteString(styleWarning.Render("Update completed, but could not be verified."))
+			b.WriteString("\n" + styleFaint.Render(report.Message))
+			b.WriteString("\n" + styleWarning.Render("The transfer reported no error, but the device did not confirm it's running the new firmware — check that it powers on and responds normally before trusting this update."))
 		default:
 			b.WriteString(styleDanger.Render("Update failed: " + report.Message))
 			if report.ErrorCode == protocol.CodeDeviceDisconnected {

@@ -587,3 +587,83 @@ func TestFirmwareTransferReportsDisconnectedWhenDeviceGenuinelyAbsent(t *testing
 		time.Sleep(2 * time.Millisecond)
 	}
 }
+
+// --- verifyPostFlash: the post-firmware-update verification step. Tested
+// directly against the package-private function (same technique as
+// TestCancelRunningTransferExitsBootloaderBeforeReportingCancelled) since
+// scripting a full bootloader-enter/chunk/commit/exit-bootloader sequence
+// through the public API just to reach this one step would obscure what's
+// actually being tested.
+
+func newVersionResponse(versionX100 uint16, beta byte) []byte {
+	resp := make([]byte, 64)
+	resp[0], resp[1] = 0x02, 0x22
+	resp[2] = byte(versionX100)
+	resp[3] = byte(versionX100 >> 8)
+	resp[4] = beta
+	return resp
+}
+
+func TestVerifyPostFlashCompletesWhenDeviceRespondsToVersionRead(t *testing.T) {
+	handle := &firmwareSessionHandle{
+		plan: FirmwareUpdatePlan{
+			SessionID: "verify-ok", ChunkSize: 32, BytesTotal: 64, ChunksTotal: 2, TargetVersion: "unspecified",
+		},
+		events: newBroadcaster(),
+		state:  stageRunning,
+	}
+	transport := &protocol.MockTransport{}
+	transport.PushReadData(newVersionResponse(123, 0))
+
+	verifyPostFlash(context.Background(), handle, 2, transport)
+
+	handle.mu.Lock()
+	report := handle.report
+	handle.mu.Unlock()
+	if report == nil {
+		t.Fatal("expected a report")
+	}
+	if report.Status != OutcomeCompleted {
+		t.Fatalf("expected Completed, got %s (message: %q)", report.Status, report.Message)
+	}
+	// beta is always present in a well-formed response (the parser sets it
+	// unconditionally whenever the response is long enough), so
+	// formatFirmwareVersion always includes "beta=N" even when N is 0 --
+	// matches existing behavior elsewhere (e.g. diagSuccessDetail).
+	if report.ObservedVersion != "firmware 1.23 beta=0" {
+		t.Fatalf("expected ObservedVersion %q, got %q", "firmware 1.23 beta=0", report.ObservedVersion)
+	}
+}
+
+func TestVerifyPostFlashReportsUnverifiedWhenDeviceDoesNotRespond(t *testing.T) {
+	handle := &firmwareSessionHandle{
+		plan: FirmwareUpdatePlan{
+			SessionID: "verify-silent", ChunkSize: 32, BytesTotal: 64, ChunksTotal: 2, TargetVersion: "unspecified",
+		},
+		events: newBroadcaster(),
+		state:  stageRunning,
+	}
+	// No PushReadData calls at all -- every read on this transport times out,
+	// simulating a device that went unresponsive after a flash that itself
+	// reported no transfer error. This is exactly the dangerous case
+	// verifyPostFlash exists to catch.
+	transport := &protocol.MockTransport{}
+
+	verifyPostFlash(context.Background(), handle, 2, transport)
+
+	handle.mu.Lock()
+	report := handle.report
+	handle.mu.Unlock()
+	if report == nil {
+		t.Fatal("expected a report")
+	}
+	if report.Status != OutcomeCompletedUnverified {
+		t.Fatalf("expected CompletedUnverified, got %s", report.Status)
+	}
+	if report.ObservedVersion != "" {
+		t.Fatalf("expected empty ObservedVersion for an unreachable device, got %q", report.ObservedVersion)
+	}
+	if report.Message == "" {
+		t.Fatal("expected a non-empty explanatory message")
+	}
+}
