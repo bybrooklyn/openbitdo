@@ -1,0 +1,144 @@
+package input
+
+import (
+	"context"
+	"fmt"
+	"time"
+
+	"github.com/karalabe/hid"
+)
+
+const bitdoVID = 0x2dc8
+
+// NavEventKind distinguishes the three navigation-relevant transitions a
+// device stream reports.
+type NavEventKind int
+
+const (
+	EventDPadChanged NavEventKind = iota
+	EventButtonDown
+	EventButtonUp
+)
+
+// NavEvent is one menu-navigation-relevant input transition from a
+// connected 8BitDo device — a d-pad direction change, or a button
+// press/release. This is decoupled from internal/protocol's command
+// session: it is read-only and never competes with a diagnostic/mapping
+// session for the same device handle.
+type NavEvent struct {
+	Kind      NavEventKind
+	SourcePID uint16
+	DPad      Direction // meaningful for EventDPadChanged
+	Button    uint16    // meaningful for EventButtonDown/EventButtonUp
+	Timestamp time.Time
+}
+
+// StartResult is what Start reports back: the merged event channel, plus a
+// human-readable note per enumerated device explaining whether nav input
+// was wired up for it and, if not, why — surfaced so the UI can be honest
+// about the gap rather than silently not responding to a controller.
+type StartResult struct {
+	Events <-chan NavEvent
+	Notes  []string
+}
+
+// Start opens a read-only, nav-only input stream on every enumerated
+// vid==0x2dc8 HID device and returns a single merged event channel. Streams
+// stop when ctx is cancelled.
+func Start(ctx context.Context) StartResult {
+	events := make(chan NavEvent, 64)
+	infos := hid.Enumerate(bitdoVID, 0)
+	notes := make([]string, 0, len(infos))
+
+	for _, info := range infos {
+		descriptor, err := fetchReportDescriptor(info.Path)
+		if err != nil {
+			notes = append(notes, fmt.Sprintf("pid=%#04x: gamepad nav unavailable (%v)", info.ProductID, err))
+			continue
+		}
+		fields, err := ParseReportDescriptor(descriptor)
+		if err != nil {
+			notes = append(notes, fmt.Sprintf("pid=%#04x: gamepad nav unavailable (bad report descriptor: %v)", info.ProductID, err))
+			continue
+		}
+		device, err := info.Open()
+		if err != nil {
+			notes = append(notes, fmt.Sprintf("pid=%#04x: gamepad nav unavailable (open failed: %v)", info.ProductID, err))
+			continue
+		}
+		notes = append(notes, fmt.Sprintf("pid=%#04x: gamepad nav active", info.ProductID))
+		go streamDevice(ctx, device, info.ProductID, fields, events)
+	}
+
+	return StartResult{Events: events, Notes: notes}
+}
+
+func streamDevice(ctx context.Context, device *hid.Device, pid uint16, fields []Field, out chan<- NavEvent) {
+	// karalabe/hid's Read has no timeout; Close() on ctx cancellation is
+	// what unblocks a pending Read (hidapi's read returns an error once the
+	// handle is closed), matching the same pattern internal/protocol's HID
+	// transport uses for the same underlying library limitation.
+	go func() {
+		<-ctx.Done()
+		_ = device.Close()
+	}()
+	defer func() { _ = device.Close() }()
+
+	var prev GamepadState
+	buf := make([]byte, 64)
+	for {
+		n, err := device.Read(buf)
+		if err != nil {
+			return // device closed (shutdown) or disconnected either way
+		}
+		if n == 0 {
+			continue
+		}
+
+		reportID := byte(0)
+		report := buf[:n]
+		// If any parsed field declares a report ID, the first byte of the
+		// report is that ID rather than data.
+		hasReportID := false
+		for _, f := range fields {
+			if f.ReportID != 0 {
+				hasReportID = true
+				break
+			}
+		}
+		if hasReportID && n > 0 {
+			reportID = report[0]
+		}
+
+		state := DecodeReport(fields, reportID, report)
+		emitTransitions(prev, state, pid, out)
+		prev = state
+	}
+}
+
+func emitTransitions(prev, next GamepadState, pid uint16, out chan<- NavEvent) {
+	now := time.Now()
+	if next.DPad != prev.DPad {
+		sendNavEvent(out, NavEvent{Kind: EventDPadChanged, SourcePID: pid, DPad: next.DPad, Timestamp: now})
+	}
+	for usage := range next.Buttons {
+		if !prev.Buttons[usage] {
+			sendNavEvent(out, NavEvent{Kind: EventButtonDown, SourcePID: pid, Button: usage, Timestamp: now})
+		}
+	}
+	for usage := range prev.Buttons {
+		if !next.Buttons[usage] {
+			sendNavEvent(out, NavEvent{Kind: EventButtonUp, SourcePID: pid, Button: usage, Timestamp: now})
+		}
+	}
+}
+
+// sendNavEvent drops the event if the channel is full rather than blocking
+// the device read loop — a menu-nav stream should never let a slow consumer
+// stall input decoding.
+func sendNavEvent(out chan<- NavEvent, event NavEvent) {
+	select {
+	case out <- event:
+	default:
+	}
+}
