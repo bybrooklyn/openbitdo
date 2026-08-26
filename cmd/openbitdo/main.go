@@ -35,12 +35,19 @@ Options:
       --debug-log <path>  Write detailed protocol traces (commands sent, raw
                            responses, timing) to <path>, for troubleshooting.
                            Off by default; never used in mock mode.
+      --version           Print version/build info and exit
+      --diagnostics-dump  Run diagnostics against every enumerated device
+                           (or mock devices with --mock) and print a TOML
+                           report per device to stdout, without launching
+                           the interactive TUI. For scripting/support use.
   -h, --help              Print this help
 
 Examples:
   openbitdo
   openbitdo --mock
   openbitdo --debug-log ~/openbitdo-debug.log
+  openbitdo --version
+  openbitdo --mock --diagnostics-dump
 
 Install:
   Homebrew: brew tap bybrooklyn/openbitdo && brew install openbitdo
@@ -71,12 +78,26 @@ func run() error {
 	}
 	mock := fs.Bool("mock", false, "Use mock transport/devices")
 	debugLogPath := fs.String("debug-log", "", "Write detailed protocol traces to this file")
+	showVersion := fs.Bool("version", false, "Print version/build info and exit")
+	diagnosticsDump := fs.Bool("diagnostics-dump", false, "Run diagnostics against every enumerated device and print TOML reports to stdout")
 	if err := fs.Parse(os.Args[1:]); err != nil {
 		return err
 	}
 	if fs.NArg() > 0 {
 		fs.Usage()
 		return fmt.Errorf("unexpected argument: %s", fs.Arg(0))
+	}
+
+	build := tui.BuildInfo{
+		AppVersion: appVersion, Commit: gitCommit, BuildDate: buildDate,
+		Platform: runtime.GOOS + "/" + runtime.GOARCH,
+	}
+	if *showVersion {
+		// Same reasoning as --help: nothing left to report a write failure
+		// through, so it's deliberately discarded rather than checked.
+		_, _ = fmt.Fprintf(os.Stdout, "openbitdo %s (commit %s, built %s, %s)\n",
+			build.AppVersion, build.Commit, build.BuildDate, build.Platform)
+		return nil
 	}
 
 	path := tui.SettingsPath()
@@ -103,6 +124,10 @@ func run() error {
 		DebugLog:            debugLog,
 	})
 
+	if *diagnosticsDump {
+		return runDiagnosticsDump(context.Background(), c)
+	}
+
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -116,14 +141,43 @@ func run() error {
 	nav := input.Start(ctx)
 
 	model := tui.NewModel(ctx, cancel, c, nav, tui.Options{
-		Build: tui.BuildInfo{
-			AppVersion: appVersion, Commit: gitCommit, BuildDate: buildDate,
-			Platform: runtime.GOOS + "/" + runtime.GOARCH,
-		},
+		Build:    build,
 		Settings: settings, SettingsPath: path, MockMode: *mock, NavNotes: nav.Notes,
 	})
 
 	program := tea.NewProgram(model, tea.WithAltScreen(), tea.WithMouseCellMotion(), tea.WithContext(ctx))
 	_, err := program.Run()
 	return err
+}
+
+// runDiagnosticsDump enumerates every currently visible device and prints a
+// TOML diagnostics report per device to stdout, without launching the TUI —
+// for scripting/support use (e.g. attaching output to a bug report without
+// needing to drive the interactive UI).
+func runDiagnosticsDump(ctx context.Context, c *core.OpenBitdoCore) error {
+	devices, err := c.ListDevices(ctx)
+	if err != nil {
+		return fmt.Errorf("list devices: %w", err)
+	}
+	if len(devices) == 0 {
+		fmt.Fprintln(os.Stderr, "no devices found")
+		return nil
+	}
+	for i, device := range devices {
+		diag, err := c.DiagProbe(ctx, device.VidPid)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "diag probe for %s: %v\n", device.Name, err)
+			continue
+		}
+		report, err := tui.DiagnosticsReportTOML(device, diag)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "render report for %s: %v\n", device.Name, err)
+			continue
+		}
+		if i > 0 {
+			fmt.Println("---")
+		}
+		fmt.Print(report)
+	}
+	return nil
 }

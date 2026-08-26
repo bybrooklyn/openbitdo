@@ -2,12 +2,15 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/bybrooklyn/openbitdo/internal/core"
 )
 
 // buildOnce compiles the real openbitdo binary a single time and shares the
@@ -101,5 +104,73 @@ func TestUnexpectedArgumentExitsNonZeroWithUsage(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), "unexpected argument") {
 		t.Fatalf("expected an explanatory error on stderr, got %q", stderr.String())
+	}
+}
+
+func TestVersionFlagExitsCleanlyAndWritesToStdout(t *testing.T) {
+	bin := builtBinary(t)
+	cmd := exec.Command(bin, "--version")
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("expected exit code 0, got error: %v (stderr=%q)", err, stderr.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("expected empty stderr, got %q", stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "openbitdo") {
+		t.Fatalf("expected version info on stdout, got %q", stdout.String())
+	}
+}
+
+func TestDiagnosticsDumpPrintsTOMLReportsPerMockDevice(t *testing.T) {
+	bin := builtBinary(t)
+	cmd := exec.Command(bin, "--mock", "--diagnostics-dump")
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("expected exit code 0, got error: %v (stderr=%q)", err, stderr.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("expected empty stderr, got %q", stderr.String())
+	}
+	out := stdout.String()
+	deviceCount := strings.Count(out, "[device]")
+	if deviceCount < 2 {
+		t.Fatalf("expected reports for multiple mock devices, got %d [device] sections in:\n%s", deviceCount, out)
+	}
+	if strings.Count(out, "\n---\n") != deviceCount-1 {
+		t.Fatalf("expected %d '---' separators between %d device reports, got %d in:\n%s",
+			deviceCount-1, deviceCount, strings.Count(out, "\n---\n"), out)
+	}
+	if !strings.Contains(out, "schema_version = 2") {
+		t.Fatalf("expected the standard support-report schema, got:\n%s", out)
+	}
+}
+
+func TestDiagnosticsDumpReportsNoDevicesOnStderrNotStdout(t *testing.T) {
+	if devices, err := core.New(core.Config{}).ListDevices(context.Background()); err == nil && len(devices) > 0 {
+		t.Skip("a real 8BitDo device is attached to this machine — this test needs none to be present")
+	}
+	bin := builtBinary(t)
+	// Real (non-mock) mode with no hardware attached to this test environment
+	// -- exercises the "no devices found" path distinctly from the mock path
+	// above, and confirms that message goes to stderr, not stdout (stdout is
+	// meant to be pipeable TOML output; a "no devices" notice mixed into it
+	// would corrupt that for a script parsing it).
+	cmd := exec.Command(bin, "--diagnostics-dump")
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("expected exit code 0 even with no devices, got error: %v (stderr=%q)", err, stderr.String())
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("expected empty stdout when no devices are found, got %q", stdout.String())
+	}
+	if !strings.Contains(stderr.String(), "no devices found") {
+		t.Fatalf("expected a 'no devices found' notice on stderr, got %q", stderr.String())
 	}
 }

@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/BurntSushi/toml"
@@ -239,20 +240,11 @@ func reportsDir(settingsPath string) string {
 	return filepath.Join(filepath.Dir(settingsPath), "reports")
 }
 
-// persistSupportReport writes a TOML report and prunes old ones (cap 20
-// files / 30 days, same retention as the prior Rust TUI), gated by mode.
-func persistSupportReport(mode ReportSaveMode, settingsPath, operation string, device *core.AppDevice, status, message string,
-	diag *protocol.DiagProbeResult, firmware *core.FirmwareFinalReport, runtimeUnlock *core.RuntimeUnlockReport) (string, error) {
-
-	failed := status != "ok" && status != "passed"
-	switch mode {
-	case ReportSaveOff:
-		return "", nil
-	case ReportSaveFailureOnly:
-		if !failed {
-			return "", nil
-		}
-	}
+// buildSupportReport assembles the report struct (no I/O) shared by
+// persistSupportReport (writes to a file) and DiagnosticsReportTOML (prints
+// to stdout for --diagnostics-dump) — one schema, two destinations.
+func buildSupportReport(operation string, device *core.AppDevice, status, message string,
+	diag *protocol.DiagProbeResult, firmware *core.FirmwareFinalReport, runtimeUnlock *core.RuntimeUnlockReport) supportReport {
 
 	report := supportReport{
 		SchemaVersion: reportSchemaVersion, GeneratedAtUTC: time.Now().UTC().Format(time.RFC3339),
@@ -272,6 +264,44 @@ func persistSupportReport(mode ReportSaveMode, settingsPath, operation string, d
 	if runtimeUnlock != nil {
 		report.RuntimeUnlock = runtimeUnlockToReport(*runtimeUnlock)
 	}
+	return report
+}
+
+// DiagnosticsReportTOML renders a diagnostics report in the exact TOML shape
+// persisted support reports use, for --diagnostics-dump. Status mirrors the
+// same "ok"/"attention" convention the TUI's diagnostics flow uses.
+func DiagnosticsReportTOML(device core.AppDevice, diag protocol.DiagProbeResult) (string, error) {
+	status := "ok"
+	for _, c := range diag.CommandChecks {
+		if !c.OK {
+			status = "attention"
+			break
+		}
+	}
+	report := buildSupportReport("diag-probe", &device, status, "", &diag, nil, nil)
+	var b strings.Builder
+	if err := toml.NewEncoder(&b).Encode(report); err != nil {
+		return "", err
+	}
+	return b.String(), nil
+}
+
+// persistSupportReport writes a TOML report and prunes old ones (cap 20
+// files / 30 days, same retention as the prior Rust TUI), gated by mode.
+func persistSupportReport(mode ReportSaveMode, settingsPath, operation string, device *core.AppDevice, status, message string,
+	diag *protocol.DiagProbeResult, firmware *core.FirmwareFinalReport, runtimeUnlock *core.RuntimeUnlockReport) (string, error) {
+
+	failed := status != "ok" && status != "passed"
+	switch mode {
+	case ReportSaveOff:
+		return "", nil
+	case ReportSaveFailureOnly:
+		if !failed {
+			return "", nil
+		}
+	}
+
+	report := buildSupportReport(operation, device, status, message, diag, firmware, runtimeUnlock)
 
 	dir := reportsDir(settingsPath)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
