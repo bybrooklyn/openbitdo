@@ -51,7 +51,7 @@ func (c *OpenBitdoCore) CandidateWriteProbe(ctx context.Context, vidPid protocol
 		Experimental: true, CandidateWriteUnlock: true,
 		RetryPolicy: protocol.DefaultRetryPolicy(), TimeoutProfile: protocol.DefaultTimeoutProfile(), TraceEnabled: true,
 	}
-	session, err := protocol.NewDeviceSession(ctx, protocol.NewHidTransport(), vidPid, config)
+	session, err := protocol.NewDeviceSession(ctx, c.transport(), vidPid, config)
 	if err != nil {
 		return RuntimeUnlockReport{}, errProtocol(err)
 	}

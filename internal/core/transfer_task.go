@@ -13,7 +13,7 @@ import (
 // bootloader, send chunks (checking for cancellation between each), commit,
 // exit bootloader, verify. Runs in its own goroutine, started from
 // ConfirmFirmware.
-func runTransferTask(ctx context.Context, handle *firmwareSessionHandle, intervalMs uint64, mockMode bool) {
+func runTransferTask(ctx context.Context, handle *firmwareSessionHandle, intervalMs uint64, mockMode bool, transport protocol.Transport) {
 	bytes, err := os.ReadFile(handle.request.FirmwarePath)
 	if err != nil {
 		finalizeFailure(handle, protocol.CodeInvalidInput, 0, fmt.Sprintf("Failed to read firmware image: %v", err))
@@ -29,7 +29,7 @@ func runTransferTask(ctx context.Context, handle *firmwareSessionHandle, interva
 		AllowUnsafe: true, BrickRiskAck: true, Experimental: handle.request.Experimental,
 		RetryPolicy: protocol.DefaultRetryPolicy(), TimeoutProfile: protocol.DefaultTimeoutProfile(), TraceEnabled: true,
 	}
-	session, err := protocol.NewDeviceSession(ctx, protocol.NewHidTransport(), handle.request.VidPid, config)
+	session, err := protocol.NewDeviceSession(ctx, transport, handle.request.VidPid, config)
 	if err != nil {
 		finalizeFailure(handle, errorCodeOf(err), 0, fmt.Sprintf("Failed to open device session: %v", err))
 		return

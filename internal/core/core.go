@@ -25,6 +25,18 @@ type OpenBitdoCore struct {
 	backups   map[ConfigBackupID]configBackup
 
 	http *http.Client
+
+	// transportOverride lets tests inject a protocol.MockTransport in place
+	// of real HID access, without needing physical hardware. Unset in normal
+	// use, where transport() falls back to protocol.NewHidTransport().
+	transportOverride protocol.Transport
+}
+
+func (c *OpenBitdoCore) transport() protocol.Transport {
+	if c.transportOverride != nil {
+		return c.transportOverride
+	}
+	return protocol.NewHidTransport()
 }
 
 // New constructs an OpenBitdoCore from config.
@@ -83,7 +95,7 @@ func (c *OpenBitdoCore) DiagProbe(ctx context.Context, target protocol.VidPid) (
 	// Diagnostics always execute inferred SafeRead checks; those checks are
 	// explicitly marked experimental in their result metadata so users can
 	// distinguish confidence levels.
-	session, err := protocol.NewDeviceSession(ctx, protocol.NewHidTransport(), target,
+	session, err := protocol.NewDeviceSession(ctx, c.transport(), target,
 		protocol.SessionConfig{Experimental: true, RetryPolicy: protocol.DefaultRetryPolicy(), TimeoutProfile: protocol.DefaultTimeoutProfile(), TraceEnabled: true})
 	if err != nil {
 		return protocol.DiagProbeResult{}, errProtocol(err)
@@ -170,7 +182,7 @@ func (c *OpenBitdoCore) openSessionForOps(ctx context.Context, target protocol.V
 		AllowUnsafe: true, BrickRiskAck: true, Experimental: c.AdvancedMode(),
 		RetryPolicy: protocol.DefaultRetryPolicy(), TimeoutProfile: protocol.DefaultTimeoutProfile(), TraceEnabled: true,
 	}
-	session, err := protocol.NewDeviceSession(ctx, protocol.NewHidTransport(), target, config)
+	session, err := protocol.NewDeviceSession(ctx, c.transport(), target, config)
 	if err != nil {
 		return nil, errProtocol(err)
 	}

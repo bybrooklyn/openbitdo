@@ -227,7 +227,7 @@ func (c *OpenBitdoCore) ConfirmFirmware(ctx context.Context, request FirmwareCon
 	// chunks and honored promptly), matching the original design where a
 	// confirmed transfer keeps running in the background even if the UI
 	// navigates away — only an explicit CancelFirmware call stops it early.
-	go runTransferTask(context.Background(), handle, interval, mockMode)
+	go runTransferTask(context.Background(), handle, interval, mockMode, c.transport())
 
 	return handle.plan, nil
 }
