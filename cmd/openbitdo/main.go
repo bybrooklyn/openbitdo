@@ -49,6 +49,9 @@ Notes:
 
 func main() {
 	if err := run(); err != nil {
+		if err == flag.ErrHelp {
+			return
+		}
 		fmt.Fprintln(os.Stderr, "error:", err)
 		os.Exit(1)
 	}
@@ -56,7 +59,7 @@ func main() {
 
 func run() error {
 	fs := flag.NewFlagSet("openbitdo", flag.ContinueOnError)
-	fs.Usage = func() { fmt.Fprint(os.Stderr, helpText) }
+	fs.Usage = func() { fmt.Fprint(os.Stdout, helpText) }
 	mock := fs.Bool("mock", false, "Use mock transport/devices")
 	if err := fs.Parse(os.Args[1:]); err != nil {
 		return err
