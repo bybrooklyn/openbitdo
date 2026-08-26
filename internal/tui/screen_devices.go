@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"sort"
 	"strings"
 
 	"github.com/bybrooklyn/openbitdo/internal/core"
@@ -69,6 +70,29 @@ func (d *devicesState) applyFilter() {
 	d.filtered = filtered
 }
 
+// sortDevicesByTier groups the "grouped dashboard: supported, read-only
+// candidate, or detect-only" browsing order the README documents as current
+// behavior — a stable sort so devices within the same tier keep their
+// enumeration order.
+func sortDevicesByTier(devices []core.AppDevice) []core.AppDevice {
+	out := append([]core.AppDevice(nil), devices...)
+	sort.SliceStable(out, func(i, j int) bool {
+		return tierRank(out[i].SupportTier) < tierRank(out[j].SupportTier)
+	})
+	return out
+}
+
+func tierRank(t protocol.SupportTier) int {
+	switch t {
+	case protocol.TierFull:
+		return 0
+	case protocol.TierCandidateReadOnly:
+		return 1
+	default:
+		return 2
+	}
+}
+
 func (d devicesState) selected() (core.AppDevice, bool) {
 	if d.cursor < 0 || d.cursor >= len(d.filtered) {
 		return core.AppDevice{}, false
@@ -120,6 +144,12 @@ func (m Model) updateDevices(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "/":
 			m.devices.filtering = true
 			return m, nil
+		case "r":
+			// Rescanning is always available — including with zero devices
+			// connected, since "plug in a controller and see it appear" is
+			// the core workflow and there was otherwise no way back into
+			// the device list after the one-shot load at startup.
+			return m, cmdLoadDevices(m.ctx, m.core)
 		case "up", "k":
 			if m.devices.pane == paneDeviceList {
 				if m.devices.cursor > 0 {
@@ -269,6 +299,7 @@ func (m Model) viewDeviceList(width, height int) string {
 			b.WriteString("\n" + styleFaint.Render("(mock mode should list 3 devices — check core.ListDevices)"))
 		} else {
 			b.WriteString("\n" + styleFaint.Render("Connect an 8BitDo device, or run with --mock to preview."))
+			b.WriteString("\n" + styleFaint.Render("Press r to rescan once it's plugged in."))
 		}
 	}
 	for i, d := range m.devices.filtered {

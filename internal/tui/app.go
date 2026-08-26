@@ -321,7 +321,7 @@ func (m Model) screenHelp() string {
 	nav := styleKey.Render("↑↓/dpad") + " move  " + styleKey.Render("enter/A") + " select  " + styleKey.Render("esc/B") + " back  " + styleKey.Render("ctrl+c") + " quit"
 	switch m.screen {
 	case screenDevices:
-		return styleKey.Render("/") + " filter  " + nav
+		return styleKey.Render("/") + " filter  " + styleKey.Render("r") + " rescan  " + nav
 	default:
 		return nav
 	}
@@ -329,7 +329,7 @@ func (m Model) screenHelp() string {
 
 func (m Model) handleDevicesLoaded(msg devicesLoadedMsg) (tea.Model, tea.Cmd) {
 	m.err = msg.err
-	m.devices.devices = msg.devices
+	m.devices.devices = sortDevicesByTier(msg.devices)
 	m.devices.applyFilter()
 	if m.devices.cursor >= len(m.devices.filtered) {
 		m.devices.cursor = 0
