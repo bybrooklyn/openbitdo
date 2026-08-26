@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"runtime/debug"
 	"time"
 
 	"github.com/bybrooklyn/openbitdo/internal/protocol"
@@ -12,8 +13,27 @@ import (
 // runTransferTask drives one confirmed firmware transfer end to end: enter
 // bootloader, send chunks (checking for cancellation between each), commit,
 // exit bootloader, verify. Runs in its own goroutine, started from
-// ConfirmFirmware.
+// ConfirmFirmware — detached from Bubbletea's Cmd system, so a panic here
+// would otherwise crash the whole process uncaught (Bubbletea's own panic
+// recovery only wraps goroutines it spawns itself) and leave the firmware
+// session hung forever waiting for a progress event that will never come.
+// The recover() below ensures a panic is instead reported as a normal
+// (if unexpected) transfer failure.
 func runTransferTask(ctx context.Context, handle *firmwareSessionHandle, intervalMs uint64, mockMode bool, transport protocol.Transport) {
+	// chunksSent is declared here (rather than at its original point of first
+	// use, further down) so the panic recovery below can report how far the
+	// transfer actually got, not always 0.
+	// chunksSent is declared here (rather than at its original point of first
+	// use, further down) so the panic recovery below can report how far the
+	// transfer actually got, not always 0.
+	chunksSent := 0
+	defer func() {
+		if r := recover(); r != nil {
+			finalizeFailure(handle, protocol.CodeInvalidInput, chunksSent,
+				fmt.Sprintf("internal error during firmware transfer: %v\n%s", r, debug.Stack()))
+		}
+	}()
+
 	bytes, err := os.ReadFile(handle.request.FirmwarePath)
 	if err != nil {
 		finalizeFailure(handle, protocol.CodeInvalidInput, 0, fmt.Sprintf("Failed to read firmware image: %v", err))
@@ -35,7 +55,6 @@ func runTransferTask(ctx context.Context, handle *firmwareSessionHandle, interva
 		return
 	}
 
-	chunksSent := 0
 	totalChunks := max(handle.plan.ChunksTotal, 1)
 
 	handle.eventsPublish("bootloader", 0, "Entering bootloader", false)

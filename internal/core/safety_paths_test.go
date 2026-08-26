@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/bybrooklyn/openbitdo/internal/protocol"
 )
@@ -441,5 +442,67 @@ func TestDownloadRecommendedFirmwareRejectsNoMatchingArtifact(t *testing.T) {
 	}
 	if coreErr, ok := err.(*Error); !ok || coreErr.Kind != KindDownload {
 		t.Fatalf("expected a Download error, got %v", err)
+	}
+}
+
+// panicTransport opens successfully but panics on every Write, simulating an
+// unexpected internal error partway through a firmware transfer (as opposed
+// to an ordinary transport error, which the non-panic error paths already
+// cover) — this is what runTransferTask's recover() exists to catch.
+type panicTransport struct{}
+
+func (panicTransport) Open(context.Context, protocol.VidPid) error { return nil }
+func (panicTransport) Close() error                                { return nil }
+func (panicTransport) Write([]byte) (int, error)                   { panic("simulated transport panic") }
+func (panicTransport) Read(context.Context, int, uint64) ([]byte, error) {
+	panic("simulated transport panic")
+}
+
+// TestFirmwareTransferPanicIsRecoveredAsFailure verifies runTransferTask's
+// recover() actually works end to end: a panicking transport must not crash
+// the test process (it would, uncaught, since this runs in its own
+// goroutine outside Bubbletea's own panic recovery) and the session must
+// reach a Failed report instead of hanging forever.
+func TestFirmwareTransferPanicIsRecoveredAsFailure(t *testing.T) {
+	c := New(Config{DefaultChunkSize: 16, ProgressIntervalMs: 1})
+	c.transportOverride = panicTransport{}
+	path := filepath.Join(t.TempDir(), "openbitdo-panic.bin")
+	if err := os.WriteFile(path, bytes.Repeat([]byte{3}, 128), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	ctx := context.Background()
+
+	preflight, err := c.PreflightFirmware(ctx, makeReq(t, path, 0x6009))
+	if err != nil || !preflight.Gate.Allowed {
+		t.Fatalf("preflight: gate=%+v err=%v", preflight.Gate, err)
+	}
+	plan := preflight.Plan
+
+	if _, err := c.StartFirmware(ctx, FirmwareStartRequest{SessionID: plan.SessionID}); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	if _, err := c.ConfirmFirmware(ctx, FirmwareConfirmRequest{SessionID: plan.SessionID, AcknowledgedRisk: true}); err != nil {
+		t.Fatalf("confirm: %v", err)
+	}
+
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		report, err := c.FirmwareReport(ctx, plan.SessionID)
+		if err != nil {
+			t.Fatalf("report: %v", err)
+		}
+		if report != nil {
+			if report.Status != OutcomeFailed {
+				t.Fatalf("expected Failed, got %s", report.Status)
+			}
+			if !bytes.Contains([]byte(report.Message), []byte("internal error")) {
+				t.Fatalf("expected the failure message to mention the panic, got %q", report.Message)
+			}
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("timed out waiting for firmware report — the panic likely wasn't recovered, so the goroutine died silently")
+		}
+		time.Sleep(2 * time.Millisecond)
 	}
 }
