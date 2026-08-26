@@ -4,10 +4,15 @@ This guide describes the clean-room path for adding or promoting a device.
 
 ## Update The Runtime Catalog
 
-1. Add or verify the PID row in `sdk/crates/bitdo_proto/src/pid_registry_table.rs`.
-2. Update capability defaults and support-tier policy in `sdk/crates/bitdo_proto/src/registry.rs`.
-3. Add or verify command rows in `sdk/crates/bitdo_proto/src/command_registry_table.rs`.
-4. Update candidate-readonly gating in `sdk/crates/bitdo_proto/src/session.rs` when the new PID needs safe-read diagnostics.
+1. Add or verify the PID row in `spec/pid_matrix.csv` and the command rows in
+   `spec/command_matrix.csv` — these CSVs are the source of truth; the Go PID/command registry
+   (`internal/protocol/registry_generated.go`) is generated from them via `go generate ./...`
+   (see the `go:generate` directive at the top of `internal/protocol/registry.go`, implemented in
+   `internal/protocol/gen/main.go`). Do not hand-edit `registry_generated.go`.
+2. Update capability defaults and support-tier policy in `internal/protocol/registry.go`
+   (`DefaultCapabilityFor`).
+3. Update candidate-readonly gating in `internal/protocol/session.go` when the new PID needs
+   safe-read diagnostics.
 
 ## Update The Sanitized Evidence
 
@@ -28,10 +33,11 @@ At minimum, touch the tests that prove:
 
 ## Validation
 
-From `cleanroom/sdk`:
+From the repository root:
 
 ```bash
+go generate ./...
 ./scripts/cleanroom_guard.sh
-cargo clippy --workspace --all-targets -- -D warnings
-cargo test --workspace --all-targets
+golangci-lint run ./...
+go test -race ./...
 ```
