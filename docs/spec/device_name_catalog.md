@@ -73,5 +73,5 @@ Use it when you need a stable display name for runtime UI, docs, packaging copy,
 ## Notes
 
 - Canonical rows are unique by PID. Do not duplicate a PID to reflect a marketing alias.
-- Name-source evidence is indexed in `/Users/brooklyn/data/8bitdo/cleanroom/process/device_name_sources.md`.
-- Alias names live in `/Users/brooklyn/data/8bitdo/cleanroom/spec/alias_index.md` and stay out of the primary PID rows unless they become the canonical public name.
+- Name-source evidence is indexed in `docs/clean-room-evidence/device_name_sources.md`.
+- Alias names live in `docs/spec/alias_index.md` and stay out of the primary PID rows unless they become the canonical public name.

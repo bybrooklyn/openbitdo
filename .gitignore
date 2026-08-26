@@ -1,11 +1,12 @@
-# Rust
-sdk/target/
-sdk/dist/
 target/
 dist/
 
 # Reports
-harness/reports/*.json
+docs/clean-room-evidence/reports/*.json
+
+# Dirty-room scratch workspaces (binary analysis for new device support) --
+# never tracked, see docs/process/dirtyroom_collection_playbook.md
+.private/
 
 # Release/build artifacts
 *.tar.gz

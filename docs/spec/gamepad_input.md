@@ -3,7 +3,7 @@
 This document is engineering documentation for `internal/input`, not
 clean-room evidence — it describes how the Go TUI decodes controller button
 presses for *menu navigation*, which is a completely separate concern from
-the 8BitDo command/diagnostic protocol documented in `spec/protocol_spec.md`.
+the 8BitDo command/diagnostic protocol documented in `docs/spec/protocol_spec.md`.
 
 ## Scope
 

@@ -4,8 +4,8 @@ This guide describes the clean-room path for adding or promoting a device.
 
 ## Update The Runtime Catalog
 
-1. Add or verify the PID row in `spec/pid_matrix.csv` and the command rows in
-   `spec/command_matrix.csv` — these CSVs are the source of truth; the Go PID/command registry
+1. Add or verify the PID row in `docs/spec/pid_matrix.csv` and the command rows in
+   `docs/spec/command_matrix.csv` — these CSVs are the source of truth; the Go PID/command registry
    (`internal/protocol/registry_generated.go`) is generated from them via `go generate ./...`
    (see the `go:generate` directive at the top of `internal/protocol/registry.go`, implemented in
    `internal/protocol/gen/main.go`). Do not hand-edit `registry_generated.go`.
@@ -18,9 +18,9 @@ This guide describes the clean-room path for adding or promoting a device.
 
 Keep the spec and evidence artifacts aligned:
 
-- `spec/device_name_catalog.md`
-- `spec/protocol_spec.md`
-- `process/device_name_sources.md`
+- `docs/spec/device_name_catalog.md`
+- `docs/spec/protocol_spec.md`
+- `docs/clean-room-evidence/device_name_sources.md`
 - dossier and matrix artifacts where applicable
 
 ## Update Tests

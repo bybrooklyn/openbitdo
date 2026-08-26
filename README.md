@@ -70,8 +70,8 @@ OpenBitdo is licensed under the [GNU General Public License v3.0 or later](LICEN
 
 ## Where To Go Next
 
-- Current RC release gate: [RC_CHECKLIST.md](RC_CHECKLIST.md)
+- Current RC release gate: [docs/RC_CHECKLIST.md](docs/RC_CHECKLIST.md)
 - Changelog and release notes: [CHANGELOG.md](CHANGELOG.md)
-- CLI and packaging migration notes: [MIGRATION.md](MIGRATION.md)
-- Device catalog: [spec/device_name_catalog.md](spec/device_name_catalog.md)
-- Protocol overview: [spec/protocol_spec.md](spec/protocol_spec.md)
+- CLI and packaging migration notes: [docs/MIGRATION.md](docs/MIGRATION.md)
+- Device catalog: [docs/spec/device_name_catalog.md](docs/spec/device_name_catalog.md)
+- Protocol overview: [docs/spec/protocol_spec.md](docs/spec/protocol_spec.md)

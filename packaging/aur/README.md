@@ -6,7 +6,7 @@ This directory holds the tracked AUR source for `openbitdo-bin`.
 
 - tracked metadata: `packaging/aur/openbitdo-bin/PKGBUILD` and `.SRCINFO`
 - template: `packaging/aur/openbitdo-bin/PKGBUILD.tmpl`
-- renderer: `packaging/scripts/render_release_metadata.sh`
+- renderer: `scripts/render_release_metadata.sh`
 
 ## Publish Flow
 

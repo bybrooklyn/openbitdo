@@ -4,7 +4,7 @@ This checklist defines the release-candidate gate for the current public release
 
 `v0.1.0` is the first Go/Bubbletea release: a from-scratch, clean-room rewrite of the prior Rust
 CLI (`v0.0.2`), not an iterative RC of it — same functional capability, a redesigned TUI, and
-controller/keyboard navigation. See `CHANGELOG.md` and `MIGRATION.md` for what changed.
+controller/keyboard navigation. See `CHANGELOG.md` and `docs/MIGRATION.md` for what changed.
 
 ## Release Policy
 
@@ -77,7 +77,7 @@ Release assets must include:
 5. Controller navigation: on Linux and macOS, confirm the device dashboard responds to an
    attached 8BitDo controller's own buttons, not just keyboard input — this is genuinely
    untested against real hardware as of `v0.1.0` (no 8BitDo controller was available during
-   development; see `spec/gamepad_input.md`) and is the first thing to verify manually.
+   development; see `docs/spec/gamepad_input.md`) and is the first thing to verify manually.
 
 ## Current Status Snapshot
 
@@ -96,4 +96,4 @@ Release assets must include:
 
 - Historical RC activity for earlier (Rust-era) candidates is preserved in commit history and the
   changelog.
-- Troubleshooting for AUR SSH publication lives in `process/aur_publish_troubleshooting.md`.
+- Troubleshooting for AUR SSH publication lives in `docs/process/aur_publish_troubleshooting.md`.

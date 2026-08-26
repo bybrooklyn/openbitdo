@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
@@ -21,7 +21,7 @@ printf 'x86_64 archive payload\n' >"$INPUT_DIR/openbitdo-v0.0.1-rc.4-linux-x86_6
 printf 'aarch64 archive payload\n' >"$INPUT_DIR/openbitdo-v0.0.1-rc.4-linux-aarch64.tar.gz"
 printf 'macos archive payload\n' >"$INPUT_DIR/openbitdo-v0.0.1-rc.4-macos-arm64.tar.gz"
 
-bash "$ROOT/packaging/scripts/render_release_metadata.sh" \
+bash "$ROOT/scripts/render_release_metadata.sh" \
   "v0.0.1-rc.4" \
   "bybrooklyn/openbitdo" \
   "$INPUT_DIR" \

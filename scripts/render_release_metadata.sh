@@ -23,7 +23,7 @@ REPOSITORY="$2"
 INPUT_DIR="$3"
 OUTPUT_DIR="$4"
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 sha256() {
   if command -v sha256sum >/dev/null 2>&1; then

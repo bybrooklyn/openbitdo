@@ -5,7 +5,7 @@ Homebrew publishing uses the separate tap repo `bybrooklyn/homebrew-openbitdo`.
 ## Source Of Truth
 
 - template: `packaging/homebrew/Formula/openbitdo.rb.tmpl`
-- renderer: `packaging/scripts/render_release_metadata.sh`
+- renderer: `scripts/render_release_metadata.sh`
 - sync helper: `packaging/homebrew/sync_tap.sh`
 
 The main repo does not keep a checked-in rendered formula. Release rendering produces the formula from published assets, and the tap repo is the canonical published destination.

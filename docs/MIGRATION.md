@@ -15,10 +15,10 @@ unchanged. What changed:
   which the Rust CLI had hardcoded as always-true with no actual confirmation dialog), and a new
   visual theme.
 - The app now navigates with a keyboard or an 8BitDo controller's own buttons, decoded from the
-  standard USB-HID gamepad usage page (see `spec/gamepad_input.md`).
+  standard USB-HID gamepad usage page (see `docs/spec/gamepad_input.md`).
 - The license changed from BSD-3-Clause to GPL-3.0-or-later.
-- The PID/command registries are generated directly from `spec/pid_matrix.csv` and
-  `spec/command_matrix.csv` at build time (`go generate`), rather than hand-maintained Rust tables
+- The PID/command registries are generated directly from `docs/spec/pid_matrix.csv` and
+  `docs/spec/command_matrix.csv` at build time (`go generate`), rather than hand-maintained Rust tables
   cross-checked against the CSVs by separate tests.
 - Settings and support-report schemas are fresh (see below) — an existing Rust `config.toml` is
   not migrated; if present and unparseable against the new schema, OpenBitdo warns and falls back

@@ -81,7 +81,7 @@ requirements:
   - id: REQ-DR-001
     title: Dossier completeness
     description: Every wave target PID shall have sanitized dossier files for each scoped operation group.
-    acceptance: `spec/dossiers/<pid_hex>/*.toml` exists and includes all required schema fields.
+    acceptance: `docs/clean-room-evidence/dossiers/<pid_hex>/*.toml` exists and includes all required schema fields.
   - id: REQ-DR-002
     title: Dossier traceability
     description: Dossiers and command matrix rows shall be linked by stable dossier IDs.

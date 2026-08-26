@@ -29,11 +29,11 @@ jobs:
       - name: Validate release metadata rendering
         run: |
           set -euo pipefail
-          test -f packaging/scripts/render_release_metadata.sh
+          test -f scripts/render_release_metadata.sh
           test -f packaging/aur/openbitdo-bin/PKGBUILD.tmpl
           test -f packaging/homebrew/Formula/openbitdo.rb.tmpl
           test ! -f packaging/homebrew/Formula/openbitdo.rb
-          bash packaging/scripts/test_render_release_metadata.sh
+          bash scripts/test_render_release_metadata.sh
       - name: Validate Homebrew tap sync helper
         run: |
           set -euo pipefail
