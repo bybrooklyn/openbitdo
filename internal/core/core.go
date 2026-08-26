@@ -33,10 +33,16 @@ type OpenBitdoCore struct {
 }
 
 func (c *OpenBitdoCore) transport() protocol.Transport {
+	var t protocol.Transport
 	if c.transportOverride != nil {
-		return c.transportOverride
+		t = c.transportOverride
+	} else {
+		t = protocol.NewHidTransport()
 	}
-	return protocol.NewHidTransport()
+	if c.config.DebugLog != nil {
+		t = newLoggingTransport(t, c.config.DebugLog.Printf)
+	}
+	return t
 }
 
 // New constructs an OpenBitdoCore from config.

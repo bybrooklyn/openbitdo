@@ -6,6 +6,7 @@ package core
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"log"
 )
 
 const defaultManifestURL = "https://github.com/bybrooklyn/openbitdo/releases/latest/download/firmware-manifest.toml"
@@ -50,6 +51,12 @@ type Config struct {
 	DefaultChunkSize    int
 	ProgressIntervalMs  uint64
 	FirmwareManifestURL string
+	// DebugLog, when set, makes every real device Open/Write/Read call
+	// (across diagnostics, mapping, and firmware — every operation flows
+	// through OpenBitdoCore.transport()) log its outcome, including raw
+	// bytes, for troubleshooting a hard bug after the fact. Off (nil) by
+	// default; never touched in mock mode.
+	DebugLog *log.Logger
 }
 
 // DefaultConfig matches the Rust implementation's defaults.

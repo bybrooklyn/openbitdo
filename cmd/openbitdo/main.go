@@ -7,6 +7,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"log"
 	"os"
 	"os/signal"
 	"runtime"
@@ -30,12 +31,16 @@ const helpText = `Usage: openbitdo [OPTIONS]
 Beginner-first 8BitDo controller utility.
 
 Options:
-      --mock   Use mock transport/devices
-  -h, --help   Print this help
+      --mock              Use mock transport/devices
+      --debug-log <path>  Write detailed protocol traces (commands sent, raw
+                           responses, timing) to <path>, for troubleshooting.
+                           Off by default; never used in mock mode.
+  -h, --help              Print this help
 
 Examples:
   openbitdo
   openbitdo --mock
+  openbitdo --debug-log ~/openbitdo-debug.log
 
 Install:
   Homebrew: brew tap bybrooklyn/openbitdo && brew install openbitdo
@@ -65,6 +70,7 @@ func run() error {
 		_, _ = fmt.Fprint(os.Stdout, helpText)
 	}
 	mock := fs.Bool("mock", false, "Use mock transport/devices")
+	debugLogPath := fs.String("debug-log", "", "Write detailed protocol traces to this file")
 	if err := fs.Parse(os.Args[1:]); err != nil {
 		return err
 	}
@@ -79,10 +85,22 @@ func run() error {
 		fmt.Fprintln(os.Stderr, warning)
 	}
 
+	var debugLog *log.Logger
+	if *debugLogPath != "" {
+		f, err := os.OpenFile(*debugLogPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+		if err != nil {
+			return fmt.Errorf("open --debug-log file: %w", err)
+		}
+		defer func() { _ = f.Close() }()
+		debugLog = log.New(f, "", log.LstdFlags|log.Lmicroseconds)
+		debugLog.Printf("=== openbitdo %s starting (mock=%v) ===", appVersion, *mock)
+	}
+
 	c := core.New(core.Config{
 		MockMode: *mock, AdvancedMode: settings.AdvancedMode,
 		DefaultChunkSize: 56, ProgressIntervalMs: 5,
 		FirmwareManifestURL: core.DefaultConfig().FirmwareManifestURL,
+		DebugLog:            debugLog,
 	})
 
 	ctx, cancel := context.WithCancel(context.Background())
