@@ -26,7 +26,7 @@ const (
 	FamilyUnknown ProtocolFamily = "Unknown"
 )
 
-// SupportLevel is the coarse level from spec/pid_matrix.csv.
+// SupportLevel is the coarse level from docs/spec/pid_matrix.csv.
 type SupportLevel string
 
 const (
@@ -59,7 +59,7 @@ func (s SafetyClass) IsUnsafe() bool {
 }
 
 // Confidence is the evidence confidence for a declared command path, as
-// recorded in spec/command_matrix.csv.
+// recorded in docs/spec/command_matrix.csv.
 type Confidence string
 
 const (

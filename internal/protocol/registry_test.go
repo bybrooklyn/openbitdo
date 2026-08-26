@@ -26,16 +26,16 @@ func csvRowCount(t *testing.T, path string) int {
 }
 
 func TestPIDRegistryMatchesSpecRowCount(t *testing.T) {
-	want := csvRowCount(t, "../../spec/pid_matrix.csv")
+	want := csvRowCount(t, "../../docs/spec/pid_matrix.csv")
 	if len(PIDRegistry) != want {
-		t.Fatalf("PIDRegistry has %d rows, spec/pid_matrix.csv has %d", len(PIDRegistry), want)
+		t.Fatalf("PIDRegistry has %d rows, docs/spec/pid_matrix.csv has %d", len(PIDRegistry), want)
 	}
 }
 
 func TestCommandRegistryMatchesSpecRowCount(t *testing.T) {
-	want := csvRowCount(t, "../../spec/command_matrix.csv")
+	want := csvRowCount(t, "../../docs/spec/command_matrix.csv")
 	if len(CommandRegistry) != want {
-		t.Fatalf("CommandRegistry has %d rows, spec/command_matrix.csv has %d", len(CommandRegistry), want)
+		t.Fatalf("CommandRegistry has %d rows, docs/spec/command_matrix.csv has %d", len(CommandRegistry), want)
 	}
 }
 

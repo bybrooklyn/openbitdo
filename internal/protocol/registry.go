@@ -1,8 +1,8 @@
 package protocol
 
-//go:generate go run ./gen -spec-dir ../../spec -out registry_generated.go
+//go:generate go run ./gen -spec-dir ../../docs/spec -out registry_generated.go
 
-// PidRow is one row of the PID registry, generated from spec/pid_matrix.csv.
+// PidRow is one row of the PID registry, generated from docs/spec/pid_matrix.csv.
 type PidRow struct {
 	Name           string
 	Pid            uint16
@@ -12,7 +12,7 @@ type PidRow struct {
 }
 
 // CommandRow is one row of the command registry, generated from
-// spec/command_matrix.csv.
+// docs/spec/command_matrix.csv.
 type CommandRow struct {
 	ID                  CommandID
 	SafetyClass         SafetyClass

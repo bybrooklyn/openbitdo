@@ -157,7 +157,7 @@ func isCommandAllowedByFamily(family ProtocolFamily, command CommandID) bool {
 }
 
 // ValidateResponse checks a raw response against command's expected
-// byte-signature, per spec/command_matrix.csv's expected_response column.
+// byte-signature, per docs/spec/command_matrix.csv's expected_response column.
 func ValidateResponse(command CommandID, response []byte) ResponseStatus {
 	if len(response) < 2 {
 		return StatusMalformed
