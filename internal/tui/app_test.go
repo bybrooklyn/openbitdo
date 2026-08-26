@@ -294,6 +294,25 @@ func TestDiagnostics_RunThenBack(t *testing.T) {
 	}
 }
 
+// TestDiagnostics_DeviceDisconnectedShowsRescanHint verifies the disconnect
+// handling added to the diagnostics screen: a core.KindDeviceDisconnected
+// error must render a distinct rescan hint, not just a generic failure
+// message indistinguishable from any other error.
+func TestDiagnostics_DeviceDisconnectedShowsRescanHint(t *testing.T) {
+	m, _ := newTestModel(t, filepath.Join(t.TempDir(), "config.toml"))
+	disconnectedErr := &core.Error{Kind: core.KindDeviceDisconnected, Message: "0x2dc8:0x6009 is no longer connected"}
+	next, _ := m.updateDiagnostics(diagResultMsg{err: disconnectedErr})
+	m = next.(Model)
+
+	view := m.viewDiagnostics(m.height)
+	if !strings.Contains(view, "Diagnostics failed") {
+		t.Fatalf("expected the failure message to still render, got:\n%s", view)
+	}
+	if !strings.Contains(view, "press r on the dashboard to rescan") {
+		t.Fatalf("expected the rescan hint for a disconnected device, got:\n%s", view)
+	}
+}
+
 // TestRecoveryTakeover_ForcesRecoveryAndBlocksNavigation ports
 // recovery_transition_is_preserved plus the "never clears at runtime"
 // write-lock behavior documented in screen_recovery.go.

@@ -61,6 +61,22 @@ func EnumerateHIDDevices() []EnumeratedDevice {
 	return devices
 }
 
+// IsDevicePresent re-enumerates to check whether target is still physically
+// connected. karalabe/hid gives no structured error types (see
+// withLinuxOpenHint's comment) and never will reliably distinguish "the
+// device was unplugged" from any other I/O failure by error string alone —
+// so rather than guess from an error message, this asks the OS directly.
+// Used after an operation fails, to tell a genuine disconnect apart from a
+// transient error on a device that's still there.
+func IsDevicePresent(target VidPid) bool {
+	for _, info := range hid.Enumerate(target.VID, target.PID) {
+		if info.VendorID == target.VID && info.ProductID == target.PID {
+			return true
+		}
+	}
+	return false
+}
+
 // HidTransport is the real hidapi-backed Transport.
 type HidTransport struct {
 	mu     sync.Mutex

@@ -506,3 +506,84 @@ func TestFirmwareTransferPanicIsRecoveredAsFailure(t *testing.T) {
 		time.Sleep(2 * time.Millisecond)
 	}
 }
+
+func TestTransferFailureCodeClassifiesByDevicePresence(t *testing.T) {
+	target := protocol.VidPid{VID: 0x2dc8, PID: 0x6009}
+	underlying := &protocol.Error{}
+
+	got := transferFailureCodeWithPresence(target, underlying, func(protocol.VidPid) bool { return false })
+	if got != protocol.CodeDeviceDisconnected {
+		t.Fatalf("device absent: expected CodeDeviceDisconnected, got %q", got)
+	}
+
+	transportErr := protocol.ErrTimeout // a real *protocol.Error with a distinct, checkable code
+	got = transferFailureCodeWithPresence(target, transportErr, func(protocol.VidPid) bool { return true })
+	if got != protocol.CodeTimeout {
+		t.Fatalf("device still present: expected the underlying error's own code (CodeTimeout), got %q", got)
+	}
+}
+
+// failingTransport opens successfully but returns an ordinary (non-panic)
+// error from every subsequent call — simulating a ordinary transport
+// failure, as opposed to panicTransport's simulated internal bug.
+type failingTransport struct{}
+
+func (failingTransport) Open(context.Context, protocol.VidPid) error { return nil }
+func (failingTransport) Close() error                                { return nil }
+func (failingTransport) Write([]byte) (int, error)                   { return 0, protocol.ErrTimeout }
+func (failingTransport) Read(context.Context, int, uint64) ([]byte, error) {
+	return nil, protocol.ErrTimeout
+}
+
+// TestFirmwareTransferReportsDisconnectedWhenDeviceGenuinelyAbsent exercises
+// transferFailureCode's real (non-injected) path end to end. No physical
+// 8BitDo device (vid 0x2dc8) is attached in this environment, so
+// protocol.IsDevicePresent genuinely returns false here — this isn't a
+// simulated disconnect, it's the actual real-world condition of this test
+// machine, which happens to be exactly the scenario this feature exists for.
+func TestFirmwareTransferReportsDisconnectedWhenDeviceGenuinelyAbsent(t *testing.T) {
+	if protocol.IsDevicePresent(protocol.VidPid{VID: 0x2dc8, PID: 0x6009}) {
+		t.Skip("a real 8BitDo device is attached to this machine — this test needs one to be absent")
+	}
+
+	c := New(Config{DefaultChunkSize: 16, ProgressIntervalMs: 1})
+	c.transportOverride = failingTransport{}
+	path := filepath.Join(t.TempDir(), "openbitdo-disconnect.bin")
+	if err := os.WriteFile(path, bytes.Repeat([]byte{4}, 64), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	ctx := context.Background()
+
+	preflight, err := c.PreflightFirmware(ctx, makeReq(t, path, 0x6009))
+	if err != nil || !preflight.Gate.Allowed {
+		t.Fatalf("preflight: gate=%+v err=%v", preflight.Gate, err)
+	}
+	plan := preflight.Plan
+	if _, err := c.StartFirmware(ctx, FirmwareStartRequest{SessionID: plan.SessionID}); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	if _, err := c.ConfirmFirmware(ctx, FirmwareConfirmRequest{SessionID: plan.SessionID, AcknowledgedRisk: true}); err != nil {
+		t.Fatalf("confirm: %v", err)
+	}
+
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		report, err := c.FirmwareReport(ctx, plan.SessionID)
+		if err != nil {
+			t.Fatalf("report: %v", err)
+		}
+		if report != nil {
+			if report.Status != OutcomeFailed {
+				t.Fatalf("expected Failed, got %s", report.Status)
+			}
+			if report.ErrorCode != protocol.CodeDeviceDisconnected {
+				t.Fatalf("expected ErrorCode=DeviceDisconnected, got %q (message: %q)", report.ErrorCode, report.Message)
+			}
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("timed out waiting for firmware report")
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+}

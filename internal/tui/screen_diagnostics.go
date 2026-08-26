@@ -100,6 +100,9 @@ func (m Model) viewDiagnostics(height int) string {
 	}
 	if m.diag.err != nil {
 		b.WriteString(styleDanger.Render(fmt.Sprintf("Diagnostics failed: %v", m.diag.err)))
+		if coreErr, ok := m.diag.err.(*core.Error); ok && coreErr.Kind == core.KindDeviceDisconnected {
+			b.WriteString("\n" + styleFaint.Render("Reconnect the device, then go back and press r on the dashboard to rescan."))
+		}
 		return stylePanel.Width(m.width - 2).Height(height - 2).Render(b.String())
 	}
 

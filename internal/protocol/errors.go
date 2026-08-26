@@ -17,6 +17,7 @@ const (
 	CodeInvalidInput         ErrorCode = "InvalidInput"
 	CodeUnknownCommand       ErrorCode = "UnknownCommand"
 	CodeDeviceNotOpen        ErrorCode = "DeviceNotOpen"
+	CodeDeviceDisconnected   ErrorCode = "DeviceDisconnected"
 )
 
 // ErrTimeout is returned when a device response does not arrive in time.
@@ -69,4 +70,13 @@ func errUnknownCommand(command CommandID) *Error {
 
 func errDeviceNotOpen(target VidPid) *Error {
 	return &Error{code: CodeDeviceNotOpen, message: fmt.Sprintf("device not open for %s", target)}
+}
+
+// ErrDeviceDisconnected reports that target failed an operation and,
+// verified via a fresh IsDevicePresent re-enumeration (not error-string
+// guessing — see IsDevicePresent's comment on why that's unreliable here),
+// is confirmably no longer connected. Exported so internal/core can build
+// this same classification into its own error/report types.
+func ErrDeviceDisconnected(target VidPid) *Error {
+	return &Error{code: CodeDeviceDisconnected, message: fmt.Sprintf("device disconnected: %s", target)}
 }

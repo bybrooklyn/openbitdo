@@ -98,6 +98,9 @@ func (c *OpenBitdoCore) DiagProbe(ctx context.Context, target protocol.VidPid) (
 	session, err := protocol.NewDeviceSession(ctx, c.transport(), target,
 		protocol.SessionConfig{Experimental: true, RetryPolicy: protocol.DefaultRetryPolicy(), TimeoutProfile: protocol.DefaultTimeoutProfile(), TraceEnabled: true})
 	if err != nil {
+		if !protocol.IsDevicePresent(target) {
+			return protocol.DiagProbeResult{}, errDeviceDisconnected(target)
+		}
 		return protocol.DiagProbeResult{}, errProtocol(err)
 	}
 	defer func() { _ = session.Close() }() // best-effort; diagnostics already have their result

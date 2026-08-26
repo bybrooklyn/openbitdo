@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/bybrooklyn/openbitdo/internal/core"
+	"github.com/bybrooklyn/openbitdo/internal/protocol"
 	tea "github.com/charmbracelet/bubbletea"
 )
 
@@ -182,6 +183,9 @@ func (m Model) viewFirmware(height int) string {
 			b.WriteString(styleWarning.Render("Update cancelled."))
 		default:
 			b.WriteString(styleDanger.Render("Update failed: " + report.Message))
+			if report.ErrorCode == protocol.CodeDeviceDisconnected {
+				b.WriteString("\n" + styleFaint.Render("Reconnect the device, then go back and press r on the dashboard to rescan."))
+			}
 		}
 		fmt.Fprintf(&b, "\n%d/%d chunks sent.\n\n", report.ChunksSent, report.ChunksTotal)
 		b.WriteString(styleHelp.Render("enter/esc to return"))

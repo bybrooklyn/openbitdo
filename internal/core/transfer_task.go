@@ -23,9 +23,6 @@ func runTransferTask(ctx context.Context, handle *firmwareSessionHandle, interva
 	// chunksSent is declared here (rather than at its original point of first
 	// use, further down) so the panic recovery below can report how far the
 	// transfer actually got, not always 0.
-	// chunksSent is declared here (rather than at its original point of first
-	// use, further down) so the panic recovery below can report how far the
-	// transfer actually got, not always 0.
 	chunksSent := 0
 	defer func() {
 		if r := recover(); r != nil {
@@ -51,7 +48,7 @@ func runTransferTask(ctx context.Context, handle *firmwareSessionHandle, interva
 	}
 	session, err := protocol.NewDeviceSession(ctx, transport, handle.request.VidPid, config)
 	if err != nil {
-		finalizeFailure(handle, errorCodeOf(err), 0, fmt.Sprintf("Failed to open device session: %v", err))
+		finalizeFailure(handle, transferFailureCode(handle.request.VidPid, err), 0, fmt.Sprintf("Failed to open device session: %v", err))
 		return
 	}
 
@@ -59,7 +56,7 @@ func runTransferTask(ctx context.Context, handle *firmwareSessionHandle, interva
 
 	handle.eventsPublish("bootloader", 0, "Entering bootloader", false)
 	if err := session.EnterBootloader(ctx); err != nil {
-		finalizeFailure(handle, errorCodeOf(err), 0, fmt.Sprintf("Failed to enter bootloader: %v", err))
+		finalizeFailure(handle, transferFailureCode(handle.request.VidPid, err), 0, fmt.Sprintf("Failed to enter bootloader: %v", err))
 		_ = session.Close()
 		return
 	}
@@ -73,8 +70,17 @@ func runTransferTask(ctx context.Context, handle *firmwareSessionHandle, interva
 
 		end := min(offset+handle.plan.ChunkSize, len(bytes))
 		if _, err := session.SendFirmwareChunk(ctx, bytes[offset:end]); err != nil {
-			message := firmwareFailureMessage(ctx, session, fmt.Sprintf("Failed to transfer chunk %d: %v", idx+1, err))
-			finalizeFailure(handle, errorCodeOf(err), chunksSent, message)
+			code := transferFailureCode(handle.request.VidPid, err)
+			var message string
+			if code == protocol.CodeDeviceDisconnected {
+				// Attempting a recovery exit-bootloader write against a
+				// device that's confirmably gone would just fail again --
+				// skip straight to reporting.
+				message = fmt.Sprintf("Device disconnected during chunk %d transfer", idx+1)
+			} else {
+				message = firmwareFailureMessage(ctx, session, fmt.Sprintf("Failed to transfer chunk %d: %v", idx+1, err))
+			}
+			finalizeFailure(handle, code, chunksSent, message)
 			_ = session.Close()
 			return
 		}
@@ -90,15 +96,21 @@ func runTransferTask(ctx context.Context, handle *firmwareSessionHandle, interva
 
 	handle.eventsPublish("commit", 99, "Committing firmware", false)
 	if err := session.FirmwareCommit(ctx); err != nil {
-		message := firmwareFailureMessage(ctx, session, fmt.Sprintf("Firmware commit failed: %v", err))
-		finalizeFailure(handle, errorCodeOf(err), chunksSent, message)
+		code := transferFailureCode(handle.request.VidPid, err)
+		var message string
+		if code == protocol.CodeDeviceDisconnected {
+			message = "Device disconnected during firmware commit"
+		} else {
+			message = firmwareFailureMessage(ctx, session, fmt.Sprintf("Firmware commit failed: %v", err))
+		}
+		finalizeFailure(handle, code, chunksSent, message)
 		_ = session.Close()
 		return
 	}
 
 	handle.eventsPublish("exit", 99, "Leaving bootloader", false)
 	if err := session.ExitBootloader(ctx); err != nil {
-		finalizeFailure(handle, errorCodeOf(err), chunksSent, fmt.Sprintf("Firmware applied but bootloader exit failed: %v", err))
+		finalizeFailure(handle, transferFailureCode(handle.request.VidPid, err), chunksSent, fmt.Sprintf("Firmware applied but bootloader exit failed: %v", err))
 		_ = session.Close()
 		return
 	}
@@ -185,7 +197,7 @@ func cancelRunningTransfer(ctx context.Context, handle *firmwareSessionHandle, s
 	handle.eventsPublish("cancel_recovery", 100, "Cancelling transfer and leaving bootloader", false)
 
 	if err := session.ExitBootloader(ctx); err != nil {
-		finalizeFailure(handle, errorCodeOf(err), chunksSent, fmt.Sprintf("Firmware update cancelled but bootloader exit failed: %v", err))
+		finalizeFailure(handle, transferFailureCode(handle.request.VidPid, err), chunksSent, fmt.Sprintf("Firmware update cancelled but bootloader exit failed: %v", err))
 		return
 	}
 	finalizeCancelled(handle, chunksSent)
@@ -206,6 +218,28 @@ func errorCodeOf(err error) protocol.ErrorCode {
 		return pe.Code()
 	}
 	return ""
+}
+
+// transferFailureCode classifies a firmware-transfer-step failure, checking
+// whether the device is still physically present (via a fresh
+// protocol.IsDevicePresent re-enumeration, not error-string guessing) before
+// falling back to the underlying error's own code. A confirmed disconnect
+// takes priority: it's more actionable and more honest than whatever
+// low-level error a session write happens to surface once the device is
+// already gone.
+func transferFailureCode(target protocol.VidPid, err error) protocol.ErrorCode {
+	return transferFailureCodeWithPresence(target, err, protocol.IsDevicePresent)
+}
+
+// transferFailureCodeWithPresence is transferFailureCode's testable core —
+// the presence check is injected so tests can exercise both branches
+// (device gone vs. device still there but some other error occurred)
+// without needing real hardware to attach or detach for either case.
+func transferFailureCodeWithPresence(target protocol.VidPid, err error, isPresent func(protocol.VidPid) bool) protocol.ErrorCode {
+	if !isPresent(target) {
+		return protocol.CodeDeviceDisconnected
+	}
+	return errorCodeOf(err)
 }
 
 // eventsPublish increments the sequence counter and publishes one progress
