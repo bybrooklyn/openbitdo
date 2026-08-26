@@ -17,6 +17,10 @@ test:
 test-race:
     go test -race ./...
 
+# Launch the TUI against real, attached hardware.
+run:
+    go run ./cmd/openbitdo
+
 # Launch the TUI against a mock device, no real hardware needed.
 run-mock:
     go run ./cmd/openbitdo --mock
