@@ -146,7 +146,7 @@ func (m Model) viewDiagnostics(height int) string {
 
 	checks := m.diag.visibleChecks()
 	if len(checks) == 0 {
-		b.WriteString(stylePositive.Render("No issues.") + "\n")
+		b.WriteString(stylePositiveBlock.Render(stylePositive.Render("No issues.")) + "\n")
 	}
 	for i, c := range checks {
 		line := diagCheckLine(c)
@@ -173,13 +173,13 @@ func (m Model) viewDiagnostics(height int) string {
 }
 
 func diagCheckLine(c protocol.DiagCommandStatus) string {
-	mark := stylePositive.Render("✓")
+	mark := stylePositive.Render(IconPass)
 	if !c.OK {
 		switch c.Severity {
 		case protocol.SeverityNeedsAttention:
-			mark = styleDanger.Render("✗")
+			mark = styleDanger.Render(IconFail)
 		default:
-			mark = styleWarning.Render("!")
+			mark = styleWarning.Render(IconWarn)
 		}
 	}
 	experimental := ""

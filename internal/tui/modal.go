@@ -5,6 +5,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // modal is a real overlay confirmation rendered on top of the current
@@ -53,12 +54,9 @@ func riskAckModal(action string, onConfirm tea.Msg) modal {
 	)
 }
 
-func (m modal) view(width, height int) string {
-	border := styleModalBorder
-	if m.danger {
-		border = styleModalBorderDanger
-	}
-
+// view renders the modal box itself (no positioning/backdrop) — see
+// viewOverlaid for how it gets composited onto the dimmed screen behind it.
+func (m modal) view(width int) string {
 	titleStyle := styleAccent
 	if m.danger {
 		titleStyle = styleDanger
@@ -79,7 +77,45 @@ func (m modal) view(width, height int) string {
 	b.WriteString("\n")
 	b.WriteString(styleHelp.Render("enter/A confirm · esc/B cancel"))
 
-	box := border.Width(min(60, width-6)).Render(b.String())
-	return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, box,
-		lipgloss.WithWhitespaceForeground(theme.TextFaint))
+	return styleModal.Width(min(60, width-6)).Render(b.String())
+}
+
+// viewOverlaid composites the modal on top of page (the already-rendered
+// screen behind it), dimmed, so the confirmation still shows real context
+// (which device, which screen) instead of replacing it entirely.
+//
+// Lipgloss/Bubbletea compose styled character cells, not RGBA layers, so
+// there's no built-in alpha-blend equivalent to a real overlay. This
+// approximates it in two steps that are each individually simple and
+// correct: strip every existing color from the rendered page (ansi.Strip),
+// then re-apply one single faint foreground uniformly — real UI dimming
+// desaturates/flattens rather than preserving full color richness anyway,
+// which is exactly what this produces. The modal itself is then spliced
+// into the dimmed lines using ansi.Cut, which is escape-code- and
+// display-width-aware so it can't corrupt an SGR sequence mid-cut.
+func (m modal) viewOverlaid(page string, width, height int) string {
+	box := m.view(width)
+	boxLines := strings.Split(box, "\n")
+	boxWidth := lipgloss.Width(box)
+	boxHeight := len(boxLines)
+
+	dimmed := lipgloss.NewStyle().Foreground(theme.TextFaint).Render(ansi.Strip(page))
+	bgLines := strings.Split(dimmed, "\n")
+	for len(bgLines) < height {
+		bgLines = append(bgLines, "")
+	}
+
+	startRow := max(0, (height-boxHeight)/2)
+	startCol := max(0, (width-boxWidth)/2)
+
+	for i, boxLine := range boxLines {
+		row := startRow + i
+		if row < 0 || row >= len(bgLines) {
+			continue
+		}
+		left := ansi.Cut(bgLines[row], 0, startCol)
+		right := ansi.Cut(bgLines[row], startCol+boxWidth, width)
+		bgLines[row] = left + boxLine + right
+	}
+	return strings.Join(bgLines, "\n")
 }

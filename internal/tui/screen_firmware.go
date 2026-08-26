@@ -159,15 +159,22 @@ func (m Model) viewFirmware(height int) string {
 	case fwStagePreflighting:
 		b.WriteString(styleFaint.Render("Checking safety gates and computing transfer plan…"))
 	case fwStageDenied:
-		b.WriteString(styleDanger.Render("Blocked: ") + m.fw.deniedMsg)
+		b.WriteString(styleDangerBlock.Render(styleDanger.Render("Blocked: ") + m.fw.deniedMsg))
 	case fwStageError:
-		b.WriteString(styleDanger.Render(fmt.Sprintf("Error: %v", m.fw.err)))
+		b.WriteString(styleDangerBlock.Render(styleDanger.Render(fmt.Sprintf("Error: %v", m.fw.err))))
 	case fwStageReadyToConfirm:
 		plan := m.fw.preflight.Plan
 		fmt.Fprintf(&b, "Image: %s (%d bytes, sha256 %s)\n", m.fw.download.Version, plan.BytesTotal, shortHash(plan.ImageSHA256))
 		fmt.Fprintf(&b, "Chunks: %d × %d bytes  ·  estimated %ds\n\n", plan.ChunksTotal, plan.ChunkSize, plan.ExpectedSeconds)
-		for _, w := range plan.Warnings {
-			b.WriteString(styleWarning.Render("⚠ "+w) + "\n")
+		if len(plan.Warnings) > 0 {
+			var warnings strings.Builder
+			for i, w := range plan.Warnings {
+				if i > 0 {
+					warnings.WriteString("\n")
+				}
+				warnings.WriteString(styleWarning.Render(IconWarn + " " + w))
+			}
+			b.WriteString(styleWarningBlock.Render(warnings.String()) + "\n")
 		}
 		b.WriteString("\n" + stylePositive.Render("Press enter to begin — do not disconnect the device."))
 	case fwStageConfirming:
@@ -211,7 +218,7 @@ func progressBar(percent, width int) string {
 		percent = 100
 	}
 	filled := width * percent / 100
-	bar := strings.Repeat("█", filled) + strings.Repeat("░", width-filled)
+	bar := strings.Repeat(IconProgressFilled, filled) + strings.Repeat(IconProgressEmpty, width-filled)
 	return styleAccent.Render(bar)
 }
 

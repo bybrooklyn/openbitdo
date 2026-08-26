@@ -396,8 +396,10 @@ func candidateTierExplanation(device core.AppDevice) string {
 				"and this one hasn't gone through that process. It's not a bug in\n" +
 				"the tool — it's exactly what \"candidate-readonly\" means.",
 		))
+		return styleWarningBlock.Render(b.String())
 	case protocol.TierDetectOnly:
 		b.WriteString(styleFaint.Render("This PID is only known well enough to identify it — no diagnostic\nevidence exists yet."))
+		return styleAccentBlock.Render(b.String())
 	}
 	return b.String()
 }

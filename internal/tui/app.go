@@ -266,7 +266,7 @@ func (m Model) View() string {
 
 	page := lipgloss.JoinVertical(lipgloss.Left, header, body, footer)
 	if m.modal.active {
-		return m.modal.view(m.width, m.height)
+		return m.modal.viewOverlaid(page, m.width, m.height)
 	}
 	return page
 }
@@ -317,11 +317,48 @@ func (m Model) viewFooter() string {
 	return lipgloss.NewStyle().Padding(0, 1).Width(m.width - 2).Render(line)
 }
 
+// hint renders one "key label" pair for the footer — the small building
+// block every screen's contextual hints are assembled from, matching
+// opencode's per-context footer (e.g. "tab agents  ctrl+p commands") rather
+// than the same generic line everywhere.
+func hint(key, label string) string {
+	return styleKey.Render(key) + " " + label
+}
+
 func (m Model) screenHelp() string {
-	nav := styleKey.Render("↑↓/dpad") + " move  " + styleKey.Render("enter/A") + " select  " + styleKey.Render("esc/B") + " back  " + styleKey.Render("ctrl+c") + " quit"
+	nav := hint("↑↓/dpad", "move") + "  " + hint("enter/A", "select") + "  " + hint("esc/B", "back") + "  " + hint("ctrl+c", "quit")
 	switch m.screen {
 	case screenDevices:
-		return styleKey.Render("/") + " filter  " + styleKey.Render("r") + " rescan  " + nav
+		return hint("/", "filter") + "  " + hint("r", "rescan") + "  " + nav
+	case screenDiagnostics:
+		extra := hint("tab", "toggle filter") + "  " + hint("r", "rerun")
+		if m.diag.device.SupportTier != protocol.TierFull {
+			extra = hint("s", "file support request") + "  " + extra
+		}
+		return extra + "  " + nav
+	case screenMapping:
+		extra := hint("←→", "cycle target")
+		if m.mapping.kind == core.KindUltimate2 {
+			extra += "  " + hint("p", "preview slot")
+		}
+		return extra + "  " + nav
+	case screenFirmware:
+		switch m.fw.stage {
+		case fwStageReadyToConfirm:
+			return hint("enter", "confirm — begin transfer") + "  " + hint("esc", "back")
+		case fwStageRunning:
+			return hint("c", "cancel") + "  " + styleFaint.Render("(transfer continues if you leave this screen)")
+		default:
+			return hint("esc", "back")
+		}
+	case screenSettings:
+		return hint("←→/enter", "toggle") + "  " + nav
+	case screenRecovery:
+		extra := hint("q", "quit")
+		if m.recoveryHasBackup && !m.recoveryRestoreDone {
+			extra = hint("r", "restore backup") + "  " + extra
+		}
+		return extra
 	default:
 		return nav
 	}

@@ -11,6 +11,9 @@ import (
 	"github.com/bybrooklyn/openbitdo/internal/input"
 	"github.com/bybrooklyn/openbitdo/internal/protocol"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
+	"github.com/muesli/termenv"
 )
 
 // These tests port the integration-level behavioral contracts from the
@@ -349,6 +352,65 @@ func TestRecoveryTakeover_ForcesRecoveryAndBlocksNavigation(t *testing.T) {
 	_ = next
 	if !m.writeLockUntilRestart {
 		t.Fatal("write lock must never clear at runtime")
+	}
+}
+
+// TestView_ModalDimsBackgroundInsteadOfReplacingIt guards a real behavior
+// change from the opencode-inspired redesign: View() used to return *only*
+// the modal while one was active (the screen behind it never rendered at
+// all). It now composites the modal onto a dimmed render of the real screen
+// behind it. This proves both halves of that: the header text is still
+// genuinely present (plain-text, ansi.Strip'd) once a modal is showing, and
+// its *exact* original (undimmed) styled rendering from before the modal
+// opened is gone from the new frame — i.e. it didn't just survive
+// untouched, it was actually restyled. Checking the plain text alone
+// wouldn't catch "dimming" silently doing nothing; checking styled-bytes
+// alone would be too brittle to lipgloss's exact multi-line SGR emission —
+// together they're both robust and a real proof.
+func TestView_ModalDimsBackgroundInsteadOfReplacingIt(t *testing.T) {
+	// Lipgloss auto-detects the color profile from the process's actual
+	// stdout, which isn't a real terminal under `go test` — it downgrades to
+	// Ascii (no SGR codes emitted at all) unless forced. Force a real color
+	// profile for this test so there's something to prove is actually
+	// dimmed; every other test in this package deliberately doesn't care
+	// about styled bytes, only this one does.
+	prevProfile := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.ANSI256)
+	t.Cleanup(func() { lipgloss.SetColorProfile(prevProfile) })
+
+	m, c := newTestModel(t, filepath.Join(t.TempDir(), "config.toml"))
+	m = loadDevices(t, m, c)
+
+	baseline := m.View()
+	if !strings.Contains(baseline, "OpenBitdo") {
+		t.Fatal("sanity check: expected the header to render before any modal is active")
+	}
+	baselineHeaderLine := strings.Split(baseline, "\n")[0]
+
+	// Select JP108, navigate to Firmware Update, trigger it -> risk-ack modal.
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRight})
+	m = next.(Model)
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown}) // Diagnose -> Mapping Editor
+	m = next.(Model)
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown}) // Mapping Editor -> Firmware Update
+	m = next.(Model)
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = next.(Model)
+	if !m.modal.active {
+		t.Fatal("expected the risk-ack modal to be active after triggering Firmware Update")
+	}
+
+	withModal := m.View()
+	if !strings.Contains(withModal, "Unsafe operation acknowledgement") {
+		t.Fatal("expected the modal's own content to render")
+	}
+
+	plain := ansi.Strip(withModal)
+	if !strings.Contains(plain, "OpenBitdo") {
+		t.Fatal("expected the header text to still be present (dimmed, not removed) behind the modal — View() must not skip rendering the screen behind an active modal")
+	}
+	if strings.Contains(withModal, baselineHeaderLine) {
+		t.Fatal("expected the header's exact styled rendering to change once dimmed — found the identical undimmed line, meaning the background wasn't actually dimmed")
 	}
 }
 
