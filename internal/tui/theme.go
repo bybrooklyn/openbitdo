@@ -45,8 +45,6 @@ var theme = themeT{
 var (
 	styleTitle = lipgloss.NewStyle().Foreground(theme.Accent).Bold(true)
 
-	styleSubtitle = lipgloss.NewStyle().Foreground(theme.TextDim)
-
 	styleBody = lipgloss.NewStyle().Foreground(theme.Text)
 
 	styleFaint = lipgloss.NewStyle().Foreground(theme.TextFaint)
@@ -73,8 +71,6 @@ var (
 				Foreground(lipgloss.Color("235")).
 				Background(theme.Accent).
 				Bold(true)
-
-	styleDimRow = lipgloss.NewStyle().Foreground(theme.TextFaint)
 
 	styleHelp = lipgloss.NewStyle().Foreground(theme.TextFaint)
 

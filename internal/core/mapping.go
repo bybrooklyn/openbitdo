@@ -128,7 +128,7 @@ func (c *OpenBitdoCore) rollbackAfterWriteFailure(ctx context.Context, backupID 
 // button map, and L2/R2 analog config for its active slot.
 func (c *OpenBitdoCore) U2ReadCoreProfile(ctx context.Context, vidPid protocol.VidPid, slot U2SlotID) (U2CoreProfile, error) {
 	p := protocol.DeviceProfileFor(vidPid)
-	if !(p.Capability.SupportsU2SlotConfig && p.Capability.SupportsU2ButtonMap) {
+	if !p.Capability.SupportsU2SlotConfig || !p.Capability.SupportsU2ButtonMap {
 		return U2CoreProfile{}, errPolicyDenied(ReasonUnsupportedPid, "Ultimate2 core profile is not supported for %s", vidPid)
 	}
 
@@ -219,7 +219,7 @@ func (c *OpenBitdoCore) U2ApplyCoreProfile(ctx context.Context, vidPid protocol.
 // backup-then-write-then-rollback-on-failure pattern.
 func (c *OpenBitdoCore) U2ApplyCoreProfileWithRecovery(ctx context.Context, vidPid protocol.VidPid, slot U2SlotID, mode byte, mapChanges []U2ButtonMapping, l2Analog, r2Analog float32, backup bool) (WriteRecoveryReport, error) {
 	p := protocol.DeviceProfileFor(vidPid)
-	if !(p.Capability.SupportsU2SlotConfig && p.Capability.SupportsU2ButtonMap) {
+	if !p.Capability.SupportsU2SlotConfig || !p.Capability.SupportsU2ButtonMap {
 		return WriteRecoveryReport{}, errPolicyDenied(ReasonUnsupportedPid, "Ultimate2 core profile is not supported for %s", vidPid)
 	}
 

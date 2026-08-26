@@ -14,7 +14,7 @@
 
 ## Enforcement
 
-- `cleanroom/sdk/scripts/cleanroom_guard.sh` scans for forbidden references
+- `cleanroom/scripts/cleanroom_guard.sh` scans for forbidden references
 - CI runs the guard before packaging and test jobs
 
 ## Commit Hygiene

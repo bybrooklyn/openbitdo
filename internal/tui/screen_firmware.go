@@ -161,8 +161,8 @@ func (m Model) viewFirmware(height int) string {
 		b.WriteString(styleDanger.Render(fmt.Sprintf("Error: %v", m.fw.err)))
 	case fwStageReadyToConfirm:
 		plan := m.fw.preflight.Plan
-		b.WriteString(fmt.Sprintf("Image: %s (%d bytes, sha256 %s)\n", m.fw.download.Version, plan.BytesTotal, shortHash(plan.ImageSHA256)))
-		b.WriteString(fmt.Sprintf("Chunks: %d × %d bytes  ·  estimated %ds\n\n", plan.ChunksTotal, plan.ChunkSize, plan.ExpectedSeconds))
+		fmt.Fprintf(&b, "Image: %s (%d bytes, sha256 %s)\n", m.fw.download.Version, plan.BytesTotal, shortHash(plan.ImageSHA256))
+		fmt.Fprintf(&b, "Chunks: %d × %d bytes  ·  estimated %ds\n\n", plan.ChunksTotal, plan.ChunkSize, plan.ExpectedSeconds)
 		for _, w := range plan.Warnings {
 			b.WriteString(styleWarning.Render("⚠ "+w) + "\n")
 		}
@@ -183,7 +183,7 @@ func (m Model) viewFirmware(height int) string {
 		default:
 			b.WriteString(styleDanger.Render("Update failed: " + report.Message))
 		}
-		b.WriteString(fmt.Sprintf("\n%d/%d chunks sent.\n\n", report.ChunksSent, report.ChunksTotal))
+		fmt.Fprintf(&b, "\n%d/%d chunks sent.\n\n", report.ChunksSent, report.ChunksTotal)
 		b.WriteString(styleHelp.Render("enter/esc to return"))
 	}
 

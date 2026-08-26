@@ -251,8 +251,8 @@ func (m *Model) undoMapping() {
 
 func (m Model) triggerMappingRow() (tea.Model, tea.Cmd) {
 	buttonRows := m.mapping.rowCount() - 3
-	switch {
-	case m.mapping.cursor == buttonRows: // Apply
+	switch m.mapping.cursor {
+	case buttonRows: // Apply
 		if !m.mapping.dirty() || m.mapping.applying {
 			return m, nil
 		}
@@ -262,13 +262,13 @@ func (m Model) triggerMappingRow() (tea.Model, tea.Cmd) {
 		}
 		p := m.mapping.u2Draft
 		return m, cmdU2Apply(m.ctx, m.core, m.mapping.device.VidPid, p.Slot, p.Mode, p.Mappings, p.L2Analog, p.R2Analog)
-	case m.mapping.cursor == buttonRows+1: // Undo
+	case buttonRows + 1: // Undo
 		if !m.mapping.canUndo() {
 			return m, nil
 		}
 		m.undoMapping()
 		m.mapping.statusMsg = "Last edit undone."
-	case m.mapping.cursor == buttonRows+2: // Reset
+	case buttonRows + 2: // Reset
 		// Rust's mapping_reset pushes the current draft onto the undo stack
 		// before resetting, so a Reset is itself undoable — match that.
 		if m.mapping.kind == core.KindJP108 {

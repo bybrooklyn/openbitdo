@@ -87,7 +87,7 @@ func readCommandMatrix(path string) ([]commandRow, []string, error) {
 	if err != nil {
 		return nil, nil, err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }() // read-only fd; close error is not actionable
 
 	r := csv.NewReader(f)
 	header, err := r.Read()
@@ -173,7 +173,7 @@ func readPidMatrix(path string) ([]pidRow, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }() // read-only fd; close error is not actionable
 
 	r := csv.NewReader(f)
 	header, err := r.Read()
@@ -244,17 +244,17 @@ func renderGo(commands []commandRow, commandOrder []string, pids []pidRow) ([]by
 	b.WriteString("// CommandID constants, one per unique command_id in spec/command_matrix.csv,\n")
 	b.WriteString("// in first-appearance order.\nconst (\n")
 	for _, id := range commandOrder {
-		b.WriteString(fmt.Sprintf("\tCommand%s CommandID = %q\n", id, id))
+		fmt.Fprintf(&b, "\tCommand%s CommandID = %q\n", id, id)
 	}
 	b.WriteString(")\n\n")
 
 	b.WriteString("// PIDRegistry is generated from spec/pid_matrix.csv.\n")
 	b.WriteString("var PIDRegistry = []PidRow{\n")
 	for _, p := range pids {
-		b.WriteString(fmt.Sprintf(
+		fmt.Fprintf(&b,
 			"\t{Name: %q, Pid: %#04x, SupportLevel: %q, SupportTier: %q, ProtocolFamily: %q},\n",
 			p.name, p.pid, p.supportLevel, p.supportTier, p.protocolFamily,
-		))
+		)
 	}
 	b.WriteString("}\n\n")
 
@@ -269,10 +269,10 @@ func renderGo(commands []commandRow, commandOrder []string, pids []pidRow) ([]by
 			}
 			appliesTo = fmt.Sprintf("[]uint16{%s}", strings.Join(parts, ", "))
 		}
-		b.WriteString(fmt.Sprintf(
+		fmt.Fprintf(&b,
 			"\t{ID: Command%s, SafetyClass: %q, Confidence: %q, ExperimentalDefault: %v, ReportID: %#02x, Request: %s, ExpectedResponse: %q, AppliesTo: %s, OperationGroup: %q},\n",
 			c.id, c.safetyClass, c.confidence, c.experimentalDefault, c.reportID, byteSliceLiteral(c.request), c.expectedResponse, appliesTo, c.operationGroup,
-		))
+		)
 	}
 	b.WriteString("}\n")
 

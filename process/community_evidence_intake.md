@@ -23,7 +23,7 @@ This process collects safe, sanitized device evidence from users and testers.
 2. map it to a known PID or create a new sanitized record
 3. update the relevant spec or dossier artifacts
 4. keep the device read-only until runtime and hardware confirmation justify promotion
-5. run `sdk/scripts/check_evidence_readiness.py` before treating a candidate as promotion-ready
+5. run `scripts/check_evidence_readiness.py` before treating a candidate as promotion-ready
 
 ## Candidate Write Probe
 

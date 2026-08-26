@@ -114,7 +114,7 @@ func (m Model) viewDiagnostics(height int) string {
 			passed++
 		}
 	}
-	b.WriteString(fmt.Sprintf("Checks: %d/%d passed", passed, total))
+	fmt.Fprintf(&b, "Checks: %d/%d passed", passed, total)
 	if m.diag.filter == diagFilterIssues {
 		b.WriteString("  " + styleWarning.Render("[showing issues only — tab to show all]"))
 	} else {
@@ -139,8 +139,8 @@ func (m Model) viewDiagnostics(height int) string {
 	if m.diag.cursor < len(checks) {
 		c := checks[m.diag.cursor]
 		b.WriteString("\n" + stylePanelTitle.Render("Detail") + "\n")
-		b.WriteString(fmt.Sprintf("command=%s confidence=%s experimental=%v attempts=%d\n", c.Command, c.Confidence, c.IsExperimental, c.Attempts))
-		b.WriteString(fmt.Sprintf("validator=%s\n", c.Validator))
+		fmt.Fprintf(&b, "command=%s confidence=%s experimental=%v attempts=%d\n", c.Command, c.Confidence, c.IsExperimental, c.Attempts)
+		fmt.Fprintf(&b, "validator=%s\n", c.Validator)
 		b.WriteString(styleFaint.Render(c.Detail) + "\n")
 		if !c.OK && c.Confidence == protocol.EvidenceConfirmed && m.diag.device.SupportTier != protocol.TierFull {
 			b.WriteString(styleWarning.Render("This check's validator is tuned to hardware-confirmed devices — a failure here on an unconfirmed PID is expected, not a sign of a broken connection.") + "\n")

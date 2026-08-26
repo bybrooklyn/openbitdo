@@ -21,5 +21,3 @@ func fetchReportDescriptor(devicePath string) ([]byte, error) {
 	}
 	return data, nil
 }
-
-const descriptorAcquisitionSupported = true

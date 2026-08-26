@@ -140,7 +140,7 @@ func (c *OpenBitdoCore) PreflightFirmware(ctx context.Context, request FirmwareP
 	if p.SupportTier != protocol.TierFull {
 		return deniedPreflight(ReasonNotHardwareConfirmed, "Firmware updates are available only after per-PID hardware confirmation."), nil
 	}
-	if !(request.AllowUnsafe && request.BrickRiskAck) {
+	if !request.AllowUnsafe || !request.BrickRiskAck {
 		return deniedPreflight(ReasonUnsafeFlagsMissing, "Safety acknowledgement is required before firmware update"), nil
 	}
 

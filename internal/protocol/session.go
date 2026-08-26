@@ -701,8 +701,8 @@ func (s *DeviceSession) sendRow(ctx context.Context, row CommandRow, payload []b
 
 	for attempt := uint8(1); attempt <= attemptsTotal; attempt++ {
 		raw, err := s.readResponseReassembled(ctx, timeoutMs, expectedMinLen)
-		switch {
-		case err == nil:
+		switch err {
+		case nil:
 			status := ValidateResponse(row.ID, raw)
 			if status == StatusOk {
 				s.recordExecution(CommandExecutionReport{
@@ -712,7 +712,7 @@ func (s *DeviceSession) sendRow(ctx context.Context, row CommandRow, payload []b
 				return ResponseFrame{Raw: raw, Status: status, ParsedFields: parseFields(row.ID, raw)}, nil
 			}
 			lastStatus, lastLen = status, len(raw)
-		case err == ErrTimeout:
+		case ErrTimeout:
 			lastStatus, lastLen = StatusMalformed, 0
 		default:
 			report := CommandExecutionReport{
@@ -819,7 +819,7 @@ func (s *DeviceSession) ensureCommandAllowed(command CommandID) (CommandRow, err
 			return CommandRow{}, errExperimentalRequired(command)
 		}
 	case BlockedUntilConfirmed:
-		if !(promotedFullSupportPath || candidateWriteUnlock) {
+		if !promotedFullSupportPath && !candidateWriteUnlock {
 			return CommandRow{}, errUnsupportedForPid(command, s.target.PID)
 		}
 	}
@@ -839,7 +839,7 @@ func (s *DeviceSession) ensureCommandAllowed(command CommandID) (CommandRow, err
 		if s.profile.SupportTier != TierFull {
 			return CommandRow{}, errUnsupportedForPid(command, s.target.PID)
 		}
-		if !(s.config.AllowUnsafe && s.config.BrickRiskAck) {
+		if !s.config.AllowUnsafe || !s.config.BrickRiskAck {
 			return CommandRow{}, errUnsafeCommandDenied(command)
 		}
 	}

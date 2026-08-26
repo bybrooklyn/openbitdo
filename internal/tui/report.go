@@ -178,7 +178,7 @@ func blockedOperationsFor(d core.AppDevice) []string {
 		if !d.Capability.SupportsFirmware {
 			out = append(out, "firmware: no verified path for this PID")
 		}
-		if !(d.Capability.SupportsJP108DedicatedMap || (d.Capability.SupportsU2ButtonMap && d.Capability.SupportsU2SlotConfig)) {
+		if !d.Capability.SupportsJP108DedicatedMap && (!d.Capability.SupportsU2ButtonMap || !d.Capability.SupportsU2SlotConfig) {
 			out = append(out, "mapping: no confirmed editor for this PID")
 		}
 		return out

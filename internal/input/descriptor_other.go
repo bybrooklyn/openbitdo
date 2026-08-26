@@ -12,5 +12,3 @@ import "fmt"
 func fetchReportDescriptor(devicePath string) ([]byte, error) {
 	return nil, fmt.Errorf("report descriptor acquisition is not implemented on this platform (device %s)", devicePath)
 }
-
-const descriptorAcquisitionSupported = false

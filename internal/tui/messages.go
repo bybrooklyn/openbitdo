@@ -1,8 +1,6 @@
 package tui
 
 import (
-	"time"
-
 	"github.com/bybrooklyn/openbitdo/internal/core"
 	"github.com/bybrooklyn/openbitdo/internal/input"
 	"github.com/bybrooklyn/openbitdo/internal/protocol"
@@ -104,6 +102,3 @@ type reportSavedMsg struct {
 type settingsSavedMsg struct {
 	err error
 }
-
-// blinkMsg drives the modal/status-line's lightweight animation tick.
-type blinkMsg time.Time

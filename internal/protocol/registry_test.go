@@ -17,7 +17,7 @@ func csvRowCount(t *testing.T, path string) int {
 	if err != nil {
 		t.Fatalf("open %s: %v", path, err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }() // read-only fd; close error is not actionable
 	rows, err := csv.NewReader(f).ReadAll()
 	if err != nil {
 		t.Fatalf("read %s: %v", path, err)

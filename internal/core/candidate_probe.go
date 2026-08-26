@@ -18,7 +18,7 @@ func (c *OpenBitdoCore) CandidateWriteProbe(ctx context.Context, vidPid protocol
 	if device.SupportTier != protocol.TierCandidateReadOnly {
 		return deniedUnlockReport(vidPid, scorecard, "Runtime unlock is only available for candidate-readonly devices."), nil
 	}
-	if !(policy.AdvancedMode && policy.AcknowledgedRisk) {
+	if !policy.AdvancedMode || !policy.AcknowledgedRisk {
 		return deniedUnlockReport(vidPid, scorecard, "Enable advanced mode and acknowledge local write risk before running the probe."), nil
 	}
 	if !policy.UnlockFilePresent {
@@ -28,7 +28,7 @@ func (c *OpenBitdoCore) CandidateWriteProbe(ctx context.Context, vidPid protocol
 		}
 		return deniedUnlockReport(vidPid, scorecard, "Create "+path+" with candidate_write_unlock = true before running the probe."), nil
 	}
-	if !(device.Capability.SupportsMode || device.Capability.SupportsProfileRW) {
+	if !device.Capability.SupportsMode && !device.Capability.SupportsProfileRW {
 		return deniedUnlockReport(vidPid, scorecard, "This candidate has no non-firmware safe-write operation available for probing."), nil
 	}
 

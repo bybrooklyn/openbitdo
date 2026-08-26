@@ -59,10 +59,6 @@ func errUnsafeCommandDenied(command CommandID) *Error {
 	return &Error{code: CodeUnsafeCommandDenied, message: fmt.Sprintf("unsafe command %s requires --unsafe and --i-understand-brick-risk", command)}
 }
 
-func errUnknownPid(pid uint16) *Error {
-	return &Error{code: CodeUnknownPid, message: fmt.Sprintf("unknown PID %#04x", pid)}
-}
-
 func errInvalidInput(format string, a ...any) *Error {
 	return &Error{code: CodeInvalidInput, message: fmt.Sprintf("invalid input: %s", fmt.Sprintf(format, a...))}
 }
