@@ -80,7 +80,7 @@ func (m Model) viewSettings(height int) string {
 	}
 
 	b.WriteString("\n" + styleFaint.Render("Config file: "+m.settingsPath) + "\n")
-	b.WriteString(styleFaint.Render("Candidate unlock files: "+candidateUnlockDir()) + "\n\n")
+	b.WriteString(styleFaint.Render("Candidate unlock files: "+candidateUnlockDir(m.settingsPath)) + "\n\n")
 
 	b.WriteString(stylePanelTitle.Render("Build") + "\n")
 	b.WriteString(styleFaint.Render(fmt.Sprintf("%s  %s  %s  %s\n", m.build.AppVersion, m.build.Commit, m.build.BuildDate, m.build.Platform)))

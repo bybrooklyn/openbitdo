@@ -231,14 +231,17 @@ func runtimeUnlockToReport(r core.RuntimeUnlockReport) *reportRuntimeUnlock {
 }
 
 // reportsDir mirrors the settings config directory's parent — reports live
-// alongside config.toml under a "reports" subdirectory.
-func reportsDir() string {
-	return filepath.Join(filepath.Dir(SettingsPath()), "reports")
+// alongside config.toml under a "reports" subdirectory. Takes settingsPath
+// explicitly (see unlock.go) so it follows the same injectable path the
+// rest of the app uses instead of always resolving to the real OS config
+// directory.
+func reportsDir(settingsPath string) string {
+	return filepath.Join(filepath.Dir(settingsPath), "reports")
 }
 
 // persistSupportReport writes a TOML report and prunes old ones (cap 20
 // files / 30 days, same retention as the prior Rust TUI), gated by mode.
-func persistSupportReport(mode ReportSaveMode, operation string, device *core.AppDevice, status, message string,
+func persistSupportReport(mode ReportSaveMode, settingsPath, operation string, device *core.AppDevice, status, message string,
 	diag *protocol.DiagProbeResult, firmware *core.FirmwareFinalReport, runtimeUnlock *core.RuntimeUnlockReport) (string, error) {
 
 	failed := status != "ok" && status != "passed"
@@ -270,7 +273,7 @@ func persistSupportReport(mode ReportSaveMode, operation string, device *core.Ap
 		report.RuntimeUnlock = runtimeUnlockToReport(*runtimeUnlock)
 	}
 
-	dir := reportsDir()
+	dir := reportsDir(settingsPath)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", err
 	}

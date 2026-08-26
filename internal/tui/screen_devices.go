@@ -100,8 +100,8 @@ func (m Model) actionsForSelectedDevice() []actionItem {
 			reason = "Write locked until restart"
 		case !m.advancedMode:
 			reason = "Enable advanced mode first"
-		case !candidateUnlockFilePresent(device.VidPid):
-			reason = "Create " + candidateUnlockFilePath(device.VidPid) + " with candidate_write_unlock = true first"
+		case !candidateUnlockFilePresent(m.settingsPath, device.VidPid):
+			reason = "Create " + candidateUnlockFilePath(m.settingsPath, device.VidPid) + " with candidate_write_unlock = true first"
 		}
 		items = append(items, actionItem{label: "Guarded Write Probe", kind: actionGuardedProbe, reason: reason})
 	}

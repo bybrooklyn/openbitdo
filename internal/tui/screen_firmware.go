@@ -143,7 +143,7 @@ func (m Model) finishFirmware(report *core.FirmwareFinalReport) (tea.Model, tea.
 			status, message = "cancelled", "Firmware update cancelled."
 		}
 	}
-	return m, cmdSaveReport(m.settings.ReportSaveMode, "firmware-update", &device, status, message, nil, report, nil)
+	return m, cmdSaveReport(m.settings.ReportSaveMode, m.settingsPath, "firmware-update", &device, status, message, nil, report, nil)
 }
 
 func (m Model) viewFirmware(height int) string {

@@ -162,22 +162,28 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		device := msg.device
 		policy := core.RuntimeUnlockPolicy{
 			AdvancedMode: m.advancedMode, AcknowledgedRisk: true,
-			UnlockFilePresent: candidateUnlockFilePresent(device.VidPid), UnlockFilePath: candidateUnlockFilePath(device.VidPid),
+			UnlockFilePresent: candidateUnlockFilePresent(m.settingsPath, device.VidPid), UnlockFilePath: candidateUnlockFilePath(m.settingsPath, device.VidPid),
 		}
 		m.statusLine = "Running guarded write probe…"
-		return m, cmdCandidateProbe(m.ctx, m.core, device.VidPid, policy)
+		return m, cmdCandidateProbe(m.ctx, m.core, device, policy)
 
 	case candidateProbeResultMsg:
 		m.err = msg.err
-		if msg.err == nil {
-			m.statusLine = msg.report.Message
-			if msg.report.WriteLockRequired {
-				m.writeLockUntilRestart = true
-				m.recoveryReason = "The guarded write probe failed: " + msg.report.Message
-				m.recoveryHasBackup = false
-			}
+		if msg.err != nil {
+			return m, nil
 		}
-		return m, nil
+		m.statusLine = msg.report.Message
+		if msg.report.WriteLockRequired {
+			m.writeLockUntilRestart = true
+			m.recoveryReason = "The guarded write probe failed: " + msg.report.Message
+			m.recoveryHasBackup = false
+		}
+		status := "ok"
+		if !msg.report.Allowed || !msg.report.ReadbackVerified {
+			status = "attention"
+		}
+		device := msg.device
+		return m, cmdSaveReport(m.settings.ReportSaveMode, m.settingsPath, "candidate-write-probe", &device, status, msg.report.Message, nil, nil, &msg.report)
 
 	case restoreBackupResultMsg:
 		m.recoveryRestoreDone = msg.err == nil

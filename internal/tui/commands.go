@@ -57,10 +57,10 @@ func cmdU2Apply(ctx context.Context, c *core.OpenBitdoCore, target protocol.VidP
 	}
 }
 
-func cmdCandidateProbe(ctx context.Context, c *core.OpenBitdoCore, target protocol.VidPid, policy core.RuntimeUnlockPolicy) tea.Cmd {
+func cmdCandidateProbe(ctx context.Context, c *core.OpenBitdoCore, device core.AppDevice, policy core.RuntimeUnlockPolicy) tea.Cmd {
 	return func() tea.Msg {
-		report, err := c.CandidateWriteProbe(ctx, target, policy)
-		return candidateProbeResultMsg{report: report, err: err}
+		report, err := c.CandidateWriteProbe(ctx, device.VidPid, policy)
+		return candidateProbeResultMsg{device: device, report: report, err: err}
 	}
 }
 
@@ -139,10 +139,10 @@ func cmdSaveSettings(path string, s Settings) tea.Cmd {
 	}
 }
 
-func cmdSaveReport(mode ReportSaveMode, operation string, device *core.AppDevice, status, message string,
+func cmdSaveReport(mode ReportSaveMode, settingsPath, operation string, device *core.AppDevice, status, message string,
 	diag *protocol.DiagProbeResult, firmware *core.FirmwareFinalReport, runtimeUnlock *core.RuntimeUnlockReport) tea.Cmd {
 	return func() tea.Msg {
-		path, err := persistSupportReport(mode, operation, device, status, message, diag, firmware, runtimeUnlock)
+		path, err := persistSupportReport(mode, settingsPath, operation, device, status, message, diag, firmware, runtimeUnlock)
 		return reportSavedMsg{path: path, err: err}
 	}
 }

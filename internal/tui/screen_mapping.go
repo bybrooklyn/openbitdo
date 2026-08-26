@@ -92,9 +92,11 @@ type mappingState struct {
 
 	jp108Loaded []core.DedicatedButtonMapping
 	jp108Draft  []core.DedicatedButtonMapping
+	jp108Undo   [][]core.DedicatedButtonMapping
 
 	u2Loaded core.U2CoreProfile
 	u2Draft  core.U2CoreProfile
+	u2Undo   []core.U2CoreProfile
 
 	cursor    int
 	applying  bool
@@ -103,15 +105,25 @@ type mappingState struct {
 
 func newMappingState() mappingState { return mappingState{} }
 
-// rowCount is the number of button rows plus the two virtual action rows
-// (Apply, Reset) appended at the end for unified up/down navigation.
+// rowCount is the number of button rows plus the three virtual action rows
+// (Apply, Undo, Reset) appended at the end for unified up/down navigation.
 func (s mappingState) rowCount() int {
 	switch s.kind {
 	case core.KindJP108:
-		return len(s.jp108Draft) + 2
+		return len(s.jp108Draft) + 3
 	default:
-		return len(s.u2Draft.Mappings) + 2
+		return len(s.u2Draft.Mappings) + 3
 	}
+}
+
+// canUndo mirrors Rust's mapping_can_undo: true whenever there's a pushed
+// snapshot to pop, independent of mapping_has_changes/dirty (a Reset also
+// pushes a snapshot, so a Reset itself is undoable).
+func (s mappingState) canUndo() bool {
+	if s.kind == core.KindJP108 {
+		return len(s.jp108Undo) > 0
+	}
+	return len(s.u2Undo) > 0
 }
 
 func (s mappingState) dirty() bool {
@@ -131,6 +143,13 @@ func equalJP108(a, b []core.DedicatedButtonMapping) bool {
 		}
 	}
 	return true
+}
+
+// cloneU2Profile makes a deep copy of a U2CoreProfile's Mappings slice so
+// undo snapshots aren't aliased to the live draft.
+func cloneU2Profile(p core.U2CoreProfile) core.U2CoreProfile {
+	p.Mappings = append([]core.U2ButtonMapping(nil), p.Mappings...)
+	return p
 }
 
 func equalU2(a, b []core.U2ButtonMapping) bool {
@@ -193,21 +212,45 @@ func (m Model) updateMapping(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m *Model) cycleMappingCursor(delta int) {
-	buttonRows := m.mapping.rowCount() - 2
+	buttonRows := m.mapping.rowCount() - 3
 	if m.mapping.cursor >= buttonRows {
 		return
 	}
+	// Push a snapshot before mutating, mirroring Rust's adjust_mapping
+	// (reducer.rs) — every single-row edit is individually undoable.
 	if m.mapping.kind == core.KindJP108 {
+		m.mapping.jp108Undo = append(m.mapping.jp108Undo, append([]core.DedicatedButtonMapping(nil), m.mapping.jp108Draft...))
 		mapping := &m.mapping.jp108Draft[m.mapping.cursor]
 		mapping.TargetHIDUsage = cycleFromTable(jp108Presets, mapping.TargetHIDUsage, delta)
 		return
 	}
+	m.mapping.u2Undo = append(m.mapping.u2Undo, cloneU2Profile(m.mapping.u2Draft))
 	mapping := &m.mapping.u2Draft.Mappings[m.mapping.cursor]
 	mapping.TargetHIDUsage = cycleFromTable(u2Presets, mapping.TargetHIDUsage, delta)
 }
 
+func (m *Model) undoMapping() {
+	// Mirrors Rust's mapping_undo: pop the last snapshot and restore it as
+	// the draft. A no-op when the undo stack is empty.
+	if m.mapping.kind == core.KindJP108 {
+		n := len(m.mapping.jp108Undo)
+		if n == 0 {
+			return
+		}
+		m.mapping.jp108Draft = m.mapping.jp108Undo[n-1]
+		m.mapping.jp108Undo = m.mapping.jp108Undo[:n-1]
+		return
+	}
+	n := len(m.mapping.u2Undo)
+	if n == 0 {
+		return
+	}
+	m.mapping.u2Draft = m.mapping.u2Undo[n-1]
+	m.mapping.u2Undo = m.mapping.u2Undo[:n-1]
+}
+
 func (m Model) triggerMappingRow() (tea.Model, tea.Cmd) {
-	buttonRows := m.mapping.rowCount() - 2
+	buttonRows := m.mapping.rowCount() - 3
 	switch {
 	case m.mapping.cursor == buttonRows: // Apply
 		if !m.mapping.dirty() || m.mapping.applying {
@@ -219,10 +262,20 @@ func (m Model) triggerMappingRow() (tea.Model, tea.Cmd) {
 		}
 		p := m.mapping.u2Draft
 		return m, cmdU2Apply(m.ctx, m.core, m.mapping.device.VidPid, p.Slot, p.Mode, p.Mappings, p.L2Analog, p.R2Analog)
-	case m.mapping.cursor == buttonRows+1: // Reset
+	case m.mapping.cursor == buttonRows+1: // Undo
+		if !m.mapping.canUndo() {
+			return m, nil
+		}
+		m.undoMapping()
+		m.mapping.statusMsg = "Last edit undone."
+	case m.mapping.cursor == buttonRows+2: // Reset
+		// Rust's mapping_reset pushes the current draft onto the undo stack
+		// before resetting, so a Reset is itself undoable — match that.
 		if m.mapping.kind == core.KindJP108 {
+			m.mapping.jp108Undo = append(m.mapping.jp108Undo, append([]core.DedicatedButtonMapping(nil), m.mapping.jp108Draft...))
 			m.mapping.jp108Draft = append([]core.DedicatedButtonMapping(nil), m.mapping.jp108Loaded...)
 		} else {
+			m.mapping.u2Undo = append(m.mapping.u2Undo, cloneU2Profile(m.mapping.u2Draft))
 			m.mapping.u2Draft = m.mapping.u2Loaded
 			m.mapping.u2Draft.Mappings = append([]core.U2ButtonMapping(nil), m.mapping.u2Loaded.Mappings...)
 		}
@@ -261,7 +314,7 @@ func (m Model) handleMappingApplyResult(report core.WriteRecoveryReport, err err
 		message = "Write failed; previous mapping was restored from backup."
 		m.mapping.statusMsg = message
 	}
-	return m, cmdSaveReport(m.settings.ReportSaveMode, "mapping-apply", &device, status, message, nil, nil, nil)
+	return m, cmdSaveReport(m.settings.ReportSaveMode, m.settingsPath, "mapping-apply", &device, status, message, nil, nil, nil)
 }
 
 func (m Model) viewMapping(height int) string {
@@ -281,7 +334,7 @@ func (m Model) viewMapping(height int) string {
 		return stylePanel.Width(m.width - 2).Height(height - 2).Render(b.String())
 	}
 
-	buttonRows := m.mapping.rowCount() - 2
+	buttonRows := m.mapping.rowCount() - 3
 	for i := 0; i < buttonRows; i++ {
 		var label, value string
 		if m.mapping.kind == core.KindJP108 {
@@ -317,8 +370,19 @@ func (m Model) viewMapping(height int) string {
 	}
 	b.WriteString(applyLine + "\n")
 
-	resetLine := "Reset Draft"
+	undoLine := "Undo Last Edit"
+	if !m.mapping.canUndo() {
+		undoLine += styleFaint.Render("  (nothing to undo)")
+	}
 	if m.mapping.cursor == buttonRows+1 {
+		undoLine = styleAccent.Render("› " + undoLine)
+	} else {
+		undoLine = "  " + undoLine
+	}
+	b.WriteString(undoLine + "\n")
+
+	resetLine := "Reset Draft"
+	if m.mapping.cursor == buttonRows+2 {
 		resetLine = styleAccent.Render("› " + resetLine)
 	} else {
 		resetLine = "  " + resetLine

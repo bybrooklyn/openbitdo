@@ -20,16 +20,22 @@ type unlockFileContents struct {
 	PID                  string `toml:"pid"`
 }
 
-func candidateUnlockDir() string {
-	return filepath.Join(filepath.Dir(SettingsPath()), "candidate-unlocks")
+// candidateUnlockDir, candidateUnlockFilePath, and candidateUnlockFilePresent
+// take settingsPath explicitly (callers pass m.settingsPath) rather than
+// reading the global SettingsPath() directly, so the unlock-file location
+// actually follows the same injectable settings path the rest of the app
+// uses — and so it's testable without touching the real user's home
+// directory.
+func candidateUnlockDir(settingsPath string) string {
+	return filepath.Join(filepath.Dir(settingsPath), "candidate-unlocks")
 }
 
-func candidateUnlockFilePath(v protocol.VidPid) string {
-	return filepath.Join(candidateUnlockDir(), fmt.Sprintf("%04x_%04x.toml", v.VID, v.PID))
+func candidateUnlockFilePath(settingsPath string, v protocol.VidPid) string {
+	return filepath.Join(candidateUnlockDir(settingsPath), fmt.Sprintf("%04x_%04x.toml", v.VID, v.PID))
 }
 
-func candidateUnlockFilePresent(v protocol.VidPid) bool {
-	raw, err := os.ReadFile(candidateUnlockFilePath(v))
+func candidateUnlockFilePresent(settingsPath string, v protocol.VidPid) bool {
+	raw, err := os.ReadFile(candidateUnlockFilePath(settingsPath, v))
 	if err != nil {
 		return false
 	}

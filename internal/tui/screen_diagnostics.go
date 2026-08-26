@@ -58,7 +58,7 @@ func (m Model) updateDiagnostics(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		message := m.core.BeginnerDiagSummary(m.diag.device, msg.result)
-		saveCmd := cmdSaveReport(m.settings.ReportSaveMode, "diag-probe", &m.diag.device, status, message, &msg.result, nil, nil)
+		saveCmd := cmdSaveReport(m.settings.ReportSaveMode, m.settingsPath, "diag-probe", &m.diag.device, status, message, &msg.result, nil, nil)
 		return m, saveCmd
 
 	case tea.KeyMsg:

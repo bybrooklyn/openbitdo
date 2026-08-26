@@ -39,6 +39,7 @@ type u2ApplyResultMsg struct {
 }
 
 type candidateProbeResultMsg struct {
+	device core.AppDevice
 	report core.RuntimeUnlockReport
 	err    error
 }
