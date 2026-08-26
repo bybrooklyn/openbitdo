@@ -8,48 +8,80 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-// usagePresets is a small curated cycle of common HID keyboard usage IDs
-// (letters, enter/esc/backspace/tab/space) for Left/Right to step through
-// when remapping a button — the same "cycle a preset list" interaction the
-// prior Rust editor used, rather than free-form hex entry.
-var usagePresets = func() []uint16 {
-	presets := make([]uint16, 0, 32)
-	for u := uint16(0x04); u <= 0x1D; u++ { // a-z
-		presets = append(presets, u)
-	}
-	presets = append(presets, 0x28, 0x29, 0x2A, 0x2B, 0x2C) // enter, esc, backspace, tab, space
-	return presets
-}()
+// jp108Presets and u2Presets are the exact remap-target cycles from the
+// prior Rust editor (reducer.rs JP108_PRESETS/U2_PRESETS) — JP108 targets are
+// raw HID keyboard-usage IDs, U2 targets are the device's own 17 logical
+// button-target IDs (0x0100.."A" .. 0x0110.."DPadRight"), a completely
+// different value space, so the two tables and their cycle/label functions
+// must stay separate rather than sharing one generic preset list.
+var jp108Presets = []uint16{
+	0x0004, 0x0005, 0x0006, 0x0007, 0x0008, 0x0009, 0x000a, 0x000b, 0x0028, 0x0029, 0x002c, 0x003a,
+	0x003b, 0x003c, 0x00e0, 0x00e1,
+}
 
-func presetLabel(usage uint16) string {
-	switch {
-	case usage >= 0x04 && usage <= 0x1D:
-		return string(rune('a' + (usage - 0x04)))
-	case usage == 0x28:
-		return "enter"
-	case usage == 0x29:
-		return "esc"
-	case usage == 0x2A:
-		return "backspace"
-	case usage == 0x2B:
-		return "tab"
-	case usage == 0x2C:
-		return "space"
+var u2Presets = []uint16{
+	0x0100, 0x0101, 0x0102, 0x0103, 0x0104, 0x0105, 0x0106, 0x0107, 0x0108, 0x0109, 0x010a, 0x010b,
+	0x010c, 0x010d, 0x010e, 0x010f, 0x0110,
+}
+
+// jp108TargetLabel mirrors Rust's mapping_editor.rs, which shows JP108
+// targets as raw hex only (no friendly-name table exists for JP108).
+func jp108TargetLabel(usage uint16) string {
+	return fmt.Sprintf("0x%04x", usage)
+}
+
+// u2TargetLabel ports mapping_editor.rs's u2_target_label exactly.
+func u2TargetLabel(target uint16) string {
+	switch target {
+	case 0x0100:
+		return "A"
+	case 0x0101:
+		return "B"
+	case 0x0102:
+		return "X"
+	case 0x0103:
+		return "Y"
+	case 0x0104:
+		return "L1"
+	case 0x0105:
+		return "R1"
+	case 0x0106:
+		return "L2"
+	case 0x0107:
+		return "R2"
+	case 0x0108:
+		return "L3"
+	case 0x0109:
+		return "R3"
+	case 0x010a:
+		return "Select"
+	case 0x010b:
+		return "Start"
+	case 0x010c:
+		return "Home"
+	case 0x010d:
+		return "DPadUp"
+	case 0x010e:
+		return "DPadDown"
+	case 0x010f:
+		return "DPadLeft"
+	case 0x0110:
+		return "DPadRight"
 	default:
-		return fmt.Sprintf("0x%02x", usage)
+		return "Unknown"
 	}
 }
 
-func cyclePreset(current uint16, delta int) uint16 {
+func cycleFromTable(table []uint16, current uint16, delta int) uint16 {
 	idx := 0
-	for i, u := range usagePresets {
+	for i, u := range table {
 		if u == current {
 			idx = i
 			break
 		}
 	}
-	idx = (idx + delta + len(usagePresets)) % len(usagePresets)
-	return usagePresets[idx]
+	idx = ((idx+delta)%len(table) + len(table)) % len(table)
+	return table[idx]
 }
 
 type mappingState struct {
@@ -167,11 +199,11 @@ func (m *Model) cycleMappingCursor(delta int) {
 	}
 	if m.mapping.kind == core.KindJP108 {
 		mapping := &m.mapping.jp108Draft[m.mapping.cursor]
-		mapping.TargetHIDUsage = cyclePreset(mapping.TargetHIDUsage, delta)
+		mapping.TargetHIDUsage = cycleFromTable(jp108Presets, mapping.TargetHIDUsage, delta)
 		return
 	}
 	mapping := &m.mapping.u2Draft.Mappings[m.mapping.cursor]
-	mapping.TargetHIDUsage = cyclePreset(mapping.TargetHIDUsage, delta)
+	mapping.TargetHIDUsage = cycleFromTable(u2Presets, mapping.TargetHIDUsage, delta)
 }
 
 func (m Model) triggerMappingRow() (tea.Model, tea.Cmd) {
@@ -255,11 +287,11 @@ func (m Model) viewMapping(height int) string {
 		if m.mapping.kind == core.KindJP108 {
 			row := m.mapping.jp108Draft[i]
 			label = fmt.Sprintf("%v", row.Button)
-			value = presetLabel(row.TargetHIDUsage)
+			value = jp108TargetLabel(row.TargetHIDUsage)
 		} else {
 			row := m.mapping.u2Draft.Mappings[i]
 			label = fmt.Sprintf("%v", row.Button)
-			value = presetLabel(row.TargetHIDUsage)
+			value = fmt.Sprintf("%s (0x%04x)", u2TargetLabel(row.TargetHIDUsage), row.TargetHIDUsage)
 		}
 		line := fmt.Sprintf("%-14s → %s", label, value)
 		if i == m.mapping.cursor {

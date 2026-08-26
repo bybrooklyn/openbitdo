@@ -7,6 +7,7 @@ import (
 	"github.com/bybrooklyn/openbitdo/internal/protocol"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/sahilm/fuzzy"
 )
 
 type devicePane int
@@ -47,17 +48,23 @@ func newDevicesState() devicesState {
 	return devicesState{pane: paneDeviceList}
 }
 
+// applyFilter fuzzy-matches devices by name (via sahilm/fuzzy, the same
+// library charmbracelet/bubbles itself uses for list filtering), matching
+// the fuzzy device-search behavior the prior Rust editor had via
+// fuzzy-matcher/SkimMatcherV2 rather than a plain substring match.
 func (d *devicesState) applyFilter() {
 	if d.filterText == "" {
 		d.filtered = d.devices
 		return
 	}
-	needle := strings.ToLower(d.filterText)
-	filtered := make([]core.AppDevice, 0, len(d.devices))
-	for _, dev := range d.devices {
-		if strings.Contains(strings.ToLower(dev.Name), needle) {
-			filtered = append(filtered, dev)
-		}
+	names := make([]string, len(d.devices))
+	for i, dev := range d.devices {
+		names[i] = dev.Name
+	}
+	matches := fuzzy.Find(d.filterText, names)
+	filtered := make([]core.AppDevice, 0, len(matches))
+	for _, match := range matches {
+		filtered = append(filtered, d.devices[match.Index])
 	}
 	d.filtered = filtered
 }
