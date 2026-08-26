@@ -10,7 +10,8 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-SPEC = ROOT / "spec"
+SPEC = ROOT / "docs" / "spec"
+DOSSIERS = ROOT / "docs" / "clean-room-evidence" / "dossiers"
 
 DOSSIER_REQUIRED_FIELDS = {
     "dossier_id",
@@ -121,7 +122,7 @@ def main() -> int:
         if pid not in evidence_pids:
             errors.append(f"{pid}: missing evidence_index.csv row")
 
-        dossier_dir = SPEC / "dossiers" / pid.removeprefix("0x")
+        dossier_dir = DOSSIERS / pid.removeprefix("0x")
         dossier_paths = sorted(dossier_dir.glob("*.toml"))
         if not dossier_paths:
             errors.append(f"{pid}: missing sanitized dossier TOML files")

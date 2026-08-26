@@ -8,7 +8,7 @@ import (
 
 // Ported from sdk/tests/profile_serialization.rs.
 func TestGoldenProfileFixtureRoundtrips(t *testing.T) {
-	fixture, err := os.ReadFile("../../harness/golden/profile_fixture.bin")
+	fixture, err := os.ReadFile("testdata/profile_fixture.bin")
 	if err != nil {
 		t.Fatalf("read fixture: %v", err)
 	}

@@ -6,7 +6,7 @@ var profileMagic = [4]byte{'B', 'D', 'P', '1'}
 
 // ProfileBlob is the on-wire/on-disk profile format: magic, slot, length,
 // payload, and a trailing wrapping-sum checksum over everything from the
-// slot byte onward. Must round-trip harness/golden/profile_fixture.bin.
+// slot byte onward. Must round-trip testdata/profile_fixture.bin.
 type ProfileBlob struct {
 	Slot    byte
 	Payload []byte
