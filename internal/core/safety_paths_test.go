@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -456,6 +457,70 @@ func (panicTransport) Close() error                                { return nil 
 func (panicTransport) Write([]byte) (int, error)                   { panic("simulated transport panic") }
 func (panicTransport) Read(context.Context, int, uint64) ([]byte, error) {
 	panic("simulated transport panic")
+}
+
+// TestFirmwareTransferRefusesTamperedImage guards against a TOCTOU gap found
+// by security review: DownloadRecommendedFirmware/PreflightFirmware verify
+// the firmware image's SHA-256 (and, for a downloaded image, its Ed25519
+// signature) but historically only the file *path* survived into the
+// human-confirmation-gated Start/Confirm flow -- the transfer task re-read
+// from disk and sent whatever was there, un-reverified. A same-user process
+// overwriting the file between preflight and confirm (a window that spans
+// human interaction, realistically seconds to minutes) would get its
+// content written straight to the device. This test simulates exactly that:
+// tamper with the file after a valid preflight, then confirm, and assert
+// the transfer refuses to proceed -- using panicTransport so that if the
+// hash check were ever removed/bypassed, the test would fail loudly via an
+// unrelated panic rather than silently passing.
+func TestFirmwareTransferRefusesTamperedImage(t *testing.T) {
+	c := New(Config{DefaultChunkSize: 16, ProgressIntervalMs: 1})
+	c.transportOverride = panicTransport{}
+	path := filepath.Join(t.TempDir(), "openbitdo-tamper.bin")
+	if err := os.WriteFile(path, bytes.Repeat([]byte{4}, 128), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	ctx := context.Background()
+
+	preflight, err := c.PreflightFirmware(ctx, makeReq(t, path, 0x6009))
+	if err != nil || !preflight.Gate.Allowed {
+		t.Fatalf("preflight: gate=%+v err=%v", preflight.Gate, err)
+	}
+	plan := preflight.Plan
+
+	if _, err := c.StartFirmware(ctx, FirmwareStartRequest{SessionID: plan.SessionID}); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+
+	// Simulate a same-user process overwriting the file during the window
+	// between preflight (which recorded plan.ImageSHA256) and confirm.
+	if err := os.WriteFile(path, bytes.Repeat([]byte{0xff}, 128), 0o644); err != nil {
+		t.Fatalf("tamper: %v", err)
+	}
+
+	if _, err := c.ConfirmFirmware(ctx, FirmwareConfirmRequest{SessionID: plan.SessionID, AcknowledgedRisk: true}); err != nil {
+		t.Fatalf("confirm: %v", err)
+	}
+
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		report, err := c.FirmwareReport(ctx, plan.SessionID)
+		if err != nil {
+			t.Fatalf("report: %v", err)
+		}
+		if report != nil {
+			if report.Status != OutcomeFailed {
+				t.Fatalf("expected Failed, got %s (message: %s)", report.Status, report.Message)
+			}
+			if !strings.Contains(report.Message, "no longer matches its verified hash") {
+				t.Fatalf("expected hash-mismatch message, got: %s", report.Message)
+			}
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("timed out waiting for firmware report")
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
 }
 
 // TestFirmwareTransferPanicIsRecoveredAsFailure verifies runTransferTask's

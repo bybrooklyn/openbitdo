@@ -37,6 +37,24 @@ func runTransferTask(ctx context.Context, handle *firmwareSessionHandle, interva
 		return
 	}
 
+	// Re-verify against the hash recorded at preflight time, immediately
+	// before these bytes are sent to the device. Everything from download
+	// through the human confirmation step only ever carries a file path
+	// forward, not the verified bytes themselves -- without this check, a
+	// same-user process that overwrites the file on disk during that
+	// (human-paced, seconds-to-minutes) window would get its content
+	// written straight to hardware, defeating the SHA-256/Ed25519
+	// verification DownloadRecommendedFirmware already performed.
+	// PreflightFirmware (the only path that creates a firmwareSessionHandle)
+	// always sets ImageSHA256, so this is an unconditional check, not a
+	// best-effort one.
+	if actual := sha256Hex(bytes); actual != handle.plan.ImageSHA256 {
+		finalizeFailure(handle, protocol.CodeInvalidInput, 0, fmt.Sprintf(
+			"Firmware image on disk no longer matches its verified hash (expected %s, got %s) -- refusing to write to the device.",
+			handle.plan.ImageSHA256, actual))
+		return
+	}
+
 	if mockMode {
 		runMockTransferTask(ctx, handle, intervalMs, bytes)
 		return
