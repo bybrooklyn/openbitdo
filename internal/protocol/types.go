@@ -19,10 +19,10 @@ func (v VidPid) String() string {
 type ProtocolFamily string
 
 const (
-	Standard64  ProtocolFamily = "Standard64"
-	JpHandshake ProtocolFamily = "JpHandshake"
-	DInput      ProtocolFamily = "DInput"
-	DS4Boot     ProtocolFamily = "DS4Boot"
+	Standard64    ProtocolFamily = "Standard64"
+	JpHandshake   ProtocolFamily = "JpHandshake"
+	DInput        ProtocolFamily = "DInput"
+	DS4Boot       ProtocolFamily = "DS4Boot"
 	FamilyUnknown ProtocolFamily = "Unknown"
 )
 
@@ -38,9 +38,9 @@ const (
 type SupportTier string
 
 const (
-	TierDetectOnly      SupportTier = "detect-only"
+	TierDetectOnly        SupportTier = "detect-only"
 	TierCandidateReadOnly SupportTier = "candidate-readonly"
-	TierFull            SupportTier = "full"
+	TierFull              SupportTier = "full"
 )
 
 // SafetyClass is a command's risk tier.

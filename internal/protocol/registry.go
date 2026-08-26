@@ -14,15 +14,15 @@ type PidRow struct {
 // CommandRow is one row of the command registry, generated from
 // spec/command_matrix.csv.
 type CommandRow struct {
-	ID                 CommandID
-	SafetyClass        SafetyClass
-	Confidence         Confidence
+	ID                  CommandID
+	SafetyClass         SafetyClass
+	Confidence          Confidence
 	ExperimentalDefault bool
-	ReportID           byte
-	Request            []byte
-	ExpectedResponse   string
-	AppliesTo          []uint16
-	OperationGroup     string
+	ReportID            byte
+	Request             []byte
+	ExpectedResponse    string
+	AppliesTo           []uint16
+	OperationGroup      string
 }
 
 // RuntimePolicy derives the runtime execution policy from a row's confidence
@@ -41,7 +41,10 @@ func (r CommandRow) RuntimePolicy() RuntimePolicy {
 	}
 }
 
-func (r CommandRow) evidenceConfidence() SupportEvidence {
+// EvidenceConfidence reports the evidence confidence surfaced to
+// reporting/UI for this row (Confirmed rows are EvidenceConfirmed,
+// everything else is EvidenceInferred).
+func (r CommandRow) EvidenceConfidence() SupportEvidence {
 	if r.Confidence == Confirmed {
 		return EvidenceConfirmed
 	}

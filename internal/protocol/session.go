@@ -32,7 +32,7 @@ func DefaultTimeoutProfile() TimeoutProfile {
 
 // SessionConfig controls a DeviceSession's safety gates and I/O behavior.
 type SessionConfig struct {
-	RetryPolicy         RetryPolicy
+	RetryPolicy          RetryPolicy
 	TimeoutProfile       TimeoutProfile
 	AllowUnsafe          bool
 	BrickRiskAck         bool
@@ -124,22 +124,22 @@ type ModeState struct {
 // FirmwareTransferReport summarizes a completed (or dry-run) firmware
 // transfer.
 type FirmwareTransferReport struct {
-	BytesTotal  int
-	ChunkSize   int
-	ChunksSent  int
-	DryRun      bool
+	BytesTotal int
+	ChunkSize  int
+	ChunksSent int
+	DryRun     bool
 }
 
 // DeviceSession drives the command protocol against one opened device,
 // gating every command through ensureCommandAllowed before it is ever
 // written to the wire.
 type DeviceSession struct {
-	transport      Transport
-	target         VidPid
-	profile        DeviceProfile
-	config         SessionConfig
-	trace          []CommandExecutionReport
-	lastExecution  *CommandExecutionReport
+	transport     Transport
+	target        VidPid
+	profile       DeviceProfile
+	config        SessionConfig
+	trace         []CommandExecutionReport
+	lastExecution *CommandExecutionReport
 }
 
 // NewDeviceSession opens transport against target and resolves its device
@@ -254,7 +254,7 @@ func (s *DeviceSession) diagCommandsToRun() []diagCheckPlan {
 		if containsPlan(plans, row.ID) {
 			continue
 		}
-		plans = append(plans, diagCheckPlan{command: row.ID, policy: row.RuntimePolicy(), confidence: row.evidenceConfidence()})
+		plans = append(plans, diagCheckPlan{command: row.ID, policy: row.RuntimePolicy(), confidence: row.EvidenceConfidence()})
 	}
 	return plans
 }
