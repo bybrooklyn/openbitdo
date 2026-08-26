@@ -12,9 +12,6 @@ on:
 jobs:
   guard:
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: sdk
     steps:
       - uses: actions/checkout@v4
       - name: Clean-room guard
@@ -52,60 +49,52 @@ jobs:
       - name: Check docs consistency
         run: |
           set -euo pipefail
-          bash sdk/scripts/check_docs_consistency.sh
+          bash scripts/check_docs_consistency.sh
 
   tui-smoke-test:
     runs-on: ubuntu-latest
     needs: guard
-    defaults:
-      run:
-        working-directory: sdk
     steps:
       - uses: actions/checkout@v4
       - name: Install system deps
         run: |
           sudo apt-get update
-          sudo apt-get install -y libudev-dev pkg-config
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-      - name: Run TUI smoke tests
-        run: cargo test -p bitdo_tui --all-targets
+          sudo apt-get install -y libudev-dev pkg-config build-essential
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Run TUI package tests (includes teatest end-to-end scenarios)
+        run: go test ./internal/tui/... -v
 
   build-macos-arm64:
     runs-on: macos-14
     needs: guard
-    defaults:
-      run:
-        working-directory: sdk
     steps:
       - uses: actions/checkout@v4
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-go@v5
         with:
-          targets: aarch64-apple-darwin
+          go-version-file: go.mod
       - name: Build/package macOS arm64 artifacts
-        run: ./scripts/package-macos.sh v0.0.0-ci arm64 aarch64-apple-darwin
+        run: ./scripts/package-macos.sh v0.0.0-ci arm64
       - name: Upload macOS arm64 artifact sample
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: ci-macos-arm64-package
-          path: sdk/dist/openbitdo-v0.0.0-ci-macos-arm64*
+          path: dist/openbitdo-v0.0.0-ci-macos-arm64*
 
   build-linux-x86_64:
     runs-on: ubuntu-latest
     needs: guard
-    defaults:
-      run:
-        working-directory: sdk
     steps:
       - uses: actions/checkout@v4
       - name: Install system deps
         run: |
           sudo apt-get update
-          sudo apt-get install -y libudev-dev pkg-config
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+          sudo apt-get install -y libudev-dev pkg-config build-essential
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
       - name: Build/package linux x86_64 artifacts
         run: ./scripts/package-linux.sh v0.0.0-ci x86_64
       - name: Upload linux x86_64 artifact sample
@@ -113,22 +102,20 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ci-linux-x86_64-package
-          path: sdk/dist/openbitdo-v0.0.0-ci-linux-x86_64*
+          path: dist/openbitdo-v0.0.0-ci-linux-x86_64*
 
   build-linux-aarch64:
     runs-on: ubuntu-24.04-arm
     needs: guard
-    defaults:
-      run:
-        working-directory: sdk
     steps:
       - uses: actions/checkout@v4
       - name: Install system deps
         run: |
           sudo apt-get update
-          sudo apt-get install -y libudev-dev pkg-config
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+          sudo apt-get install -y libudev-dev pkg-config build-essential
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
       - name: Build/package linux aarch64 artifacts
         run: ./scripts/package-linux.sh v0.0.0-ci aarch64
       - name: Upload linux aarch64 artifact sample
@@ -136,7 +123,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ci-linux-aarch64-package
-          path: sdk/dist/openbitdo-v0.0.0-ci-linux-aarch64*
+          path: dist/openbitdo-v0.0.0-ci-linux-aarch64*
 
   test:
     runs-on: ubuntu-latest
@@ -147,18 +134,20 @@ jobs:
       - build-macos-arm64
       - build-linux-x86_64
       - build-linux-aarch64
-    defaults:
-      run:
-        working-directory: sdk
     steps:
       - uses: actions/checkout@v4
       - name: Install system deps
         run: |
           sudo apt-get update
-          sudo apt-get install -y libudev-dev pkg-config
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-      - name: Clippy (workspace strict)
-        run: cargo clippy --workspace --all-targets -- -D warnings
-      - name: Run tests
-        run: cargo test --workspace --all-targets
+          sudo apt-get install -y libudev-dev pkg-config build-essential
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Lint (strict)
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: latest
+      - name: Vet
+        run: go vet ./...
+      - name: Run tests (race detector)
+        run: go test -race ./...

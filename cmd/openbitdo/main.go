@@ -59,7 +59,11 @@ func main() {
 
 func run() error {
 	fs := flag.NewFlagSet("openbitdo", flag.ContinueOnError)
-	fs.Usage = func() { fmt.Fprint(os.Stdout, helpText) }
+	fs.Usage = func() {
+		// A failed write to stdout here isn't actionable — there's nothing
+		// left to report it through — so the error is deliberately discarded.
+		_, _ = fmt.Fprint(os.Stdout, helpText)
+	}
 	mock := fs.Bool("mock", false, "Use mock transport/devices")
 	if err := fs.Parse(os.Args[1:]); err != nil {
 		return err
