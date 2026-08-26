@@ -362,3 +362,76 @@ func hex4(v uint16) string {
 func candidateUnlockFileNameFor(v protocol.VidPid) string {
 	return hex4(v.VID) + "_" + hex4(v.PID) + ".toml"
 }
+
+// TestU2SlotPreviewCyclesAndCanBeLoadedIntoDraft exercises the full
+// preview flow end to end: 'p' cycles the slot and issues a real command,
+// running that command's tea.Cmd produces the u2SlotPreviewMsg Update
+// expects, and 'enter' on a shown preview loads it into the draft (not the
+// device — nothing is written until Apply).
+func TestU2SlotPreviewCyclesAndCanBeLoadedIntoDraft(t *testing.T) {
+	m, _ := newTestModel(t, filepath.Join(t.TempDir(), "config.toml"))
+	m.screen = screenMapping
+	m.mapping = mappingState{
+		device: core.AppDevice{Name: "U2", VidPid: protocol.VidPid{VID: 0x2dc8, PID: 0x6012}},
+		kind:   core.KindUltimate2,
+	}
+
+	next, cmd := m.updateMapping(tea.KeyMsg{Runes: []rune("p"), Type: tea.KeyRunes})
+	m = next.(Model)
+	if !m.mapping.u2PreviewLoading {
+		t.Fatal("expected p to start a preview load")
+	}
+	if m.mapping.u2PreviewSlot != core.U2Slot1 {
+		t.Fatalf("expected the first preview to be Slot1, got %v", m.mapping.u2PreviewSlot)
+	}
+	if cmd == nil {
+		t.Fatal("expected p to return a non-nil command")
+	}
+
+	msg := cmd()
+	previewMsg, ok := msg.(u2SlotPreviewMsg)
+	if !ok {
+		t.Fatalf("expected a u2SlotPreviewMsg, got %T", msg)
+	}
+	next, _ = m.updateMapping(previewMsg)
+	m = next.(Model)
+	if m.mapping.u2PreviewLoading {
+		t.Fatal("expected loading to clear once the preview result arrives")
+	}
+	if m.mapping.u2PreviewResult == nil {
+		t.Fatal("expected a preview result")
+	}
+	previewedMappings := append([]core.U2ButtonMapping(nil), m.mapping.u2PreviewResult.Mappings...)
+	if len(previewedMappings) == 0 {
+		t.Fatal("expected the mock preview to return non-empty mappings")
+	}
+
+	// esc dismisses the preview without touching the draft.
+	draftBefore := append([]core.U2ButtonMapping(nil), m.mapping.u2Draft.Mappings...)
+	next, _ = m.updateMapping(tea.KeyMsg{Type: tea.KeyEsc})
+	m = next.(Model)
+	if m.mapping.u2PreviewResult != nil {
+		t.Fatal("expected esc to dismiss the preview")
+	}
+	if m.screen != screenMapping {
+		t.Fatalf("esc from a shown preview must dismiss the preview, not leave the mapping screen — got %v", m.screen)
+	}
+	if !equalU2(m.mapping.u2Draft.Mappings, draftBefore) {
+		t.Fatal("dismissing a preview with esc must not change the draft")
+	}
+
+	// Re-preview, then enter loads it into the draft this time.
+	next, cmd = m.updateMapping(tea.KeyMsg{Runes: []rune("p"), Type: tea.KeyRunes})
+	m = next.(Model)
+	next, _ = m.updateMapping(cmd().(u2SlotPreviewMsg))
+	m = next.(Model)
+
+	next, _ = m.updateMapping(tea.KeyMsg{Type: tea.KeyEnter})
+	m = next.(Model)
+	if m.mapping.u2PreviewResult != nil {
+		t.Fatal("expected enter to clear the preview after loading it")
+	}
+	if !equalU2(m.mapping.u2Draft.Mappings, previewedMappings) {
+		t.Fatalf("expected enter to load the previewed mappings into the draft: got %v, want %v", m.mapping.u2Draft.Mappings, previewedMappings)
+	}
+}

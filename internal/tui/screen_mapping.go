@@ -98,6 +98,18 @@ type mappingState struct {
 	u2Draft  core.U2CoreProfile
 	u2Undo   []core.U2CoreProfile
 
+	// u2Preview holds a read-only look at a slot other than whatever's
+	// currently loaded into the draft, so a user can see what's actually
+	// stored in each of the Ultimate2's 3 slots before deciding which one to
+	// load into the editor — there is no protocol command to change which
+	// slot is active on the device itself (that only happens on the
+	// controller), so "switching" here means loading a previewed slot's data
+	// into the draft, not writing anything, until Apply is pressed.
+	u2PreviewSlot    core.U2SlotID
+	u2PreviewLoading bool
+	u2PreviewResult  *core.U2CoreProfile
+	u2PreviewErr     error
+
 	cursor    int
 	applying  bool
 	statusMsg string
@@ -187,11 +199,34 @@ func (m Model) updateMapping(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case u2ApplyResultMsg:
 		return m.handleMappingApplyResult(msg.report, msg.err)
 
+	case u2SlotPreviewMsg:
+		m.mapping.u2PreviewLoading = false
+		m.mapping.u2PreviewErr = msg.err
+		if msg.err == nil {
+			profile := msg.profile
+			m.mapping.u2PreviewResult = &profile
+		}
+		return m, nil
+
 	case tea.KeyMsg:
+		if m.mapping.u2PreviewResult != nil || m.mapping.u2PreviewLoading {
+			switch msg.String() {
+			case "esc":
+				m.mapping.u2PreviewResult = nil
+				m.mapping.u2PreviewErr = nil
+			case "enter":
+				return m.loadPreviewedSlotIntoDraft()
+			}
+			return m, nil
+		}
 		switch msg.String() {
 		case "esc":
 			m.screen = screenDevices
 			return m, nil
+		case "p":
+			if m.mapping.kind == core.KindUltimate2 {
+				return m.previewNextU2Slot()
+			}
 		case "up", "k":
 			if m.mapping.cursor > 0 {
 				m.mapping.cursor--
@@ -208,6 +243,39 @@ func (m Model) updateMapping(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.triggerMappingRow()
 		}
 	}
+	return m, nil
+}
+
+// previewNextU2Slot cycles to the next of the 3 Ultimate2 slots and starts a
+// read-only preview read against it.
+func (m Model) previewNextU2Slot() (tea.Model, tea.Cmd) {
+	next := m.mapping.u2PreviewSlot + 1
+	if next > core.U2Slot3 {
+		next = core.U2Slot1
+	}
+	m.mapping.u2PreviewSlot = next
+	m.mapping.u2PreviewLoading = true
+	m.mapping.u2PreviewResult = nil
+	m.mapping.u2PreviewErr = nil
+	return m, cmdU2PreviewSlot(m.ctx, m.core, m.mapping.device.VidPid, next)
+}
+
+// loadPreviewedSlotIntoDraft is what "switching" to a previewed slot
+// actually means in this tool: the previewed slot's mappings replace the
+// draft (and become the new Loaded baseline for undo/dirty comparisons), but
+// nothing is written to the device until Apply is pressed — same
+// write-on-confirm discipline as every other mapping change.
+func (m Model) loadPreviewedSlotIntoDraft() (tea.Model, tea.Cmd) {
+	if m.mapping.u2PreviewResult == nil {
+		return m, nil
+	}
+	profile := *m.mapping.u2PreviewResult
+	m.mapping.u2Loaded = profile
+	m.mapping.u2Draft = profile
+	m.mapping.u2Draft.Mappings = append([]core.U2ButtonMapping(nil), profile.Mappings...)
+	m.mapping.u2PreviewResult = nil
+	m.mapping.u2PreviewErr = nil
+	m.mapping.cursor = 0
 	return m, nil
 }
 
@@ -334,6 +402,23 @@ func (m Model) viewMapping(height int) string {
 		return stylePanel.Width(m.width - 2).Height(height - 2).Render(b.String())
 	}
 
+	if m.mapping.u2PreviewLoading || m.mapping.u2PreviewResult != nil || m.mapping.u2PreviewErr != nil {
+		fmt.Fprintf(&b, "%s\n\n", stylePanelTitle.Render(fmt.Sprintf("Preview: Slot %d", m.mapping.u2PreviewSlot)))
+		switch {
+		case m.mapping.u2PreviewLoading:
+			b.WriteString(styleFaint.Render("Reading slot…"))
+		case m.mapping.u2PreviewErr != nil:
+			b.WriteString(styleDanger.Render("Error: " + m.mapping.u2PreviewErr.Error()))
+		default:
+			for _, row := range m.mapping.u2PreviewResult.Mappings {
+				fmt.Fprintf(&b, "%-14s → %s (0x%04x)\n", fmt.Sprintf("%v", row.Button), u2TargetLabel(row.TargetHIDUsage), row.TargetHIDUsage)
+			}
+			b.WriteString("\n" + styleWarning.Render("This is a read-only preview — nothing has changed yet."))
+			b.WriteString("\n" + styleFaint.Render("enter to load this slot into the editor · esc to dismiss · p for the next slot"))
+		}
+		return stylePanel.Width(m.width - 2).Height(height - 2).Render(b.String())
+	}
+
 	buttonRows := m.mapping.rowCount() - 3
 	for i := 0; i < buttonRows; i++ {
 		var label, value string
@@ -388,6 +473,10 @@ func (m Model) viewMapping(height int) string {
 		resetLine = "  " + resetLine
 	}
 	b.WriteString(resetLine + "\n")
+
+	if m.mapping.kind == core.KindUltimate2 {
+		b.WriteString("\n" + styleHelp.Render("p to preview another slot before loading it into the editor"))
+	}
 
 	if m.mapping.statusMsg != "" {
 		b.WriteString("\n" + styleFaint.Render(m.mapping.statusMsg))

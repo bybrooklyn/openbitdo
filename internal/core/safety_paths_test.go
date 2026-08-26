@@ -667,3 +667,43 @@ func TestVerifyPostFlashReportsUnverifiedWhenDeviceDoesNotRespond(t *testing.T) 
 		t.Fatal("expected a non-empty explanatory message")
 	}
 }
+
+// --- U2PreviewSlot: must read exactly the requested slot, never overriding
+// it with the device's currently-active slot the way U2ReadCoreProfile
+// deliberately does for its own use case.
+
+func minimalOkResponse() []byte {
+	resp := make([]byte, 64)
+	resp[0], resp[1] = 0x02, 0x05
+	return resp
+}
+
+func TestU2PreviewSlotReadsRequestedSlotNotActiveSlot(t *testing.T) {
+	// PID 0x6012 is an Ultimate2 full-tier device (SupportsU2SlotConfig +
+	// SupportsU2ButtonMap) — see protocol.DeviceProfileFor's registry.
+	target := protocol.VidPid{VID: 0x2dc8, PID: 0x6012}
+	transport := &protocol.MockTransport{}
+	transport.PushReadData(minimalOkResponse()) // U2ReadConfigSlot response
+	transport.PushReadData(minimalOkResponse()) // U2ReadButtonMap response
+
+	c := New(Config{})
+	c.transportOverride = transport
+
+	profile, err := c.U2PreviewSlot(context.Background(), target, U2Slot3)
+	if err != nil {
+		t.Fatalf("U2PreviewSlot: %v", err)
+	}
+	if profile.Slot != U2Slot3 {
+		t.Fatalf("expected profile.Slot=%v, got %v", U2Slot3, profile.Slot)
+	}
+
+	writes := transport.Writes()
+	if len(writes) != 2 {
+		t.Fatalf("expected exactly 2 writes (ReadConfigSlot, ReadButtonMap) — critically, no U2GetCurrentSlot call — got %d: %v", len(writes), writes)
+	}
+	for i, w := range writes {
+		if len(w) < 5 || w[4] != U2Slot3.WireValue() {
+			t.Fatalf("write %d: expected slot byte (index 4) = %#02x, got %v", i, U2Slot3.WireValue(), w)
+		}
+	}
+}

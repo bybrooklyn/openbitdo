@@ -187,6 +187,62 @@ func (c *OpenBitdoCore) U2ReadCoreProfile(ctx context.Context, vidPid protocol.V
 	}, nil
 }
 
+// U2PreviewSlot reads exactly the requested slot's button map and config,
+// never substituting the device's currently-active slot the way
+// U2ReadCoreProfile deliberately does for its own use case (loading "my
+// current setup" into the editor). There is no protocol command to change
+// which slot is active on an Ultimate2 device -- switching happens on the
+// controller itself, not over the wire -- so this exists to let a user
+// browse what's actually stored in each of the 3 slots before deciding
+// which one to load into the mapping editor, rather than the editor only
+// ever being able to show whatever happens to be active right now.
+func (c *OpenBitdoCore) U2PreviewSlot(ctx context.Context, vidPid protocol.VidPid, slot U2SlotID) (U2CoreProfile, error) {
+	p := protocol.DeviceProfileFor(vidPid)
+	if !p.Capability.SupportsU2SlotConfig || !p.Capability.SupportsU2ButtonMap {
+		return U2CoreProfile{}, errPolicyDenied(ReasonUnsupportedPid, "Ultimate2 core profile is not supported for %s", vidPid)
+	}
+
+	if c.config.MockMode {
+		return U2CoreProfile{
+			Slot: slot, Mode: 0, FirmwareVersion: "mock-1.0.0", L2Analog: 0.5, R2Analog: 0.5,
+			SupportsTriggerWrite: true, Mappings: defaultU2Mappings(),
+		}, nil
+	}
+
+	session, err := c.openSessionForOps(ctx, vidPid)
+	if err != nil {
+		return U2CoreProfile{}, err
+	}
+	defer func() { _ = session.Close() }()
+
+	configBlob, err := session.U2ReadConfigSlot(ctx, slot.WireValue())
+	if err != nil {
+		return U2CoreProfile{}, errProtocol(err)
+	}
+	wireMap, err := session.U2ReadButtonMap(ctx, slot.WireValue())
+	if err != nil {
+		return U2CoreProfile{}, errProtocol(err)
+	}
+	mappings := make([]U2ButtonMapping, 0, len(wireMap))
+	for _, entry := range wireMap {
+		if button, ok := U2ButtonFromWireIndex(entry.Index); ok {
+			mappings = append(mappings, U2ButtonMapping{Button: button, TargetHIDUsage: entry.Usage})
+		}
+	}
+
+	var l2, r2 float32
+	if len(configBlob) > 6 {
+		l2 = float32(configBlob[6]) / 255.0
+	}
+	if len(configBlob) > 7 {
+		r2 = float32(configBlob[7]) / 255.0
+	}
+	return U2CoreProfile{
+		Slot: slot, FirmwareVersion: "unknown", L2Analog: l2, R2Analog: r2,
+		SupportsTriggerWrite: p.SupportTier == protocol.TierFull, Mappings: mappings,
+	}, nil
+}
+
 func formatFirmwareVersionDecimal(raw uint32) string {
 	return fmt.Sprintf("%d.%02d", raw/100, raw%100)
 }

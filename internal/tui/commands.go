@@ -50,6 +50,13 @@ func cmdU2ReadProfile(ctx context.Context, c *core.OpenBitdoCore, target protoco
 	}
 }
 
+func cmdU2PreviewSlot(ctx context.Context, c *core.OpenBitdoCore, target protocol.VidPid, slot core.U2SlotID) tea.Cmd {
+	return func() tea.Msg {
+		profile, err := c.U2PreviewSlot(ctx, target, slot)
+		return u2SlotPreviewMsg{slot: slot, profile: profile, err: err}
+	}
+}
+
 func cmdU2Apply(ctx context.Context, c *core.OpenBitdoCore, target protocol.VidPid, slot core.U2SlotID, mode byte, changes []core.U2ButtonMapping, l2, r2 float32) tea.Cmd {
 	return func() tea.Msg {
 		report, err := c.U2ApplyCoreProfileWithRecovery(ctx, target, slot, mode, changes, l2, r2, true)

@@ -36,6 +36,12 @@ type u2ApplyResultMsg struct {
 	err    error
 }
 
+type u2SlotPreviewMsg struct {
+	slot    core.U2SlotID
+	profile core.U2CoreProfile
+	err     error
+}
+
 type candidateProbeResultMsg struct {
 	device core.AppDevice
 	report core.RuntimeUnlockReport
