@@ -13,6 +13,7 @@ OpenBitdo is unofficial and not affiliated with 8BitDo. Firmware updates and dev
 - Stage verified firmware updates on full-support devices.
 - Edit supported mappings for the currently confirmed JP108 and Ultimate 2 flows.
 - Keep unconfirmed devices in safe read-only or detect-only paths.
+- Navigate the entire app with a keyboard or an 8BitDo controller's own d-pad/buttons.
 
 ## Install
 
@@ -21,7 +22,7 @@ OpenBitdo is unofficial and not affiliated with 8BitDo. Firmware updates and dev
 | Homebrew | `brew tap bybrooklyn/openbitdo && brew install openbitdo` | macOS or Linux users who want the standard tap flow |
 | AUR | `paru -S openbitdo-bin` | Arch Linux users who want a prebuilt package |
 | GitHub Releases | Download a release tarball and run `bin/openbitdo` | Users who want a standalone binary without a package manager |
-| From source | `cargo run -p openbitdo --` from `sdk/` with Rust 1.85+ | Contributors and local development |
+| From source | `go build -o openbitdo ./cmd/openbitdo` with Go 1.27+ | Contributors and local development |
 
 ## First Run
 
@@ -63,9 +64,12 @@ Apple Developer signing and notarization are deferred until credentials are avai
 - Homebrew publishes through the separate tap repo `bybrooklyn/homebrew-openbitdo`.
 - Package-manager metadata is rendered from published assets so release checksums stay authoritative.
 
+## License
+
+OpenBitdo is licensed under the [GNU General Public License v3.0 or later](LICENSE).
+
 ## Where To Go Next
 
-- Developer and release-engineering details: [sdk/README.md](sdk/README.md)
 - Current RC release gate: [RC_CHECKLIST.md](RC_CHECKLIST.md)
 - Changelog and release notes: [CHANGELOG.md](CHANGELOG.md)
 - CLI and packaging migration notes: [MIGRATION.md](MIGRATION.md)
