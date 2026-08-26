@@ -51,8 +51,8 @@ func Start(ctx context.Context) StartResult {
 	notes := make([]string, 0, len(infos))
 
 	for _, info := range infos {
-		descriptor, err := fetchReportDescriptor(info.Path) //nolint:staticcheck // SA4023: always non-nil on the !linux stub by design; descriptor_linux.go's real implementation can succeed
-		if err != nil {                                     //nolint:staticcheck // SA4023: see above
+		descriptor, err := fetchReportDescriptor(info)
+		if err != nil {
 			notes = append(notes, fmt.Sprintf("pid=%#04x: gamepad nav unavailable (%v)", info.ProductID, err))
 			continue
 		}
