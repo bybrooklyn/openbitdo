@@ -24,6 +24,9 @@ type OpenBitdoCore struct {
 	backupsMu sync.RWMutex
 	backups   map[ConfigBackupID]configBackup
 
+	diagCacheMu sync.RWMutex
+	diagCache   map[diagCacheKey]DiagCacheEntry
+
 	http *http.Client
 
 	// transportOverride lets tests inject a protocol.MockTransport in place
@@ -48,10 +51,11 @@ func (c *OpenBitdoCore) transport() protocol.Transport {
 // New constructs an OpenBitdoCore from config.
 func New(config Config) *OpenBitdoCore {
 	c := &OpenBitdoCore{
-		config:   config,
-		sessions: make(map[FirmwareUpdateSessionID]*firmwareSessionHandle),
-		backups:  make(map[ConfigBackupID]configBackup),
-		http:     &http.Client{},
+		config:    config,
+		sessions:  make(map[FirmwareUpdateSessionID]*firmwareSessionHandle),
+		backups:   make(map[ConfigBackupID]configBackup),
+		diagCache: make(map[diagCacheKey]DiagCacheEntry),
+		http:      &http.Client{},
 	}
 	c.advancedMode.Store(config.AdvancedMode)
 	return c
