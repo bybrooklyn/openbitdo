@@ -643,6 +643,227 @@ func TestViewFirmware_NoDoubleBlankLineWhenNoWarnings(t *testing.T) {
 	}
 }
 
+// TestCurrentFwStepIndex pins the fwStage -> breadcrumb-index mapping used by
+// renderFwStageIndicator, including the two exceptional stages (Denied,
+// Error) that intentionally sit outside the linear happy path and must
+// return -1 rather than some arbitrary in-range index.
+func TestCurrentFwStepIndex(t *testing.T) {
+	cases := []struct {
+		stage fwStage
+		want  int
+	}{
+		{fwStageDownloading, 0},
+		{fwStagePreflighting, 1},
+		{fwStageDenied, -1},
+		{fwStageReadyToConfirm, 2},
+		{fwStageConfirming, 3},
+		{fwStageRunning, 3},
+		{fwStageDone, 4},
+		{fwStageError, -1},
+	}
+	for _, c := range cases {
+		if got := currentFwStepIndex(c.stage); got != c.want {
+			t.Errorf("currentFwStepIndex(%v) = %d, want %d", c.stage, got, c.want)
+		}
+	}
+}
+
+// TestRenderFwStageIndicator_HappyPathProgression walks every step of the
+// linear happy path and checks the breadcrumb marks earlier steps IconPass,
+// the current step IconInProgress (highlighted), and later steps as plain
+// faint labels -- the actual visual signal the "disconnected, not done"
+// feedback was about restoring.
+func TestRenderFwStageIndicator_HappyPathProgression(t *testing.T) {
+	steps := []struct {
+		stage      fwStage
+		label      string
+		wantPassed []string
+		wantFaint  []string
+	}{
+		{fwStageDownloading, "Download", nil, []string{"Verify", "Confirm", "Transfer", "Done"}},
+		{fwStagePreflighting, "Verify", []string{"Download"}, []string{"Confirm", "Transfer", "Done"}},
+		{fwStageReadyToConfirm, "Confirm", []string{"Download", "Verify"}, []string{"Transfer", "Done"}},
+		{fwStageConfirming, "Transfer", []string{"Download", "Verify", "Confirm"}, []string{"Done"}},
+		{fwStageRunning, "Transfer", []string{"Download", "Verify", "Confirm"}, []string{"Done"}},
+	}
+	for _, s := range steps {
+		out := ansi.Strip(renderFwStageIndicator(s.stage))
+		if !strings.Contains(out, IconInProgress+" "+s.label) {
+			t.Errorf("stage %v: expected current step %q marked with %q, got: %s", s.stage, s.label, IconInProgress, out)
+		}
+		for _, passed := range s.wantPassed {
+			if !strings.Contains(out, IconPass+" "+passed) {
+				t.Errorf("stage %v: expected earlier step %q marked with %q, got: %s", s.stage, passed, IconPass, out)
+			}
+		}
+		for _, faint := range s.wantFaint {
+			if !strings.Contains(out, faint) {
+				t.Errorf("stage %v: expected upcoming step %q to appear (unmarked), got: %s", s.stage, faint, out)
+			}
+			if strings.Contains(out, IconPass+" "+faint) || strings.Contains(out, IconInProgress+" "+faint) {
+				t.Errorf("stage %v: upcoming step %q should not carry a pass/in-progress icon yet, got: %s", s.stage, faint, out)
+			}
+		}
+	}
+}
+
+// TestRenderFwStageIndicator_DoneShowsAllStepsPassed guards the fix made
+// alongside this test: arriving at fwStageDone previously left the final
+// "Done" step rendered with IconInProgress (a "still working" diamond) on a
+// screen that had, in fact, finished -- exactly the "not done" feeling the
+// user reported. Every step, including Done, must read as IconPass here,
+// regardless of whether the underlying outcome succeeded (that distinction
+// is carried separately by the outcome line in the body, not this
+// breadcrumb).
+func TestRenderFwStageIndicator_DoneShowsAllStepsPassed(t *testing.T) {
+	out := ansi.Strip(renderFwStageIndicator(fwStageDone))
+	for _, label := range fwSteps {
+		if !strings.Contains(out, IconPass+" "+label) {
+			t.Errorf("expected step %q to be marked %q once the flow reaches Done, got: %s", label, IconPass, out)
+		}
+	}
+	if strings.Contains(out, IconInProgress) {
+		t.Errorf("expected no %q (in-progress) icon once the flow reaches Done, got: %s", IconInProgress, out)
+	}
+}
+
+// TestRenderFwStageIndicator_ExceptionalStagesShowNoBreadcrumb checks that
+// Denied and Error -- exits from the happy path, not steps within it --
+// suppress the breadcrumb entirely rather than rendering some misleading
+// partial progression.
+func TestRenderFwStageIndicator_ExceptionalStagesShowNoBreadcrumb(t *testing.T) {
+	for _, stage := range []fwStage{fwStageDenied, fwStageError} {
+		if got := renderFwStageIndicator(stage); got != "" {
+			t.Errorf("stage %v: expected renderFwStageIndicator to return empty (no breadcrumb), got: %q", stage, got)
+		}
+	}
+}
+
+// TestViewFirmware_AllStagesRenderWithoutPanicking drives viewFirmware
+// directly across every fwStage with minimally-populated state, the same
+// direct-construction technique TestViewFirmware_NoDoubleBlankLineWhenNoWarnings
+// uses. This is the "walk every stage, don't just eyeball the code" coverage
+// for stages the interactive teatest flow doesn't reach (Denied, Error, and
+// each of the three Done outcomes), plus a spacing regression guard on each.
+func TestViewFirmware_AllStagesRenderWithoutPanicking(t *testing.T) {
+	base := func(t *testing.T) Model {
+		m, _ := newTestModel(t, filepath.Join(t.TempDir(), "config.toml"))
+		m.fw.device = core.AppDevice{Name: "JP108"}
+		return m
+	}
+
+	cases := []struct {
+		name    string
+		setup   func(m *Model)
+		want    string
+		noBread bool // true if this stage must show no stage indicator at all
+	}{
+		{
+			name:  "Downloading",
+			setup: func(m *Model) { m.fw.stage = fwStageDownloading },
+			want:  "Downloading and verifying firmware",
+		},
+		{
+			name:  "Preflighting",
+			setup: func(m *Model) { m.fw.stage = fwStagePreflighting },
+			want:  "Checking safety gates",
+		},
+		{
+			name: "Denied",
+			setup: func(m *Model) {
+				m.fw.stage = fwStageDenied
+				m.fw.deniedMsg = "brick risk too high"
+			},
+			want:    "Blocked: brick risk too high",
+			noBread: true,
+		},
+		{
+			name: "Error",
+			setup: func(m *Model) {
+				m.fw.stage = fwStageError
+				m.fw.err = fmt.Errorf("transport error: device disconnected")
+			},
+			want:    "Error: transport error: device disconnected",
+			noBread: true,
+		},
+		{
+			name:  "Confirming",
+			setup: func(m *Model) { m.fw.stage = fwStageConfirming },
+			want:  "Starting transfer",
+		},
+		{
+			name: "Running",
+			setup: func(m *Model) {
+				m.fw.stage = fwStageRunning
+				m.fw.progress = 42
+				m.fw.progressMsg = "sending chunk 12/30"
+			},
+			want: "sending chunk 12/30",
+		},
+		{
+			name: "Done-Completed",
+			setup: func(m *Model) {
+				m.fw.stage = fwStageDone
+				m.fw.finalReport = core.FirmwareFinalReport{
+					Status: core.OutcomeCompleted, ObservedVersion: "1.2.3", ChunksSent: 30, ChunksTotal: 30,
+				}
+			},
+			want: "Update completed and verified.",
+		},
+		{
+			name: "Done-Cancelled",
+			setup: func(m *Model) {
+				m.fw.stage = fwStageDone
+				m.fw.finalReport = core.FirmwareFinalReport{Status: core.OutcomeCancelled, ChunksSent: 10, ChunksTotal: 30}
+			},
+			want: "Update cancelled.",
+		},
+		{
+			name: "Done-Unverified",
+			setup: func(m *Model) {
+				m.fw.stage = fwStageDone
+				m.fw.finalReport = core.FirmwareFinalReport{
+					Status: core.OutcomeCompletedUnverified, Message: "no version response", ChunksSent: 30, ChunksTotal: 30,
+				}
+			},
+			want: "could not be verified",
+		},
+		{
+			name: "Done-Failed",
+			setup: func(m *Model) {
+				m.fw.stage = fwStageDone
+				m.fw.finalReport = core.FirmwareFinalReport{
+					Status: core.OutcomeFailed, Message: "checksum mismatch", ChunksSent: 5, ChunksTotal: 30,
+				}
+			},
+			want: "Update failed: checksum mismatch",
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			m := base(t)
+			c.setup(&m)
+
+			view := m.viewFirmware(30)
+			stripped := ansi.Strip(view)
+			if !strings.Contains(stripped, c.want) {
+				t.Fatalf("expected view to contain %q, got:\n%s", c.want, stripped)
+			}
+			if got := countConsecutiveBlankLines(view); got > 1 {
+				t.Fatalf("expected at most one consecutive blank line, found a run of %d, in:\n%s", got, stripped)
+			}
+			hasBreadcrumb := strings.Contains(stripped, "Download") && strings.Contains(stripped, "→")
+			if c.noBread && hasBreadcrumb {
+				t.Fatalf("expected no stage breadcrumb for %s, got:\n%s", c.name, stripped)
+			}
+			if !c.noBread && !hasBreadcrumb {
+				t.Fatalf("expected a stage breadcrumb for %s, got:\n%s", c.name, stripped)
+			}
+		})
+	}
+}
+
 func hex4(v uint16) string {
 	const hexdigits = "0123456789abcdef"
 	return string([]byte{

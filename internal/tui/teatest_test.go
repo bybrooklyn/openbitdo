@@ -67,6 +67,24 @@ func waitForOutput(t *testing.T, tm *teatest.TestModel, substr string) {
 	}, teatest.WithCheckInterval(10*time.Millisecond), teatest.WithDuration(5*time.Second))
 }
 
+// waitForAllOutputs checks several substrings against the *same* buffered
+// frame in one WaitFor call. tm.Output() drains on each call (see the package
+// doc comment above), so multiple substrings that all come from one render
+// must be checked together here rather than via back-to-back waitForOutput
+// calls — the second of which would see nothing new and hang for the full
+// timeout.
+func waitForAllOutputs(t *testing.T, tm *teatest.TestModel, substrs ...string) {
+	t.Helper()
+	teatest.WaitFor(t, tm.Output(), func(bts []byte) bool {
+		for _, s := range substrs {
+			if !bytes.Contains(bts, []byte(s)) {
+				return false
+			}
+		}
+		return true
+	}, teatest.WithCheckInterval(10*time.Millisecond), teatest.WithDuration(5*time.Second))
+}
+
 // TestTeatest_DashboardRendersAndKeyboardNavMoves: the app starts, renders
 // the device dashboard, and keyboard Down actually moves the device-list
 // selection — landing on the candidate-readonly device surfaces its
@@ -148,9 +166,17 @@ func TestTeatest_FirmwareFlowGatesOnRiskAckModal(t *testing.T) {
 	waitForOutput(t, tm, "Unsafe operation acknowledgement")
 	tm.Send(tea.KeyMsg{Type: tea.KeyEnter}) // confirm the modal
 
-	waitForOutput(t, tm, "Press enter to begin")
+	// The stage indicator (added to address "the firmware flow feels
+	// disconnected" feedback) must reach the real running program: "Confirm"
+	// current (IconInProgress), "Download"/"Verify" already done (IconPass).
+	// All three checks land on the same rendered frame, so they're checked
+	// together via waitForAllOutputs (see its doc comment for why).
+	waitForAllOutputs(t, tm, "Press enter to begin", IconPass+" Download", IconPass+" Verify", IconInProgress+" Confirm")
+
 	tm.Send(tea.KeyMsg{Type: tea.KeyEnter}) // begin the transfer
-	waitForOutput(t, tm, "Update completed and verified.")
+	// Likewise: the completion text and the final stage now reading as
+	// IconPass (not still IconInProgress) both come from the same frame.
+	waitForAllOutputs(t, tm, "Update completed and verified.", IconPass+" Done")
 }
 
 // TestTeatest_SettingsTogglePersistsAcrossReload: toggling a setting writes
