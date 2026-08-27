@@ -22,10 +22,38 @@ func cmdLoadDevices(ctx context.Context, c *core.OpenBitdoCore) tea.Cmd {
 	}
 }
 
-func cmdRunDiagnostics(ctx context.Context, c *core.OpenBitdoCore, target protocol.VidPid) tea.Cmd {
+// cmdDiagProbeCached returns device's cached diagnostic result if this
+// session already has one, or runs and caches a fresh probe if not — used
+// whenever the user navigates to Diagnostics for a device, so revisiting one
+// already probed this session shows instantly instead of re-running.
+func cmdDiagProbeCached(ctx context.Context, c *core.OpenBitdoCore, device core.AppDevice) tea.Cmd {
 	return func() tea.Msg {
-		result, err := c.DiagProbe(ctx, target)
-		return diagResultMsg{result: result, err: err}
+		entry, err := c.DiagProbeCached(ctx, device)
+		return diagResultMsg{result: entry.Result, ranAt: entry.RanAt, err: err}
+	}
+}
+
+// cmdDiagProbeFresh always runs a new probe and replaces the cache entry —
+// used for the Diagnostics screen's explicit "r" rerun, so caching never
+// blocks getting a genuinely fresh result on demand.
+func cmdDiagProbeFresh(ctx context.Context, c *core.OpenBitdoCore, device core.AppDevice) tea.Cmd {
+	return func() tea.Msg {
+		entry, err := c.DiagProbeFresh(ctx, device)
+		return diagResultMsg{result: entry.Result, ranAt: entry.RanAt, err: err}
+	}
+}
+
+// cmdAutoDiagnose runs in the background (never user-triggered directly)
+// whenever a device is loaded or freshly hotplug-connected and hasn't been
+// diagnosed yet this session — DiagProbe/its wrappers only issue read-only
+// SafeRead HID commands, so this is safe to run without confirmation, unlike
+// anything write/firmware-tier. Reports via autoDiagResultMsg rather than
+// diagResultMsg so its handler can tell it apart from a user-triggered probe
+// and only update the live Diagnostics view if that's actually what's shown.
+func cmdAutoDiagnose(ctx context.Context, c *core.OpenBitdoCore, device core.AppDevice) tea.Cmd {
+	return func() tea.Msg {
+		entry, err := c.DiagProbeCached(ctx, device)
+		return autoDiagResultMsg{device: device, result: entry.Result, ranAt: entry.RanAt, err: err}
 	}
 }
 

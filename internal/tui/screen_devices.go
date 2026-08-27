@@ -232,8 +232,17 @@ func (m Model) triggerDevicesEnter() (tea.Model, tea.Cmd) {
 		m.screen = screenDiagnostics
 		m.diag = newDiagnosticsState()
 		m.diag.device = device
+		// A cache hit renders instantly with no loading flash — a plain
+		// mutex-protected map read, not I/O, safe to do synchronously here
+		// rather than round-tripping through a tea.Cmd just to look up what
+		// core.HasDiagnosed would immediately confirm is already there.
+		if entry, ok := m.core.CachedDiag(device); ok {
+			m.diag.result = entry.Result
+			m.diag.ranAt = entry.RanAt
+			return m, nil
+		}
 		m.diag.loading = true
-		return m, cmdRunDiagnostics(m.ctx, m.core, device.VidPid)
+		return m, cmdDiagProbeCached(m.ctx, m.core, device)
 
 	case actionMapping:
 		m.screen = screenMapping

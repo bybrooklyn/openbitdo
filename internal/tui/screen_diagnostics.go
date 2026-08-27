@@ -3,6 +3,7 @@ package tui
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/bybrooklyn/openbitdo/internal/core"
 	"github.com/bybrooklyn/openbitdo/internal/protocol"
@@ -20,6 +21,7 @@ type diagnosticsState struct {
 	device             core.AppDevice
 	loading            bool
 	result             protocol.DiagProbeResult
+	ranAt              time.Time // when result was produced; zero if not yet set
 	err                error
 	cursor             int
 	filter             diagFilter
@@ -47,6 +49,7 @@ func (m Model) updateDiagnostics(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.diag.loading = false
 		m.diag.err = msg.err
 		m.diag.result = msg.result
+		m.diag.ranAt = msg.ranAt
 		status := "passed"
 		if msg.err != nil {
 			status = "error"
@@ -95,7 +98,7 @@ func (m Model) updateDiagnostics(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.diag.cursor = 0
 		case "r":
 			m.diag.loading = true
-			return m, cmdRunDiagnostics(m.ctx, m.core, m.diag.device.VidPid)
+			return m, cmdDiagProbeFresh(m.ctx, m.core, m.diag.device)
 		}
 	}
 	return m, nil
@@ -128,6 +131,10 @@ func (m Model) viewDiagnostics(height int) string {
 	if m.diag.device.SupportTier != protocol.TierFull {
 		b.WriteString(candidateTierExplanation(m.diag.device))
 		b.WriteString("\n" + styleFaint.Render("Press s to generate a support-request report you can paste into a new GitHub issue.") + "\n\n")
+	}
+
+	if !m.diag.ranAt.IsZero() {
+		b.WriteString(styleFaint.Render(fmt.Sprintf("Last run: %s  (r to rerun)", formatAge(time.Since(m.diag.ranAt)))) + "\n\n")
 	}
 
 	passed, total := 0, len(m.diag.result.CommandChecks)
@@ -175,6 +182,21 @@ func (m Model) viewDiagnostics(height int) string {
 	}
 
 	return stylePanel.Width(m.width - 2).Height(height - 2).Render(b.String())
+}
+
+// formatAge renders a cache-staleness duration as a short, human-readable
+// string for the "Last run: Xs ago" indicator — mirrors DiagCacheEntry.Age.
+func formatAge(d time.Duration) string {
+	switch {
+	case d < time.Second:
+		return "just now"
+	case d < time.Minute:
+		return fmt.Sprintf("%ds ago", int(d.Seconds()))
+	case d < time.Hour:
+		return fmt.Sprintf("%dm ago", int(d.Minutes()))
+	default:
+		return fmt.Sprintf("%dh ago", int(d.Hours()))
+	}
 }
 
 func diagCheckLine(c protocol.DiagCommandStatus) string {

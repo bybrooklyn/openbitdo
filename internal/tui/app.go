@@ -124,6 +124,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case navEventMsg:
 		cmd := cmdListenNav(m.navEvents)
+		if msg.event.Kind == input.EventDeviceConnected || msg.event.Kind == input.EventDeviceDisconnected {
+			return m.handleHotplugEvent(msg.event, cmd)
+		}
 		if m.modal.active {
 			navMsg := navToKeyMsg(msg.event)
 			if navMsg != nil {
@@ -189,6 +192,22 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case restoreBackupResultMsg:
 		m.recoveryRestoreDone = msg.err == nil
 		m.recoveryRestoreErr = msg.err
+		return m, nil
+
+	case autoDiagResultMsg:
+		// Only take over the live view if Diagnostics is actually still
+		// waiting on a probe for this exact device — otherwise this is
+		// either a different device's background result (silently cached
+		// for later) or a duplicate of a result the user's own "r" rerun /
+		// cache hit already displayed (m.diag.loading is already false by
+		// then), which must not clobber it.
+		if m.screen == screenDiagnostics && m.diag.loading &&
+			m.diag.device.VidPid == msg.device.VidPid && m.diag.device.Serial == msg.device.Serial {
+			m.diag.loading = false
+			m.diag.err = msg.err
+			m.diag.result = msg.result
+			m.diag.ranAt = msg.ranAt
+		}
 		return m, nil
 	}
 
@@ -315,18 +334,17 @@ func hint(key, label string) string {
 // this scopes down to just the connected/not-connected label-hiding below,
 // per gamepadConnected. Revisit if a future dossier documents this.
 
-// gamepadConnected reports whether a gamepad's nav stream was actually
-// wired up at startup, from internal/input.Start's per-device Notes (the
-// same data already surfaced verbatim on the Settings screen — see
-// screen_settings.go's "Gamepad Navigation" section). This is a
-// startup-time snapshot, not a live connect/disconnect signal:
-// internal/input.NavEvent has no Connected/Disconnected kind, only
-// DPadChanged/ButtonDown/ButtonUp, so a controller plugged in after launch
-// won't flip this until restart. That's an existing limitation of what
-// internal/input tracks, not something screenHelp/viewFooter can see past —
-// it's still the right, honest signal for "should the footer show
-// controller-specific key hints," since a keyboard-only user should never
-// see "A"/"B" glyphs that mean nothing to them.
+// gamepadConnected reports whether a gamepad's nav stream is currently
+// wired up, from internal/input.Start's per-device Notes (the same data
+// already surfaced verbatim on the Settings screen — see
+// screen_settings.go's "Gamepad Navigation" section). Live, not just a
+// startup snapshot: handleHotplugEvent keeps m.navNotes current via
+// replacePIDNote as EventDeviceConnected/EventDeviceDisconnected events
+// arrive, so a controller plugged in (or unplugged) after launch flips this
+// without needing a restart. It's still the right, honest signal for
+// "should the footer show controller-specific key hints," since a
+// keyboard-only user should never see "A"/"B" glyphs that mean nothing to
+// them.
 func (m Model) gamepadConnected() bool {
 	for _, note := range m.navNotes {
 		if strings.Contains(note, "gamepad nav active") {
@@ -386,7 +404,59 @@ func (m Model) handleDevicesLoaded(msg devicesLoadedMsg) (tea.Model, tea.Cmd) {
 	if m.devices.cursor >= len(m.devices.filtered) {
 		m.devices.cursor = 0
 	}
-	return m, nil
+	// Every load (startup, manual "r" rescan, or a hotplug-triggered reload
+	// from handleHotplugEvent) auto-diagnoses any device this session hasn't
+	// probed yet — core.HasDiagnosed makes this naturally idempotent, so an
+	// already-cached device is skipped rather than re-probed on every
+	// reload. This is what makes a freshly-connected controller have a
+	// "Last run: Xs ago" diagnostic result already waiting by the time the
+	// user navigates to it.
+	cmds := make([]tea.Cmd, 0, len(msg.devices)+1)
+	for _, d := range msg.devices {
+		if !m.core.HasDiagnosed(d) {
+			cmds = append(cmds, cmdAutoDiagnose(m.ctx, m.core, d))
+		}
+	}
+	return m, tea.Batch(cmds...)
+}
+
+// handleHotplugEvent reacts to a live device connect/disconnect
+// (input.EventDeviceConnected/EventDeviceDisconnected, emitted by
+// internal/input's background hotplug poller). It refreshes the device list
+// the same way a manual "r" rescan does — handleDevicesLoaded's own
+// auto-diagnose sweep then picks up any newly-connected device — and, if
+// the device that just disconnected is the one currently shown on
+// Diagnostics, surfaces that using the same KindDeviceDisconnected shape
+// screen_diagnostics.go already renders for an operation-level disconnect,
+// rather than inventing a second disconnect story. listenCmd is
+// cmdListenNav's already-issued re-arm, batched in so the nav channel keeps
+// being read.
+func (m Model) handleHotplugEvent(e input.NavEvent, listenCmd tea.Cmd) (Model, tea.Cmd) {
+	m.navNotes = replacePIDNote(m.navNotes, e.SourcePID, e.Note)
+	m.statusLine = e.Note
+
+	if e.Kind == input.EventDeviceDisconnected && m.screen == screenDiagnostics &&
+		m.diag.device.VidPid.PID == e.SourcePID && m.diag.device.Serial == e.Serial {
+		m.diag.loading = false
+		m.diag.err = &core.Error{Kind: core.KindDeviceDisconnected, Message: fmt.Sprintf("%s is no longer connected", m.diag.device.VidPid)}
+	}
+
+	return m, tea.Batch(listenCmd, cmdLoadDevices(m.ctx, m.core))
+}
+
+// replacePIDNote drops any existing note for pid and appends newNote,
+// keeping gamepadConnected's substring scan and Settings' "Gamepad
+// Navigation" list live-accurate across hotplug connect/disconnect events
+// instead of only reflecting internal/input.Start's startup-time snapshot.
+func replacePIDNote(notes []string, pid uint16, newNote string) []string {
+	prefix := fmt.Sprintf("pid=%#04x:", pid)
+	out := make([]string, 0, len(notes)+1)
+	for _, n := range notes {
+		if !strings.HasPrefix(n, prefix) {
+			out = append(out, n)
+		}
+	}
+	return append(out, newNote)
 }
 
 // navToKeyMsg translates a gamepad nav event into the same tea.KeyMsg every

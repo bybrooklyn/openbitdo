@@ -1,6 +1,8 @@
 package tui
 
 import (
+	"time"
+
 	"github.com/bybrooklyn/openbitdo/internal/core"
 	"github.com/bybrooklyn/openbitdo/internal/input"
 	"github.com/bybrooklyn/openbitdo/internal/protocol"
@@ -13,6 +15,19 @@ type devicesLoadedMsg struct {
 
 type diagResultMsg struct {
 	result protocol.DiagProbeResult
+	ranAt  time.Time
+	err    error
+}
+
+// autoDiagResultMsg is the outcome of a diagnostic probe run automatically
+// in the background (see cmdAutoDiagnose) when a device is first loaded or
+// hotplug-connected, rather than one the user explicitly triggered. Carries
+// device so its handler can tell whether the result belongs to whatever the
+// Diagnostics screen is currently showing.
+type autoDiagResultMsg struct {
+	device core.AppDevice
+	result protocol.DiagProbeResult
+	ranAt  time.Time
 	err    error
 }
 
