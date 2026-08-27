@@ -135,7 +135,7 @@ func (c *OpenBitdoCore) U2ReadCoreProfile(ctx context.Context, vidPid protocol.V
 	if c.config.MockMode {
 		return U2CoreProfile{
 			Slot: slot, Mode: 0, FirmwareVersion: "mock-1.0.0", L2Analog: 0.5, R2Analog: 0.5,
-			SupportsTriggerWrite: true, Mappings: defaultU2Mappings(),
+			SupportsTriggerWrite: true, Mappings: defaultU2Mappings(), PaddleMappings: defaultU2PaddleMappings(),
 		}, nil
 	}
 
@@ -163,15 +163,9 @@ func (c *OpenBitdoCore) U2ReadCoreProfile(ctx context.Context, vidPid protocol.V
 	if err != nil {
 		return U2CoreProfile{}, errProtocol(err)
 	}
-	wireMap, err := session.U2ReadButtonMap(ctx, activeSlot.WireValue())
+	mappings, paddleMappings, mappingsUnavailable, err := u2ReadButtonMapOrUnavailable(ctx, session, activeSlot)
 	if err != nil {
 		return U2CoreProfile{}, errProtocol(err)
-	}
-	mappings := make([]U2ButtonMapping, 0, len(wireMap))
-	for _, entry := range wireMap {
-		if button, ok := U2ButtonFromWireIndex(entry.Index); ok {
-			mappings = append(mappings, U2ButtonMapping{Button: button, TargetHIDUsage: entry.Usage})
-		}
 	}
 
 	var l2, r2 float32
@@ -183,8 +177,53 @@ func (c *OpenBitdoCore) U2ReadCoreProfile(ctx context.Context, vidPid protocol.V
 	}
 	return U2CoreProfile{
 		Slot: activeSlot, Mode: mode.Mode, FirmwareVersion: firmwareVersion, L2Analog: l2, R2Analog: r2,
-		SupportsTriggerWrite: p.SupportTier == protocol.TierFull, Mappings: mappings,
+		SupportsTriggerWrite: p.SupportTier == protocol.TierFull,
+		Mappings:             mappings, PaddleMappings: paddleMappings, MappingsUnavailable: mappingsUnavailable,
 	}, nil
+}
+
+// u2ReadButtonMapOrUnavailable reads and splits the button-map for slot,
+// tolerating the specific "chunking not yet confirmed" block (see
+// internal/protocol's U2ReadButtonMap) as a non-fatal, expected condition
+// for real hardware today: it returns empty mappings plus a human-readable
+// reason instead of failing the whole profile read, so mode/firmware/analog
+// data (which don't depend on the button map) still come through. Any
+// *other* error is treated as fatal, same as before this existed.
+func u2ReadButtonMapOrUnavailable(ctx context.Context, session *protocol.DeviceSession, slot U2SlotID) ([]U2ButtonMapping, []U2PaddleMapping, string, error) {
+	// U2ReadButtonMap always errors *today* because it's a deliberate hard
+	// block (see its doc comment) -- the err==nil branch below is correct,
+	// general-purpose handling for the day that block lifts, not dead code;
+	// staticcheck can't see that's temporary, hence the nolint.
+	wireMap, err := session.U2ReadButtonMap(ctx, slot.WireValue()) //nolint:staticcheck // SA4023
+	if err == nil {                                                //nolint:staticcheck // SA4023
+		mappings, paddleMappings := splitU2WireMap(wireMap)
+		return mappings, paddleMappings, "", nil
+	}
+	if pe, ok := err.(*protocol.Error); ok && pe.Code() == protocol.CodeU2ButtonMapUnavailable {
+		return nil, nil, pe.Error(), nil
+	}
+	return nil, nil, "", err
+}
+
+// splitU2WireMap converts the wire-level 22-slot table into the core
+// package's named button/paddle mapping types. Indices 0-16 resolve to a
+// named U2ButtonID (index 17, a confirmed-but-unidentified 18th core slot —
+// see U2ButtonID's doc comment — is preserved on the wire but has no named
+// Go identifier, so it's silently dropped here); indices 18-21 resolve to
+// U2PaddleID. Currently exercised only by tests, since U2ReadButtonMap is
+// hard-blocked against real hardware — kept correct and tested so it's
+// ready the moment that block lifts.
+func splitU2WireMap(wire []protocol.IndexedFunction) ([]U2ButtonMapping, []U2PaddleMapping) {
+	mappings := make([]U2ButtonMapping, 0, len(wire))
+	paddleMappings := make([]U2PaddleMapping, 0, len(wire))
+	for _, entry := range wire {
+		if button, ok := U2ButtonFromWireIndex(entry.Index); ok {
+			mappings = append(mappings, U2ButtonMapping{Button: button, Target: U2Function(entry.Function)})
+		} else if entry.Index >= 18 && entry.Index <= 21 {
+			paddleMappings = append(paddleMappings, U2PaddleMapping{Paddle: U2PaddleID(entry.Index - 18), Target: U2Function(entry.Function)})
+		}
+	}
+	return mappings, paddleMappings
 }
 
 // U2PreviewSlot reads exactly the requested slot's button map and config,
@@ -205,7 +244,7 @@ func (c *OpenBitdoCore) U2PreviewSlot(ctx context.Context, vidPid protocol.VidPi
 	if c.config.MockMode {
 		return U2CoreProfile{
 			Slot: slot, Mode: 0, FirmwareVersion: "mock-1.0.0", L2Analog: 0.5, R2Analog: 0.5,
-			SupportsTriggerWrite: true, Mappings: defaultU2Mappings(),
+			SupportsTriggerWrite: true, Mappings: defaultU2Mappings(), PaddleMappings: defaultU2PaddleMappings(),
 		}, nil
 	}
 
@@ -219,15 +258,9 @@ func (c *OpenBitdoCore) U2PreviewSlot(ctx context.Context, vidPid protocol.VidPi
 	if err != nil {
 		return U2CoreProfile{}, errProtocol(err)
 	}
-	wireMap, err := session.U2ReadButtonMap(ctx, slot.WireValue())
+	mappings, paddleMappings, mappingsUnavailable, err := u2ReadButtonMapOrUnavailable(ctx, session, slot)
 	if err != nil {
 		return U2CoreProfile{}, errProtocol(err)
-	}
-	mappings := make([]U2ButtonMapping, 0, len(wireMap))
-	for _, entry := range wireMap {
-		if button, ok := U2ButtonFromWireIndex(entry.Index); ok {
-			mappings = append(mappings, U2ButtonMapping{Button: button, TargetHIDUsage: entry.Usage})
-		}
 	}
 
 	var l2, r2 float32
@@ -239,7 +272,8 @@ func (c *OpenBitdoCore) U2PreviewSlot(ctx context.Context, vidPid protocol.VidPi
 	}
 	return U2CoreProfile{
 		Slot: slot, FirmwareVersion: "unknown", L2Analog: l2, R2Analog: r2,
-		SupportsTriggerWrite: p.SupportTier == protocol.TierFull, Mappings: mappings,
+		SupportsTriggerWrite: p.SupportTier == protocol.TierFull,
+		Mappings:             mappings, PaddleMappings: paddleMappings, MappingsUnavailable: mappingsUnavailable,
 	}, nil
 }
 
@@ -286,7 +320,7 @@ func (c *OpenBitdoCore) U2ApplyCoreProfileWithRecovery(ctx context.Context, vidP
 				kind: backupU2,
 				u2Profile: U2CoreProfile{
 					Slot: slot, FirmwareVersion: "mock-1.0.0", L2Analog: 0.5, R2Analog: 0.5,
-					SupportsTriggerWrite: true, Mappings: defaultU2Mappings(),
+					SupportsTriggerWrite: true, Mappings: defaultU2Mappings(), PaddleMappings: defaultU2PaddleMappings(),
 				},
 				u2ConfigBlob: make([]byte, 32),
 			})
@@ -332,10 +366,25 @@ func u2ApplyWrite(ctx context.Context, session *protocol.DeviceSession, slot U2S
 	if _, err := session.U2SetMode(ctx, mode); err != nil {
 		return err
 	}
-	wireMap := make([]protocol.IndexedUsage, 0, len(mapChanges))
+	wireMap := make([]protocol.IndexedFunction, 0, len(mapChanges))
 	for _, entry := range mapChanges {
-		wireMap = append(wireMap, protocol.IndexedUsage{Index: entry.Button.WireIndex(), Usage: entry.TargetHIDUsage})
+		wireMap = append(wireMap, protocol.IndexedFunction{Index: entry.Button.WireIndex(), Function: uint32(entry.Target)})
 	}
+	// U2WriteButtonMap is currently hard-blocked against real hardware (see
+	// its doc comment in internal/protocol) and always returns an error
+	// here regardless of wireMap's contents. Deliberately NOT swallowed:
+	// U2SetMode above may have already taken effect on the real device by
+	// this point, and letting this error propagate is what makes
+	// U2ApplyCoreProfileWithRecovery's existing backup/rollback path put
+	// the device back the way it was, with a clear "write failed" message
+	// carrying this error's explanation -- rather than silently reporting
+	// success while dropping the button-map/paddle changes the caller
+	// actually asked for. The practical effect: applying *anything* via the
+	// Ultimate2 Mapping Editor against real hardware is blocked (safely,
+	// with rollback) until chunking is confirmed -- see
+	// docs/clean-room-evidence/dossiers/6012/u2_core.toml. Mock mode is
+	// unaffected (never reaches this function).
+	//nolint:staticcheck // SA4023: always true today only because the block above is temporary.
 	if err := session.U2WriteButtonMap(ctx, slot.WireValue(), wireMap); err != nil {
 		return err
 	}
@@ -398,12 +447,25 @@ func (c *OpenBitdoCore) RestoreBackup(ctx context.Context, backupID ConfigBackup
 		if _, err := session.U2SetMode(ctx, profile.Mode); err != nil {
 			return errProtocol(err)
 		}
-		wireMap := make([]protocol.IndexedUsage, 0, len(profile.Mappings))
+		wireMap := make([]protocol.IndexedFunction, 0, len(profile.Mappings))
 		for _, entry := range profile.Mappings {
-			wireMap = append(wireMap, protocol.IndexedUsage{Index: entry.Button.WireIndex(), Usage: entry.TargetHIDUsage})
+			wireMap = append(wireMap, protocol.IndexedFunction{Index: entry.Button.WireIndex(), Function: uint32(entry.Target)})
 		}
+		// U2WriteButtonMap is hard-blocked against real hardware (see its
+		// doc comment in internal/protocol). Unlike u2ApplyWrite's use of
+		// this same call, that block is deliberately swallowed here: the
+		// only way a U2 backup reaches this restore path is via
+		// u2ApplyWrite's own button-map write having already failed with
+		// this exact block *before* the device's button map was ever
+		// touched, so there is nothing to actually restore on that front --
+		// treating the block as a genuine rollback failure here would wrongly
+		// report "device state is uncertain" for a device that was never
+		// touched. Any *other* error still fails the restore normally.
+		//nolint:staticcheck // SA4023: always true today only because the block above is temporary.
 		if err := session.U2WriteButtonMap(ctx, profile.Slot.WireValue(), wireMap); err != nil {
-			return errProtocol(err)
+			if pe, ok := err.(*protocol.Error); !ok || pe.Code() != protocol.CodeU2ButtonMapUnavailable {
+				return errProtocol(err)
+			}
 		}
 		if err := session.U2WriteConfigSlot(ctx, profile.Slot.WireValue(), backup.payload.u2ConfigBlob); err != nil {
 			return errProtocol(err)

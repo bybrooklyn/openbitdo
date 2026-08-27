@@ -5,14 +5,15 @@ package core
 // Sanitized dirty-room evidence (static analysis of the official vendor
 // software, cross-validated across two independent builds) describes these
 // as occupying indices 18-21 of a 22-slot button-map array, each holding a
-// uint32 "function" bitmask rather than the uint16 HID-usage-code encoding
-// this codebase's existing U2ReadButtonMap/U2WriteButtonMap already use for
-// the 17 core buttons (see U2ButtonID). That's a real, unresolved mismatch
-// with the wire format already implemented — see doc.go and the dossier
-// update in docs/clean-room-evidence/dossiers/6012/u2_core.toml for why
-// this type is deliberately NOT yet wired into any protocol read/write
-// call. It exists so the function catalog and the paddle-3/4 asymmetry
-// (below) have a correct, tested home once that reconciliation happens.
+// uint32 "function" bitmask — confirmed correct by a dedicated
+// reconciliation pass, see docs/clean-room-evidence/dossiers/6012/u2_core.toml,
+// RESOLVED_encoding_mismatch. This type and U2Function are wired into
+// U2CoreProfile/U2ButtonMapping/U2PaddleMapping and the mock/UI paths.
+// Real (non-mock) protocol read/write remains hard-blocked, not because of
+// this type, but because the 88-byte payload needs multi-report chunked
+// transfer whose exact paging scheme isn't yet confirmed by any evidence —
+// see OPEN_QUESTION_chunking_mechanism in the same dossier and
+// internal/protocol's U2ReadButtonMap/U2WriteButtonMap.
 type U2PaddleID int
 
 const (

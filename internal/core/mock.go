@@ -222,10 +222,33 @@ func defaultJP108Mappings() []DedicatedButtonMapping {
 	return out
 }
 
+// u2DefaultButtonFunction is each core button's "does what it says"
+// default target — e.g. the A button defaults to acting as A. Mirrors the
+// dirty-room evidence's description of the array's default initializer
+// (each core slot pre-populated with its own natural function).
+var u2DefaultButtonFunction = map[U2ButtonID]U2Function{
+	U2A: U2FuncA, U2B: U2FuncB, U2X: U2FuncX, U2Y: U2FuncY,
+	U2L1: U2FuncL1, U2R1: U2FuncR1, U2L2: U2FuncL2, U2R2: U2FuncR2,
+	U2L3: U2FuncL3, U2R3: U2FuncR3, U2Select: U2FuncSelect, U2Start: U2FuncStart,
+	U2Home: U2FuncHome, U2DPadUp: U2FuncDPadUp, U2DPadDown: U2FuncDPadDown,
+	U2DPadLeft: U2FuncDPadLeft, U2DPadRight: U2FuncDPadRight,
+}
+
 func defaultU2Mappings() []U2ButtonMapping {
 	out := make([]U2ButtonMapping, 0, len(AllU2Buttons))
-	for idx, button := range AllU2Buttons {
-		out = append(out, U2ButtonMapping{Button: button, TargetHIDUsage: 0x0100 + uint16(idx)})
+	for _, button := range AllU2Buttons {
+		out = append(out, U2ButtonMapping{Button: button, Target: u2DefaultButtonFunction[button]})
+	}
+	return out
+}
+
+// defaultU2PaddleMappings returns the 4 back paddles unbound (U2FuncNone),
+// matching the dirty-room evidence's description of the array's default
+// initializer leaving paddle slots 18-21 with no function assigned.
+func defaultU2PaddleMappings() []U2PaddleMapping {
+	out := make([]U2PaddleMapping, 0, len(AllU2Paddles))
+	for _, paddle := range AllU2Paddles {
+		out = append(out, U2PaddleMapping{Paddle: paddle, Target: U2FuncNone})
 	}
 	return out
 }

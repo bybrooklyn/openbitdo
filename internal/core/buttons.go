@@ -48,7 +48,19 @@ func DedicatedButtonFromWireIndex(value byte) (DedicatedButtonID, bool) {
 	return 0, false
 }
 
-// U2ButtonID is one of the 17 Ultimate2 core buttons (incl. d-pad).
+// U2ButtonID is one of the 17 named Ultimate2 core buttons (incl. d-pad).
+//
+// The confirmed 22-slot wire array (see U2PaddleID and
+// docs/clean-room-evidence/dossiers/6012/u2_core.toml,
+// RESOLVED_encoding_mismatch) has 18 core button/D-pad slots at indices
+// 0-17, not 17 — this type names only 17 of them. The dirty-room evidence
+// establishes that an 18th core slot exists but does not identify which
+// physical input it corresponds to; rather than guess, this codebase
+// leaves it unnamed. Since real button-map reads/writes are currently
+// hard-blocked entirely (see internal/protocol's U2ReadButtonMap/
+// U2WriteButtonMap), this has no behavioral effect today — noted here so a
+// future implementer doesn't mistake "17 named buttons" for "18 confirmed
+// slots, all identified."
 type U2ButtonID int
 
 const (

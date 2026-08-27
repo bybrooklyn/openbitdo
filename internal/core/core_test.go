@@ -217,8 +217,11 @@ func TestU2MockProfileRoundtripSupportsBackupAndRestore(t *testing.T) {
 	if len(profile.Mappings) == 0 {
 		t.Fatal("expected non-empty mappings")
 	}
+	if len(profile.PaddleMappings) != len(AllU2Paddles) {
+		t.Fatalf("expected %d paddle mappings, got %d", len(AllU2Paddles), len(profile.PaddleMappings))
+	}
 
-	backupID, hasBackup, err := c.U2ApplyCoreProfile(ctx, target, U2Slot1, 1, []U2ButtonMapping{{Button: U2A, TargetHIDUsage: 0x0110}}, 0.5, 0.5, true)
+	backupID, hasBackup, err := c.U2ApplyCoreProfile(ctx, target, U2Slot1, 1, []U2ButtonMapping{{Button: U2A, Target: U2FuncStart}}, 0.5, 0.5, true)
 	if err != nil {
 		t.Fatalf("apply profile: %v", err)
 	}

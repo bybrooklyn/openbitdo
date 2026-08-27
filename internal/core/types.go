@@ -71,10 +71,21 @@ type DedicatedButtonMapping struct {
 	TargetHIDUsage uint16
 }
 
-// U2ButtonMapping is one Ultimate2 button -> HID-usage mapping.
+// U2ButtonMapping is one Ultimate2 button -> function mapping. Target is a
+// single-bit function bitmask from the shared U2Function catalog (confirmed
+// wire encoding — see docs/clean-room-evidence/dossiers/6012/u2_core.toml),
+// not a raw HID usage code.
 type U2ButtonMapping struct {
-	Button         U2ButtonID
-	TargetHIDUsage uint16
+	Button U2ButtonID
+	Target U2Function
+}
+
+// U2PaddleMapping is one Ultimate2 back-paddle -> function mapping, the
+// paddle-side counterpart to U2ButtonMapping. See U2PaddleID/U2Function in
+// paddles.go.
+type U2PaddleMapping struct {
+	Paddle U2PaddleID
+	Target U2Function
 }
 
 // U2CoreProfile is the full readable/writable Ultimate2 core state.
@@ -86,6 +97,14 @@ type U2CoreProfile struct {
 	R2Analog             float32
 	SupportsTriggerWrite bool
 	Mappings             []U2ButtonMapping
+	PaddleMappings       []U2PaddleMapping
+	// MappingsUnavailable is non-empty when Mappings/PaddleMappings could
+	// not be read from real hardware — currently always the case for a real
+	// (non-mock) device, since the button-map wire chunking scheme isn't
+	// yet confirmed (see internal/protocol's U2ReadButtonMap). Empty for
+	// mock-mode profiles, where Mappings/PaddleMappings are always
+	// populated with synthetic defaults.
+	MappingsUnavailable string
 }
 
 // GuidedButtonTestResult is the outcome of a guided button-test walkthrough.

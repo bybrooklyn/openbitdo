@@ -746,10 +746,19 @@ func minimalOkResponse() []byte {
 func TestU2PreviewSlotReadsRequestedSlotNotActiveSlot(t *testing.T) {
 	// PID 0x6012 is an Ultimate2 full-tier device (SupportsU2SlotConfig +
 	// SupportsU2ButtonMap) — see protocol.DeviceProfileFor's registry.
+	//
+	// U2ReadButtonMap is hard-blocked against real hardware (see its doc
+	// comment in internal/protocol -- the 22x uint32 wire shape needs
+	// multi-report chunking whose paging scheme isn't yet confirmed), so
+	// this test only pushes one response (U2ReadConfigSlot) -- the
+	// button-map "read" never reaches the transport at all. U2PreviewSlot
+	// tolerates that block gracefully (MappingsUnavailable set, rather than
+	// the whole preview failing), which is the behavior this test now
+	// covers alongside its original point: the requested slot, not the
+	// active one, is what gets targeted.
 	target := protocol.VidPid{VID: 0x2dc8, PID: 0x6012}
 	transport := &protocol.MockTransport{}
 	transport.PushReadData(minimalOkResponse()) // U2ReadConfigSlot response
-	transport.PushReadData(minimalOkResponse()) // U2ReadButtonMap response
 
 	c := New(Config{})
 	c.transportOverride = transport
@@ -761,14 +770,18 @@ func TestU2PreviewSlotReadsRequestedSlotNotActiveSlot(t *testing.T) {
 	if profile.Slot != U2Slot3 {
 		t.Fatalf("expected profile.Slot=%v, got %v", U2Slot3, profile.Slot)
 	}
+	if profile.MappingsUnavailable == "" {
+		t.Fatal("expected MappingsUnavailable to be set given U2ReadButtonMap is hard-blocked")
+	}
+	if len(profile.Mappings) != 0 || len(profile.PaddleMappings) != 0 {
+		t.Fatalf("expected no mappings when blocked, got %d buttons / %d paddles", len(profile.Mappings), len(profile.PaddleMappings))
+	}
 
 	writes := transport.Writes()
-	if len(writes) != 2 {
-		t.Fatalf("expected exactly 2 writes (ReadConfigSlot, ReadButtonMap) — critically, no U2GetCurrentSlot call — got %d: %v", len(writes), writes)
+	if len(writes) != 1 {
+		t.Fatalf("expected exactly 1 write (ReadConfigSlot only -- ReadButtonMap performs zero I/O when blocked, and critically no U2GetCurrentSlot call) — got %d: %v", len(writes), writes)
 	}
-	for i, w := range writes {
-		if len(w) < 5 || w[4] != U2Slot3.WireValue() {
-			t.Fatalf("write %d: expected slot byte (index 4) = %#02x, got %v", i, U2Slot3.WireValue(), w)
-		}
+	if len(writes[0]) < 5 || writes[0][4] != U2Slot3.WireValue() {
+		t.Fatalf("expected slot byte (index 4) = %#02x, got %v", U2Slot3.WireValue(), writes[0])
 	}
 }
