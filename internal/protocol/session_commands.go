@@ -164,49 +164,38 @@ func (s *DeviceSession) U2WriteConfigSlot(ctx context.Context, slot byte, config
 	return err
 }
 
-// IndexedUsage is one (button index, HID usage) mapping entry.
+// IndexedUsage is one (button index, HID usage) mapping entry — used by
+// JP108's dedicated mapping, which really does use raw HID usage codes.
 type IndexedUsage struct {
 	Index byte
 	Usage uint16
 }
 
-// U2ReadButtonMap reads the Ultimate2 button map for a slot.
-func (s *DeviceSession) U2ReadButtonMap(ctx context.Context, slot byte) ([]IndexedUsage, error) {
-	row, err := s.ensureCommandAllowed(CommandU2ReadButtonMap)
-	if err != nil {
-		return nil, err
-	}
-	payload := append([]byte(nil), row.Request...)
-	if len(payload) > 4 {
-		payload[4] = slot
-	}
-	resp, err := s.sendRow(ctx, row, payload)
-	if err != nil {
-		return nil, err
-	}
-	return parseIndexedU16Table(resp.Raw, 17), nil
+// IndexedFunction is one (slot index, function bitmask) entry in the
+// Ultimate2 button-map wire structure — parallel to IndexedUsage but for
+// U2's confirmed uint32 single-bit-function-catalog encoding, not a raw HID
+// usage code. See docs/clean-room-evidence/dossiers/6012/u2_core.toml.
+type IndexedFunction struct {
+	Index    byte
+	Function uint32
 }
 
-// U2WriteButtonMap writes a set of Ultimate2 button-map entries for a slot.
-func (s *DeviceSession) U2WriteButtonMap(ctx context.Context, slot byte, mappings []IndexedUsage) error {
-	row, err := s.ensureCommandAllowed(CommandU2WriteButtonMap)
-	if err != nil {
-		return err
-	}
-	payload := append([]byte(nil), row.Request...)
-	if len(payload) < 8 {
-		return errInvalidInput("U2WriteButtonMap payload shorter than expected")
-	}
-	payload[4] = slot
-	for _, m := range mappings {
-		pos := 8 + int(m.Index)*2
-		if pos+1 < len(payload) {
-			payload[pos] = byte(m.Usage)
-			payload[pos+1] = byte(m.Usage >> 8)
-		}
-	}
-	_, err = s.sendRow(ctx, row, payload)
-	return err
+// U2ReadButtonMap would read the Ultimate2 button map for a slot, but is
+// hard-blocked against real hardware and performs zero HID I/O — see
+// errU2ButtonMapChunkingUnconfirmed for why. Kept as a method (rather than
+// removed outright) so callers and this type's shape stay ready for the day
+// chunking is confirmed and this can be unblocked.
+func (s *DeviceSession) U2ReadButtonMap(_ context.Context, _ byte) ([]IndexedFunction, error) {
+	return nil, errU2ButtonMapChunkingUnconfirmed()
+}
+
+// U2WriteButtonMap would write a set of Ultimate2 button-map entries for a
+// slot, but is hard-blocked against real hardware and performs zero HID
+// I/O — see errU2ButtonMapChunkingUnconfirmed for why. A write using
+// unconfirmed chunking assumptions could corrupt a real device's
+// persistent button-map configuration.
+func (s *DeviceSession) U2WriteButtonMap(_ context.Context, _ byte, _ []IndexedFunction) error {
+	return errU2ButtonMapChunkingUnconfirmed()
 }
 
 // U2SetMode writes a new Ultimate2 mode.

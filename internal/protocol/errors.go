@@ -18,6 +18,9 @@ const (
 	CodeUnknownCommand       ErrorCode = "UnknownCommand"
 	CodeDeviceNotOpen        ErrorCode = "DeviceNotOpen"
 	CodeDeviceDisconnected   ErrorCode = "DeviceDisconnected"
+	// CodeU2ButtonMapUnavailable is returned by U2ReadButtonMap/
+	// U2WriteButtonMap for every call — see errU2ButtonMapChunkingUnconfirmed.
+	CodeU2ButtonMapUnavailable ErrorCode = "U2ButtonMapUnavailable"
 )
 
 // ErrTimeout is returned when a device response does not arrive in time.
@@ -70,6 +73,26 @@ func errUnknownCommand(command CommandID) *Error {
 
 func errDeviceNotOpen(target VidPid) *Error {
 	return &Error{code: CodeDeviceNotOpen, message: fmt.Sprintf("device not open for %s", target)}
+}
+
+// errU2ButtonMapChunkingUnconfirmed is returned by U2ReadButtonMap and
+// U2WriteButtonMap for every call, without performing any HID I/O. The
+// confirmed Ultimate2 button-map wire shape is 22 x uint32 (88 bytes),
+// which cannot fit in a single 64-byte HID report, so a correct
+// implementation needs multi-report chunked transfer — and the exact
+// chunking/paging scheme is not confirmed by any evidence. A write using
+// guessed chunking could corrupt a real device's persistent button-map
+// configuration, which is strictly worse than refusing outright. See
+// docs/clean-room-evidence/dossiers/6012/u2_core.toml,
+// OPEN_QUESTION_chunking_mechanism, for what must be confirmed (via real
+// hardware capture or disassembly) before this can be unblocked.
+func errU2ButtonMapChunkingUnconfirmed() *Error {
+	return &Error{
+		code: CodeU2ButtonMapUnavailable,
+		message: "Ultimate2 button-map read/write is blocked pending hardware verification: the wire " +
+			"structure needs multi-report chunked transfer whose exact paging scheme is not yet confirmed " +
+			"(see docs/clean-room-evidence/dossiers/6012/u2_core.toml, OPEN_QUESTION_chunking_mechanism)",
+	}
 }
 
 // ErrDeviceDisconnected reports that target failed an operation and,
