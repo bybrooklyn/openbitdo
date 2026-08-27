@@ -25,7 +25,11 @@ trap 'rm -f "$candidate_list"' EXIT
 : >"$candidate_list"
 
 for pattern in "${patterns[@]}"; do
-  rg -l --glob '*_test.go' "$pattern" internal cmd >>"$candidate_list" || true
+  while IFS= read -r -d '' file; do
+    if grep -Eq "$pattern" "$file"; then
+      printf '%s\n' "$file" >>"$candidate_list"
+    fi
+  done < <(find internal cmd -type f -name '*_test.go' -print0)
 done
 
 LC_ALL=C sort -u "$candidate_list" -o "$candidate_list"

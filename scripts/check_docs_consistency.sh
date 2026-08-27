@@ -4,6 +4,11 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
+command -v rg >/dev/null 2>&1 || {
+  echo "documentation consistency check requires ripgrep (rg); refusing to skip release scans" >&2
+  exit 1
+}
+
 EXPECTED_TAG="v0.1.0-rc.1"
 EXPECTED_GO="1.26.7"
 U2_BLOCK_REASON="button-map framing not hardware-confirmed"
