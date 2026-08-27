@@ -138,12 +138,10 @@ func TestTeatest_MappingEditorPresetCycling(t *testing.T) {
 	waitForOutput(t, tm, "0x0005  (←/→ to change)")
 }
 
-// TestTeatest_FirmwareFlowGatesOnRiskAckModal: triggering firmware update
-// on a full-support device must show the real brick-risk acknowledgement
-// modal before anything else happens; esc must cancel without starting
-// anything (still on the devices screen, action cursor unmoved); and
-// confirming must actually proceed through preflight to completion.
-func TestTeatest_FirmwareFlowGatesOnRiskAckModal(t *testing.T) {
+// TestTeatest_FirmwareActionIsDeferredIn010: firmware is a visible but
+// disabled action in v0.1.0. Selecting it must explain the deferral without
+// opening the unsafe acknowledgement modal or starting download/preflight.
+func TestTeatest_FirmwareActionIsDeferredIn010(t *testing.T) {
 	tm, _, _ := newTeatestModel(t, filepath.Join(t.TempDir(), "config.toml"), 100, 30)
 	waitForOutput(t, tm, "PID_108JP")
 
@@ -151,32 +149,9 @@ func TestTeatest_FirmwareFlowGatesOnRiskAckModal(t *testing.T) {
 	waitForOutput(t, tm, "› Diagnose")
 	tm.Send(tea.KeyMsg{Type: tea.KeyDown}) // Diagnose(0) -> Mapping Editor(1)
 	tm.Send(tea.KeyMsg{Type: tea.KeyDown}) // Mapping Editor(1) -> Firmware Update(2)
-	waitForOutput(t, tm, "› Firmware Update")
+	waitForOutput(t, tm, "› Firmware Update  (Deferred in 0.1.0)")
 	tm.Send(tea.KeyMsg{Type: tea.KeyEnter})
-	waitForOutput(t, tm, "permanently brick the") // the risk-ack modal's body text (wraps before "device")
-
-	// Cancel: no screen transition happened underneath the modal (it never
-	// left screenDevices), and the action cursor is still on Firmware
-	// Update(2) — pressing enter again re-opens the same modal rather than
-	// needing to re-navigate, which is itself evidence nothing advanced.
-	tm.Send(tea.KeyMsg{Type: tea.KeyEsc})
-	waitForOutput(t, tm, "› Firmware Update")
-
-	tm.Send(tea.KeyMsg{Type: tea.KeyEnter})
-	waitForOutput(t, tm, "Unsafe operation acknowledgement")
-	tm.Send(tea.KeyMsg{Type: tea.KeyEnter}) // confirm the modal
-
-	// The stage indicator (added to address "the firmware flow feels
-	// disconnected" feedback) must reach the real running program: "Confirm"
-	// current (IconInProgress), "Download"/"Verify" already done (IconPass).
-	// All three checks land on the same rendered frame, so they're checked
-	// together via waitForAllOutputs (see its doc comment for why).
-	waitForAllOutputs(t, tm, "Press enter to begin", IconPass+" Download", IconPass+" Verify", IconInProgress+" Confirm")
-
-	tm.Send(tea.KeyMsg{Type: tea.KeyEnter}) // begin the transfer
-	// Likewise: the completion text and the final stage now reading as
-	// IconPass (not still IconInProgress) both come from the same frame.
-	waitForAllOutputs(t, tm, "Update completed and verified.", IconPass+" Done")
+	waitForOutput(t, tm, "Firmware Update: Deferred in 0.1.0")
 }
 
 // TestTeatest_SettingsTogglePersistsAcrossReload: toggling a setting writes

@@ -5,15 +5,32 @@ package tui
 import (
 	"bytes"
 	"context"
+	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/bybrooklyn/openbitdo/internal/core"
 	"github.com/bybrooklyn/openbitdo/internal/input"
+	"github.com/bybrooklyn/openbitdo/internal/protocol"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/x/exp/teatest"
 )
+
+func manualReleaseGatePID(t *testing.T) uint16 {
+	t.Helper()
+	raw := strings.TrimSpace(os.Getenv("OPENBITDO_MANUAL_PID"))
+	if raw == "" {
+		t.Skip("set OPENBITDO_MANUAL_PID to the physically connected Ultimate2 PID, for example 0x6013")
+	}
+	value, err := strconv.ParseUint(strings.TrimPrefix(strings.ToLower(raw), "0x"), 16, 16)
+	if err != nil {
+		t.Fatalf("parse OPENBITDO_MANUAL_PID=%q as hex PID: %v", raw, err)
+	}
+	return uint16(value)
+}
 
 // TestManualRealHardwareDeviceListAndDiagnose drives the actual running
 // program (real Update/View, real tea.Cmd scheduling, teatest's virtual
@@ -27,8 +44,8 @@ import (
 // This exists to verify the whole app (not just internal/machid in
 // isolation) against real hardware for the first time: does the real
 // device show up on the Devices screen, does Diagnose actually complete
-// (however it completes) without crashing/hanging, and does the Mapping
-// Editor handle a real (non-mock) session sensibly. It intentionally does
+// (however it completes) without crashing/hanging, and is the deferred real
+// Ultimate2 mapping action blocked before a session begins. It intentionally does
 // NOT assert success on the diagnostic checks themselves -- see
 // internal/machid/machid_darwin.go's package doc: this project's actual
 // Ultimate2 (PID 0x6013) writes successfully but has never been observed
@@ -87,25 +104,62 @@ func TestManualRealHardwareDeviceListAndDiagnose(t *testing.T) {
 	tm.Send(tea.KeyMsg{Type: tea.KeyDown}) // Diagnose(0) -> Mapping Editor(1)
 	tm.Send(tea.KeyMsg{Type: tea.KeyEnter})
 
-	// Mapping Editor against a real, non-mock Ultimate2 session: must
-	// render *something* coherent (a real screen, an honest error) within a
-	// bounded time, not hang. Not asserting exact wording since which path
-	// it takes (partial profile w/ MappingsUnavailable vs. a full profile-
-	// read error, if U2GetCurrentSlot/U2ReadConfigSlot themselves get no
-	// response either) is itself part of what this test is checking.
-	// Wait for "Loading mapping…" to resolve one way or the other: either
-	// "Error:" (viewMapping's m.mapping.err branch -- e.g. if
-	// U2GetCurrentSlot/U2ReadConfigSlot themselves get no real response,
-	// the whole profile read fails before ever reaching the deliberately-
-	// blocked button-map call) or "Apply Changes" (the draft loaded
-	// successfully, always the last row per commit 2888ae5).
+	// Real Ultimate2 mapping is deliberately deferred for v0.1.0-rc.1.
+	// Activating the disabled row must stay on the dashboard and explain the
+	// hardware-evidence gap; it must not open a session or attempt any write.
 	var mapFrame []byte
 	teatest.WaitFor(t, tm.Output(), func(bts []byte) bool {
-		if bytes.Contains(bts, []byte("Error:")) || bytes.Contains(bts, []byte("Apply Changes")) {
+		if bytes.Contains(bts, []byte("button-map framing not hardware-confirmed")) {
 			mapFrame = bts
 			return true
 		}
 		return false
-	}, teatest.WithCheckInterval(200*time.Millisecond), teatest.WithDuration(30*time.Second))
-	t.Logf("Mapping Editor screen rendered against real hardware:\n%s", mapFrame)
+	}, teatest.WithCheckInterval(50*time.Millisecond), teatest.WithDuration(5*time.Second))
+	t.Logf("Deferred real-mapping reason rendered without leaving the dashboard:\n%s", mapFrame)
+}
+
+func TestManualUltimate2ReleaseGateDiagnostics(t *testing.T) {
+	pid := manualReleaseGatePID(t)
+	target := protocol.VidPid{VID: 0x2dc8, PID: pid}
+	c := core.New(core.Config{MockMode: false, ProgressIntervalMs: 5, DefaultChunkSize: 56})
+	ctx := context.Background()
+
+	devices, err := c.ListDevices(ctx)
+	if err != nil {
+		t.Fatalf("list devices: %v", err)
+	}
+	found := false
+	for _, device := range devices {
+		if device.VidPid == target {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("required Ultimate2 pid %s is not currently enumerated", target)
+	}
+
+	diag, err := c.DiagProbe(ctx, target)
+	if err != nil {
+		t.Fatalf("diag probe: %v", err)
+	}
+	if !diag.TransportReady {
+		t.Fatalf("transport_ready=false for %s", target)
+	}
+	var checked int
+	for _, check := range diag.CommandChecks {
+		if check.Confidence != protocol.EvidenceConfirmed || check.IsExperimental {
+			continue
+		}
+		checked++
+		if !check.OK {
+			t.Fatalf("confirmed safe diagnostic %s failed: bytes_written=%d bytes_read=%d error=%s detail=%s", check.Command, check.BytesWritten, check.BytesRead, check.ErrorCode, check.Detail)
+		}
+		if check.BytesRead == 0 {
+			t.Fatalf("confirmed safe diagnostic %s returned no response bytes", check.Command)
+		}
+	}
+	if checked == 0 {
+		t.Fatal("no confirmed non-experimental diagnostics were applicable; release gate cannot pass")
+	}
 }

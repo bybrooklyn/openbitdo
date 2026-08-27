@@ -10,7 +10,9 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -117,6 +119,153 @@ func TestWriteRecoveryReportRollbackFailed(t *testing.T) {
 
 var errWriteBoom = errInvalidState("simulated device write failure")
 
+type panicRecordingMappingTransport struct {
+	opens  int
+	closes int
+	writes int
+	reads  int
+}
+
+func (t *panicRecordingMappingTransport) Open(context.Context, protocol.VidPid) error {
+	t.opens++
+	panic("U2 mapping denial opened the HID transport")
+}
+
+func (t *panicRecordingMappingTransport) Close() error {
+	t.closes++
+	panic("U2 mapping denial closed the HID transport")
+}
+
+func (t *panicRecordingMappingTransport) Write([]byte) (int, error) {
+	t.writes++
+	panic("U2 mapping denial wrote to the HID transport")
+}
+
+func (t *panicRecordingMappingTransport) Read(context.Context, int, uint64) ([]byte, error) {
+	t.reads++
+	panic("U2 mapping denial read from the HID transport")
+}
+
+func requireU2MappingDeferred(t *testing.T, err error) {
+	t.Helper()
+	coreErr, ok := err.(*Error)
+	if !ok || coreErr.Kind != KindPolicyDenied || coreErr.Reason != ReasonNotHardwareConfirmed {
+		t.Fatalf("expected PolicyDenied/NotHardwareConfirmed, got %v", err)
+	}
+	if coreErr.Message != u2MappingDeferredReason {
+		t.Fatalf("expected exact U2 denial %q, got %q", u2MappingDeferredReason, coreErr.Message)
+	}
+}
+
+func requireNoMappingTransportIO(t *testing.T, transport *panicRecordingMappingTransport) {
+	t.Helper()
+	if transport.opens != 0 || transport.closes != 0 || transport.writes != 0 || transport.reads != 0 {
+		t.Fatalf("expected zero transport I/O, got opens=%d closes=%d writes=%d reads=%d",
+			transport.opens, transport.closes, transport.writes, transport.reads)
+	}
+}
+
+func TestRealU2ApplyPathsDenyBeforeTransportOrStateMutation(t *testing.T) {
+	target := protocol.VidPid{VID: 0x2dc8, PID: 0x6012}
+	changes := []U2ButtonMapping{{Button: U2A, Target: U2FuncStart}}
+
+	t.Run("recovery API", func(t *testing.T) {
+		transport := &panicRecordingMappingTransport{}
+		c := New(Config{})
+		c.transportOverride = transport
+		beforeChanges := append([]U2ButtonMapping(nil), changes...)
+
+		report, err := c.U2ApplyCoreProfileWithRecovery(context.Background(), target, U2Slot1, 1, changes, 0.25, 0.75, true)
+		requireU2MappingDeferred(t, err)
+		if !reflect.DeepEqual(report, WriteRecoveryReport{}) {
+			t.Fatalf("denied apply returned a mutated recovery report: %+v", report)
+		}
+		if !reflect.DeepEqual(changes, beforeChanges) {
+			t.Fatalf("denied apply mutated caller changes: before=%+v after=%+v", beforeChanges, changes)
+		}
+		if len(c.backups) != 0 || len(c.sessions) != 0 {
+			t.Fatalf("denied apply mutated core state: backups=%d sessions=%d", len(c.backups), len(c.sessions))
+		}
+		requireNoMappingTransportIO(t, transport)
+	})
+
+	t.Run("convenience API", func(t *testing.T) {
+		transport := &panicRecordingMappingTransport{}
+		c := New(Config{})
+		c.transportOverride = transport
+
+		backupID, hasBackup, err := c.U2ApplyCoreProfile(context.Background(), target, U2Slot1, 1, changes, 0.25, 0.75, true)
+		requireU2MappingDeferred(t, err)
+		if backupID != "" || hasBackup {
+			t.Fatalf("denied apply returned backup state: id=%q present=%v", backupID, hasBackup)
+		}
+		if len(c.backups) != 0 || len(c.sessions) != 0 {
+			t.Fatalf("denied apply mutated core state: backups=%d sessions=%d", len(c.backups), len(c.sessions))
+		}
+		requireNoMappingTransportIO(t, transport)
+	})
+}
+
+func TestRealU2RestoreDeniesBeforeTransportOrStateMutation(t *testing.T) {
+	target := protocol.VidPid{VID: 0x2dc8, PID: 0x6012}
+	transport := &panicRecordingMappingTransport{}
+	c := New(Config{})
+	c.transportOverride = transport
+	backupID := c.storeBackup(target, configBackupPayload{
+		kind: backupU2,
+		u2Profile: U2CoreProfile{
+			Slot: U2Slot2, Mode: 3, Mappings: []U2ButtonMapping{{Button: U2B, Target: U2FuncA}},
+		},
+		u2ConfigBlob: []byte{1, 2, 3, 4},
+	})
+	before := c.backups[backupID]
+	beforeCount := len(c.backups)
+
+	err := c.RestoreBackup(context.Background(), backupID)
+	requireU2MappingDeferred(t, err)
+	if len(c.backups) != beforeCount || !reflect.DeepEqual(c.backups[backupID], before) || len(c.sessions) != 0 {
+		t.Fatalf("denied restore mutated core state: backups=%d sessions=%d", len(c.backups), len(c.sessions))
+	}
+	requireNoMappingTransportIO(t, transport)
+}
+
+func TestBeginnerDiagSummaryReportsReleaseDeferrals(t *testing.T) {
+	u2 := appDeviceFromProfile(protocol.VidPid{VID: 0x2dc8, PID: 0x6012}, "", true)
+	jp108 := appDeviceFromProfile(protocol.VidPid{VID: 0x2dc8, PID: 0x5209}, "", true)
+	diag := protocol.DiagProbeResult{}
+
+	realU2Summary := New(DefaultConfig()).BeginnerDiagSummary(u2, diag)
+	for _, want := range []string{"firmware updates (deferred in 0.1.0)", u2MappingDeferredReason} {
+		if !strings.Contains(realU2Summary, want) {
+			t.Fatalf("real U2 summary missing %q: %s", want, realU2Summary)
+		}
+	}
+	if strings.Contains(realU2Summary, "none for confirmed capabilities") {
+		t.Fatalf("real U2 summary falsely reports no blocked capabilities: %s", realU2Summary)
+	}
+
+	jp108Summary := New(DefaultConfig()).BeginnerDiagSummary(jp108, diag)
+	if !strings.Contains(jp108Summary, "firmware updates (deferred in 0.1.0)") {
+		t.Fatalf("JP108 summary omitted the firmware feature gate: %s", jp108Summary)
+	}
+	if strings.Contains(jp108Summary, u2MappingDeferredReason) {
+		t.Fatalf("JP108 summary included the Ultimate2-only mapping block: %s", jp108Summary)
+	}
+
+	mockU2Summary := New(Config{MockMode: true}).BeginnerDiagSummary(u2, diag)
+	if strings.Contains(mockU2Summary, u2MappingDeferredReason) {
+		t.Fatalf("mock U2 summary should keep mapping preview available: %s", mockU2Summary)
+	}
+	if !strings.Contains(mockU2Summary, "firmware updates (deferred in 0.1.0)") {
+		t.Fatalf("mock U2 summary omitted the firmware feature gate: %s", mockU2Summary)
+	}
+
+	firmwareTestU2Summary := New(enableFirmwareForTest(Config{})).BeginnerDiagSummary(u2, diag)
+	if strings.Contains(firmwareTestU2Summary, "firmware updates (deferred in 0.1.0)") || !strings.Contains(firmwareTestU2Summary, u2MappingDeferredReason) {
+		t.Fatalf("test-enabled firmware summary did not isolate the U2 mapping block: %s", firmwareTestU2Summary)
+	}
+}
+
 // --- CandidateWriteProbe: the three independent gates (support tier,
 // advanced-mode+risk-ack, unlock file) plus the capability check, each
 // exercised as its own distinct denial rather than one combined test.
@@ -177,10 +326,117 @@ func TestCandidateWriteProbeDeniedWhenNoSafeWriteCapability(t *testing.T) {
 	}
 }
 
-// --- Firmware session guard clauses not yet covered.
+// --- Firmware feature gate and session guard clauses.
+
+func requireFirmwareDisabledError(t *testing.T, err error) {
+	t.Helper()
+	coreErr, ok := err.(*Error)
+	if !ok || coreErr.Kind != KindPolicyDenied || coreErr.Reason != ReasonFeatureUnavailable {
+		t.Fatalf("expected PolicyDenied/FeatureUnavailable, got %v", err)
+	}
+	if coreErr.Message != firmwareDeferredMessage {
+		t.Fatalf("expected deferred firmware message %q, got %q", firmwareDeferredMessage, coreErr.Message)
+	}
+}
+
+func TestFirmwareDisabledByDefaultRejectsEveryEntryBeforeIO(t *testing.T) {
+	defaults := DefaultConfig()
+	if defaults.FirmwareUpdatesEnabled || defaults.FirmwareManifestURL != "" || len(defaults.FirmwareTrustedKeys) != 0 {
+		t.Fatalf("production defaults must contain no firmware capability, feed, or trust keys: %+v", defaults)
+	}
+
+	var requests atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests.Add(1)
+		_, _ = w.Write([]byte("version = 1\n"))
+	}))
+	defer srv.Close()
+
+	publicKey, _, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		t.Fatalf("generate signing key: %v", err)
+	}
+	transport := &protocol.MockTransport{}
+	c := New(Config{
+		FirmwareManifestURL: srv.URL,
+		FirmwareTrustedKeys: []ed25519.PublicKey{publicKey},
+	})
+	c.transportOverride = transport
+	if c.FirmwareEnabled() {
+		t.Fatal("firmware must be disabled by default")
+	}
+
+	_, err = c.DownloadRecommendedFirmware(context.Background(), protocol.VidPid{VID: 0x2dc8, PID: 0x6009})
+	requireFirmwareDisabledError(t, err)
+	if got := requests.Load(); got != 0 {
+		t.Fatalf("disabled download made %d HTTP requests", got)
+	}
+
+	preflight, err := c.PreflightFirmware(context.Background(), FirmwarePreflightRequest{
+		VidPid:       protocol.VidPid{VID: 0x2dc8, PID: 0x6009},
+		FirmwarePath: filepath.Join(t.TempDir(), "intentionally-missing.bin"),
+		AllowUnsafe:  true,
+		BrickRiskAck: true,
+	})
+	if err != nil {
+		t.Fatalf("disabled preflight should return its policy gate, got %v", err)
+	}
+	if preflight.Gate.Allowed || preflight.Gate.Reason != ReasonFeatureUnavailable || preflight.Gate.Message != firmwareDeferredMessage {
+		t.Fatalf("unexpected disabled preflight gate: %+v", preflight.Gate)
+	}
+	if len(c.sessions) != 0 {
+		t.Fatalf("disabled preflight created %d sessions", len(c.sessions))
+	}
+
+	const sessionID FirmwareUpdateSessionID = "disabled-session"
+	handle := &firmwareSessionHandle{
+		plan:   FirmwareUpdatePlan{SessionID: sessionID},
+		events: newBroadcaster(),
+		state:  stageAwaitingConfirmation,
+	}
+	c.sessions[sessionID] = handle
+
+	_, err = c.StartFirmware(context.Background(), FirmwareStartRequest{SessionID: sessionID})
+	requireFirmwareDisabledError(t, err)
+	_, err = c.ConfirmFirmware(context.Background(), FirmwareConfirmRequest{SessionID: sessionID, AcknowledgedRisk: true})
+	requireFirmwareDisabledError(t, err)
+	_, err = c.CancelFirmware(context.Background(), FirmwareCancelRequest{SessionID: sessionID})
+	requireFirmwareDisabledError(t, err)
+	_, err = c.FirmwareReport(context.Background(), sessionID)
+	requireFirmwareDisabledError(t, err)
+	_, err = c.SubscribeEvents(sessionID)
+	requireFirmwareDisabledError(t, err)
+	if got := len(transport.Writes()); got != 0 {
+		t.Fatalf("disabled firmware paths made %d device writes", got)
+	}
+	handle.mu.Lock()
+	state := handle.state
+	handle.mu.Unlock()
+	if state != stageAwaitingConfirmation {
+		t.Fatalf("disabled firmware path mutated session state to %v", state)
+	}
+}
+
+func TestEnabledFirmwareDownloadRequiresInjectedTrustBeforeNetwork(t *testing.T) {
+	var requests atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests.Add(1)
+		_, _ = w.Write([]byte("version = 1\n"))
+	}))
+	defer srv.Close()
+
+	c := New(enableFirmwareForTest(Config{FirmwareManifestURL: srv.URL}))
+	_, err := c.DownloadRecommendedFirmware(context.Background(), protocol.VidPid{VID: 0x2dc8, PID: 0x6009})
+	if coreErr, ok := err.(*Error); !ok || coreErr.Kind != KindManifest || !strings.Contains(coreErr.Message, "no trusted firmware signing keys") {
+		t.Fatalf("expected missing-trust manifest error, got %v", err)
+	}
+	if got := requests.Load(); got != 0 {
+		t.Fatalf("misconfigured firmware download made %d HTTP requests", got)
+	}
+}
 
 func TestConfirmFirmwareRequiresAcknowledgedRisk(t *testing.T) {
-	c := New(Config{MockMode: true})
+	c := New(enableFirmwareForTest(Config{MockMode: true}))
 	_, err := c.ConfirmFirmware(context.Background(), FirmwareConfirmRequest{SessionID: "does-not-matter", AcknowledgedRisk: false})
 	if err == nil {
 		t.Fatal("expected an error when risk is not acknowledged")
@@ -192,7 +448,7 @@ func TestConfirmFirmwareRequiresAcknowledgedRisk(t *testing.T) {
 }
 
 func TestStartFirmwareRejectsUnknownSession(t *testing.T) {
-	c := New(Config{MockMode: true})
+	c := New(enableFirmwareForTest(Config{MockMode: true}))
 	_, err := c.StartFirmware(context.Background(), FirmwareStartRequest{SessionID: "unknown"})
 	if err == nil {
 		t.Fatal("expected an error for an unknown session id")
@@ -203,7 +459,7 @@ func TestStartFirmwareRejectsUnknownSession(t *testing.T) {
 }
 
 func TestCancelFirmwareRejectsUnknownSession(t *testing.T) {
-	c := New(Config{MockMode: true})
+	c := New(enableFirmwareForTest(Config{MockMode: true}))
 	_, err := c.CancelFirmware(context.Background(), FirmwareCancelRequest{SessionID: "unknown"})
 	if err == nil {
 		t.Fatal("expected an error for an unknown session id")
@@ -214,7 +470,7 @@ func TestCancelFirmwareRejectsUnknownSession(t *testing.T) {
 }
 
 func TestStartFirmwareRejectsWrongState(t *testing.T) {
-	c := New(Config{MockMode: true, DefaultChunkSize: 16})
+	c := New(enableFirmwareForTest(Config{MockMode: true, DefaultChunkSize: 16}))
 	path := filepath.Join(t.TempDir(), "openbitdo-wrong-state.bin")
 	if err := os.WriteFile(path, make([]byte, 64), 0o644); err != nil {
 		t.Fatalf("write: %v", err)
@@ -289,14 +545,9 @@ func TestValidateFirmwareImageRejectsMissingFile(t *testing.T) {
 	}
 }
 
-// --- fetchBytes / verifyArtifactSignature: these hit real network code in
-// non-mock mode, so a local httptest.Server stands in for the manifest/
-// artifact/signature endpoints. The pinned Ed25519 keys are public-only by
-// design (the private key isn't in this repo), so only the *rejection*
-// paths are testable here -- a genuinely valid signature can't be
-// constructed without it. That's fine: the rejection paths are exactly the
-// safety-relevant ones (does the app correctly refuse a bad/tampered
-// artifact), and they were at 0% coverage before this.
+// --- fetchBytes / verifyArtifactSignature: local httptest servers stand in
+// for the injected test feed. Trust roots are ephemeral per test; production
+// embeds neither a feed URL nor a signing key.
 
 func TestFetchBytesRejectsNon2xxStatus(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -326,7 +577,7 @@ func TestFetchBytesRejectsUnreachableHost(t *testing.T) {
 }
 
 func TestVerifyArtifactSignatureRejectsUnsupportedAlgorithm(t *testing.T) {
-	c := New(Config{})
+	c := New(enableFirmwareForTest(Config{}))
 	err := c.verifyArtifactSignature(context.Background(), FirmwareArtifact{
 		Signature: ManifestSignature{Algorithm: "rsa", URL: "http://unused.invalid/sig"},
 	}, []byte("payload"))
@@ -354,7 +605,7 @@ func TestVerifyArtifactSignatureRejectsBadSignature(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := New(Config{})
+	c := New(enableFirmwareWithEphemeralTrustForTest(t, Config{}))
 	err = c.verifyArtifactSignature(context.Background(), FirmwareArtifact{
 		Signature: ManifestSignature{Algorithm: "ed25519", URL: srv.URL},
 	}, payload)
@@ -373,7 +624,7 @@ func TestVerifyArtifactSignatureRejectsMalformedBase64(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := New(Config{})
+	c := New(enableFirmwareWithEphemeralTrustForTest(t, Config{}))
 	err := c.verifyArtifactSignature(context.Background(), FirmwareArtifact{
 		Signature: ManifestSignature{Algorithm: "ed25519", URL: srv.URL},
 	}, []byte("payload"))
@@ -416,7 +667,7 @@ url = "` + srv.URL + `/artifact.bin.sig"
 		_, _ = w.Write([]byte(manifestTOML))
 	})
 
-	c := New(Config{FirmwareManifestURL: srv.URL + "/manifest.toml"})
+	c := New(enableFirmwareWithEphemeralTrustForTest(t, Config{FirmwareManifestURL: srv.URL + "/manifest.toml"}))
 	_, err := c.DownloadRecommendedFirmware(context.Background(), protocol.VidPid{VID: 0x2dc8, PID: 0x5209})
 	if err == nil {
 		t.Fatal("expected a hash-mismatch error")
@@ -436,7 +687,7 @@ func TestDownloadRecommendedFirmwareRejectsNoMatchingArtifact(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := New(Config{FirmwareManifestURL: srv.URL})
+	c := New(enableFirmwareWithEphemeralTrustForTest(t, Config{FirmwareManifestURL: srv.URL}))
 	_, err := c.DownloadRecommendedFirmware(context.Background(), protocol.VidPid{VID: 0x2dc8, PID: 0x5209})
 	if err == nil {
 		t.Fatal("expected an error when the manifest has no matching artifact")
@@ -473,7 +724,7 @@ func (panicTransport) Read(context.Context, int, uint64) ([]byte, error) {
 // hash check were ever removed/bypassed, the test would fail loudly via an
 // unrelated panic rather than silently passing.
 func TestFirmwareTransferRefusesTamperedImage(t *testing.T) {
-	c := New(Config{DefaultChunkSize: 16, ProgressIntervalMs: 1})
+	c := New(enableFirmwareForTest(Config{DefaultChunkSize: 16, ProgressIntervalMs: 1}))
 	c.transportOverride = panicTransport{}
 	path := filepath.Join(t.TempDir(), "openbitdo-tamper.bin")
 	if err := os.WriteFile(path, bytes.Repeat([]byte{4}, 128), 0o644); err != nil {
@@ -529,7 +780,7 @@ func TestFirmwareTransferRefusesTamperedImage(t *testing.T) {
 // goroutine outside Bubbletea's own panic recovery) and the session must
 // reach a Failed report instead of hanging forever.
 func TestFirmwareTransferPanicIsRecoveredAsFailure(t *testing.T) {
-	c := New(Config{DefaultChunkSize: 16, ProgressIntervalMs: 1})
+	c := New(enableFirmwareForTest(Config{DefaultChunkSize: 16, ProgressIntervalMs: 1}))
 	c.transportOverride = panicTransport{}
 	path := filepath.Join(t.TempDir(), "openbitdo-panic.bin")
 	if err := os.WriteFile(path, bytes.Repeat([]byte{3}, 128), 0o644); err != nil {
@@ -585,71 +836,6 @@ func TestTransferFailureCodeClassifiesByDevicePresence(t *testing.T) {
 	got = transferFailureCodeWithPresence(target, transportErr, func(protocol.VidPid) bool { return true })
 	if got != protocol.CodeTimeout {
 		t.Fatalf("device still present: expected the underlying error's own code (CodeTimeout), got %q", got)
-	}
-}
-
-// failingTransport opens successfully but returns an ordinary (non-panic)
-// error from every subsequent call — simulating a ordinary transport
-// failure, as opposed to panicTransport's simulated internal bug.
-type failingTransport struct{}
-
-func (failingTransport) Open(context.Context, protocol.VidPid) error { return nil }
-func (failingTransport) Close() error                                { return nil }
-func (failingTransport) Write([]byte) (int, error)                   { return 0, protocol.ErrTimeout }
-func (failingTransport) Read(context.Context, int, uint64) ([]byte, error) {
-	return nil, protocol.ErrTimeout
-}
-
-// TestFirmwareTransferReportsDisconnectedWhenDeviceGenuinelyAbsent exercises
-// transferFailureCode's real (non-injected) path end to end. No physical
-// 8BitDo device (vid 0x2dc8) is attached in this environment, so
-// protocol.IsDevicePresent genuinely returns false here — this isn't a
-// simulated disconnect, it's the actual real-world condition of this test
-// machine, which happens to be exactly the scenario this feature exists for.
-func TestFirmwareTransferReportsDisconnectedWhenDeviceGenuinelyAbsent(t *testing.T) {
-	if protocol.IsDevicePresent(protocol.VidPid{VID: 0x2dc8, PID: 0x6009}) {
-		t.Skip("a real 8BitDo device is attached to this machine — this test needs one to be absent")
-	}
-
-	c := New(Config{DefaultChunkSize: 16, ProgressIntervalMs: 1})
-	c.transportOverride = failingTransport{}
-	path := filepath.Join(t.TempDir(), "openbitdo-disconnect.bin")
-	if err := os.WriteFile(path, bytes.Repeat([]byte{4}, 64), 0o644); err != nil {
-		t.Fatalf("write: %v", err)
-	}
-	ctx := context.Background()
-
-	preflight, err := c.PreflightFirmware(ctx, makeReq(t, path, 0x6009))
-	if err != nil || !preflight.Gate.Allowed {
-		t.Fatalf("preflight: gate=%+v err=%v", preflight.Gate, err)
-	}
-	plan := preflight.Plan
-	if _, err := c.StartFirmware(ctx, FirmwareStartRequest{SessionID: plan.SessionID}); err != nil {
-		t.Fatalf("start: %v", err)
-	}
-	if _, err := c.ConfirmFirmware(ctx, FirmwareConfirmRequest{SessionID: plan.SessionID, AcknowledgedRisk: true}); err != nil {
-		t.Fatalf("confirm: %v", err)
-	}
-
-	deadline := time.Now().Add(2 * time.Second)
-	for {
-		report, err := c.FirmwareReport(ctx, plan.SessionID)
-		if err != nil {
-			t.Fatalf("report: %v", err)
-		}
-		if report != nil {
-			if report.Status != OutcomeFailed {
-				t.Fatalf("expected Failed, got %s", report.Status)
-			}
-			if report.ErrorCode != protocol.CodeDeviceDisconnected {
-				t.Fatalf("expected ErrorCode=DeviceDisconnected, got %q (message: %q)", report.ErrorCode, report.Message)
-			}
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("timed out waiting for firmware report")
-		}
-		time.Sleep(2 * time.Millisecond)
 	}
 }
 

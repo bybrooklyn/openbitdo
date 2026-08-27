@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/bybrooklyn/openbitdo/internal/core"
 	"github.com/bybrooklyn/openbitdo/internal/input"
@@ -41,6 +42,35 @@ func loadDevices(t *testing.T, m Model, c *core.OpenBitdoCore) Model {
 	return next.(Model)
 }
 
+func runCmdForMsg[T tea.Msg](t *testing.T, cmd tea.Cmd) T {
+	t.Helper()
+	msg := cmd()
+	if got, ok := msg.(T); ok {
+		return got
+	}
+	if batch, ok := msg.(tea.BatchMsg); ok {
+		for _, sub := range batch {
+			if sub == nil {
+				continue
+			}
+			ch := make(chan tea.Msg, 1)
+			go func() { ch <- sub() }()
+			select {
+			case subMsg := <-ch:
+				if got, ok := subMsg.(T); ok {
+					return got
+				}
+			case <-time.After(50 * time.Millisecond):
+				// Timers such as notice expiry intentionally do not fire
+				// immediately; skip them while looking for the command result.
+			}
+		}
+	}
+	var zero T
+	t.Fatalf("expected %T, got %T", zero, msg)
+	return zero
+}
+
 // TestDevicesLoaded_PrioritizesDiagnosticsForDetectedDevice ports
 // dashboard_prioritizes_diagnostics_when_device_detected.
 func TestDevicesLoaded_PrioritizesDiagnosticsForDetectedDevice(t *testing.T) {
@@ -56,6 +86,253 @@ func TestDevicesLoaded_PrioritizesDiagnosticsForDetectedDevice(t *testing.T) {
 	}
 	if items[0].reason != "" {
 		t.Fatalf("expected Diagnose enabled for a detected device, got reason %q", items[0].reason)
+	}
+}
+
+func TestView_ResponsiveMatrixStaysWithinBounds(t *testing.T) {
+	cases := []struct {
+		width, height int
+		want          string
+	}{
+		{60, 18, "Status"},
+		{80, 24, "Status"},
+		{96, 24, "Devices"},
+		{100, 30, "Devices"},
+		{120, 40, "Devices"},
+	}
+	for _, tc := range cases {
+		t.Run(fmt.Sprintf("%dx%d", tc.width, tc.height), func(t *testing.T) {
+			m, c := newTestModel(t, filepath.Join(t.TempDir(), "config.toml"))
+			m.width, m.height = tc.width, tc.height
+			m = loadDevices(t, m, c)
+			view := m.View()
+			if !strings.Contains(ansi.Strip(view), tc.want) {
+				t.Fatalf("expected %q in view:\n%s", tc.want, ansi.Strip(view))
+			}
+			lines := strings.Split(view, "\n")
+			if len(lines) != tc.height {
+				t.Fatalf("rendered %d lines, want exactly %d", len(lines), tc.height)
+			}
+			for i, line := range lines {
+				if w := lipgloss.Width(line); w > tc.width {
+					t.Fatalf("line %d width=%d exceeds terminal width=%d: %q", i, w, tc.width, line)
+				}
+			}
+		})
+	}
+}
+
+func TestView_TooSmallShowsResizeOnly(t *testing.T) {
+	m, _ := newTestModel(t, filepath.Join(t.TempDir(), "config.toml"))
+	m.width, m.height = 59, 17
+	view := ansi.Strip(m.View())
+	for _, want := range []string{"Terminal too small: 59x17", "Required: at least 60x18", "q / ctrl+c quit"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("expected %q in too-small view:\n%s", want, view)
+		}
+	}
+	if strings.Contains(view, "Devices") {
+		t.Fatalf("too-small view should not render the dashboard:\n%s", view)
+	}
+}
+
+func TestMouse_DisabledFirmwareShowsReasonWithoutTransition(t *testing.T) {
+	m, c := newTestModel(t, filepath.Join(t.TempDir(), "config.toml"))
+	m = loadDevices(t, m, c)
+	m.devices.pane = paneActions
+	m.devices.actionIdx = 2
+
+	firmwareRow := renderedRowContaining(t, m.View(), "Firmware Update")
+	next, _ := m.Update(tea.MouseMsg{Button: tea.MouseButtonLeft, Action: tea.MouseActionPress, X: m.width - 10, Y: firmwareRow})
+	m = next.(Model)
+	if m.screen != screenDevices {
+		t.Fatalf("disabled firmware click changed screens to %v", m.screen)
+	}
+	if !strings.Contains(m.statusLine, "Deferred in 0.1.0") {
+		t.Fatalf("expected disabled reason in status line, got %q", m.statusLine)
+	}
+}
+
+func TestMouse_DeviceRowsActionsAndWheelUseSharedGeometry(t *testing.T) {
+	m, c := newTestModel(t, filepath.Join(t.TempDir(), "config.toml"))
+	m = loadDevices(t, m, c)
+	if len(m.devices.filtered) < 3 {
+		t.Fatalf("expected at least three mock devices, got %d", len(m.devices.filtered))
+	}
+
+	deviceRow := renderedRowContaining(t, m.View(), "PID_Ultimate2")
+	next, _ := m.Update(tea.MouseMsg{Button: tea.MouseButtonLeft, Action: tea.MouseActionPress, X: 2, Y: deviceRow})
+	m = next.(Model)
+	if m.devices.cursor != 1 || m.devices.pane != paneDeviceList {
+		t.Fatalf("device row click selected cursor=%d pane=%v, want cursor=1 paneDeviceList", m.devices.cursor, m.devices.pane)
+	}
+
+	next, _ = m.Update(tea.MouseMsg{Button: tea.MouseButtonWheelDown})
+	m = next.(Model)
+	if m.devices.cursor != 2 {
+		t.Fatalf("device wheel should move selection by three rows up to list bounds, got cursor=%d", m.devices.cursor)
+	}
+
+	m.devices.cursor = 0
+	diagnoseRow := renderedRowContaining(t, m.View(), "Diagnose")
+	next, _ = m.Update(tea.MouseMsg{Button: tea.MouseButtonLeft, Action: tea.MouseActionPress, X: m.width - 10, Y: diagnoseRow})
+	m = next.(Model)
+	if m.screen != screenDiagnostics {
+		t.Fatalf("enabled Diagnose action click should open diagnostics, got screen=%v", m.screen)
+	}
+}
+
+func renderedRowContaining(t *testing.T, rendered, text string) int {
+	t.Helper()
+	for row, line := range strings.Split(ansi.Strip(rendered), "\n") {
+		if strings.Contains(line, text) {
+			return row
+		}
+	}
+	t.Fatalf("rendered frame does not contain %q:\n%s", text, ansi.Strip(rendered))
+	return -1
+}
+
+func TestMouse_DiagnosticsSettingsMappingAndModalContracts(t *testing.T) {
+	m, c := newTestModel(t, filepath.Join(t.TempDir(), "config.toml"))
+	m = loadDevices(t, m, c)
+	device, _ := m.devices.selected()
+
+	m.screen = screenDiagnostics
+	m.diag.device = device
+	m.diag.result.CommandChecks = []protocol.DiagCommandStatus{
+		{Command: protocol.CommandID("DiagAlpha"), OK: true, Severity: protocol.SeverityOK},
+		{Command: protocol.CommandID("DiagBeta"), OK: true, Severity: protocol.SeverityOK},
+		{Command: protocol.CommandID("DiagGamma"), OK: true, Severity: protocol.SeverityOK},
+	}
+	diagnosticRow := renderedRowContaining(t, m.View(), "DiagGamma")
+	next, _ := m.Update(tea.MouseMsg{Button: tea.MouseButtonLeft, Action: tea.MouseActionPress, X: 5, Y: diagnosticRow})
+	m = next.(Model)
+	if m.diag.cursor != 2 {
+		t.Fatalf("diagnostics row click selected cursor=%d, want 2", m.diag.cursor)
+	}
+
+	m.screen = screenSettings
+	before := m.settings.ReportSaveMode
+	settingsRow := renderedRowContaining(t, m.View(), "Report Save Mode:")
+	next, _ = m.Update(tea.MouseMsg{Button: tea.MouseButtonLeft, Action: tea.MouseActionPress, X: 5, Y: settingsRow})
+	m = next.(Model)
+	if m.settingsCursor != 1 || m.settings.ReportSaveMode == before {
+		t.Fatalf("settings row click cursor=%d mode=%s before=%s", m.settingsCursor, m.settings.ReportSaveMode, before)
+	}
+
+	m.screen = screenMapping
+	m.mapping = mappingState{kind: core.KindJP108}
+	for i := 0; i < 24; i++ {
+		m.mapping.jp108Draft = append(m.mapping.jp108Draft, core.DedicatedButtonMapping{Button: core.DedicatedButtonID(i), TargetHIDUsage: 0x0004})
+	}
+	for i := 0; i < 5; i++ {
+		next, _ = m.Update(tea.MouseMsg{Button: tea.MouseButtonWheelDown})
+		m = next.(Model)
+	}
+	if m.mapping.cursor != 15 || m.mapping.rowOffset == 0 {
+		t.Fatalf("mapping wheel cursor=%d rowOffset=%d, want cursor=15 and scrolled viewport", m.mapping.cursor, m.mapping.rowOffset)
+	}
+
+	m.modal = discardMappingModal(discardActionBack)
+	box, _, cancel := modalGeometry(m.modal, m.width, m.height)
+	next, _ = m.Update(tea.MouseMsg{Button: tea.MouseButtonLeft, Action: tea.MouseActionPress, X: box.x - 1, Y: box.y})
+	m = next.(Model)
+	if !m.modal.active {
+		t.Fatal("outside modal click must be a no-op")
+	}
+	next, _ = m.Update(tea.MouseMsg{Button: tea.MouseButtonLeft, Action: tea.MouseActionPress, X: cancel.x, Y: cancel.y})
+	m = next.(Model)
+	if m.modal.active {
+		t.Fatal("cancel button click should close the modal")
+	}
+}
+
+func TestMouse_MappingUsesActualRenderedRowsAndIgnoresIndicators(t *testing.T) {
+	m, _ := newTestModel(t, filepath.Join(t.TempDir(), "config.toml"))
+	m.screen = screenMapping
+	m.mapping.kind = core.KindJP108
+	m.mapping.device = core.AppDevice{Name: "JP108", VidPid: protocol.VidPid{VID: 0x2dc8, PID: 0x5209}}
+	for i := 0; i < 18; i++ {
+		row := core.DedicatedButtonMapping{Button: core.DedicatedButtonID(i), TargetHIDUsage: 0x0004 + uint16(i)}
+		m.mapping.jp108Loaded = append(m.mapping.jp108Loaded, row)
+		m.mapping.jp108Draft = append(m.mapping.jp108Draft, row)
+	}
+	m.mapping.jp108Draft[0].TargetHIDUsage = 0x0005
+	m.mapping.cursor = 17
+	m.ensureMappingCursorVisible()
+
+	view := m.View()
+	indicatorRow := renderedRowContaining(t, view, "more above")
+	beforeCursor := m.mapping.cursor
+	next, cmd := m.Update(tea.MouseMsg{Button: tea.MouseButtonLeft, Action: tea.MouseActionPress, X: 4, Y: indicatorRow})
+	m = next.(Model)
+	if cmd != nil || m.mapping.cursor != beforeCursor || m.mapping.applying {
+		t.Fatal("clicking a mapping scroll indicator must not select or execute an action")
+	}
+
+	visibleRow := renderedRowContaining(t, m.View(), m.mappingRowText(17))
+	next, cmd = m.Update(tea.MouseMsg{Button: tea.MouseButtonLeft, Action: tea.MouseActionPress, X: 4, Y: visibleRow})
+	m = next.(Model)
+	if cmd != nil || m.mapping.cursor != 17 {
+		t.Fatalf("visible mapping row click selected cursor=%d cmd=%v, want cursor=17 and no command", m.mapping.cursor, cmd != nil)
+	}
+
+	applyRow := renderedRowContaining(t, m.View(), "Apply Changes")
+	next, cmd = m.Update(tea.MouseMsg{Button: tea.MouseButtonLeft, Action: tea.MouseActionPress, X: 4, Y: applyRow})
+	m = next.(Model)
+	if cmd == nil || !m.mapping.applying {
+		t.Fatal("clicking the rendered Apply Changes row must start the explicit mock apply")
+	}
+}
+
+func TestNoticeExpiryDismissalAndReportSaveFailure(t *testing.T) {
+	m, _ := newTestModel(t, filepath.Join(t.TempDir(), "config.toml"))
+	m, _ = m.setNotice(noticeSuccess, "Saved.", true)
+	id := m.notice.id
+	next, _ := m.Update(noticeExpiredMsg{id: id})
+	m = next.(Model)
+	if m.statusLine != "" || m.notice.message != "" {
+		t.Fatalf("transient notice should expire, status=%q notice=%+v", m.statusLine, m.notice)
+	}
+
+	next, _ = m.Update(reportSavedMsg{err: fmt.Errorf("disk full")})
+	m = next.(Model)
+	if m.err == nil || !strings.Contains(m.View(), "report save failed: disk full") {
+		t.Fatalf("report-save failure should surface persistently, err=%v view=%s", m.err, ansi.Strip(m.View()))
+	}
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("x")})
+	m = next.(Model)
+	if m.err != nil || m.notice.message != "" {
+		t.Fatalf("persistent notice should dismiss with x, err=%v notice=%+v", m.err, m.notice)
+	}
+}
+
+func TestMappingDirtyBackRequiresDiscardConfirm(t *testing.T) {
+	loaded := []core.DedicatedButtonMapping{{Button: core.ButtonA, TargetHIDUsage: 0x0004}}
+	m := Model{width: 100, height: 30, mapping: mappingState{
+		kind:        core.KindJP108,
+		jp108Loaded: append([]core.DedicatedButtonMapping(nil), loaded...),
+		jp108Draft:  append([]core.DedicatedButtonMapping(nil), loaded...),
+	}}
+	m.screen = screenMapping
+	m.cycleMappingCursor(1)
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	m = next.(Model)
+	if !m.modal.active || m.screen != screenMapping {
+		t.Fatal("dirty mapping back should open a discard modal and keep the editor active")
+	}
+	box, confirm, _ := modalGeometry(m.modal, m.width, m.height)
+	next, _ = m.Update(tea.MouseMsg{Button: tea.MouseButtonLeft, Action: tea.MouseActionPress, X: box.x - 1, Y: box.y - 1})
+	m = next.(Model)
+	if !m.modal.active {
+		t.Fatal("outside modal click dismissed a safety prompt")
+	}
+	next, _ = m.Update(tea.MouseMsg{Button: tea.MouseButtonLeft, Action: tea.MouseActionPress, X: confirm.x, Y: confirm.y})
+	m = next.(Model)
+	if m.modal.active || m.screen != screenDevices {
+		t.Fatal("confirm click should discard the draft and return to Devices")
 	}
 }
 
@@ -190,11 +467,7 @@ func TestCandidateWriteProbe_RequiresPerPidUnlockFile(t *testing.T) {
 		t.Fatal("expected risk acknowledged after dispatching the probe")
 	}
 
-	resultMsg := cmd()
-	result, ok := resultMsg.(candidateProbeResultMsg)
-	if !ok {
-		t.Fatalf("expected candidateProbeResultMsg, got %T", resultMsg)
-	}
+	result := runCmdForMsg[candidateProbeResultMsg](t, cmd)
 	if result.err != nil {
 		t.Fatalf("unexpected probe error: %v", result.err)
 	}
@@ -210,7 +483,7 @@ func TestCandidateWriteProbe_RequiresPerPidUnlockFile(t *testing.T) {
 	if saveCmd == nil {
 		t.Fatal("expected a save-report command after a successful probe")
 	}
-	savedMsg := saveCmd().(reportSavedMsg)
+	savedMsg := runCmdForMsg[reportSavedMsg](t, saveCmd)
 	if savedMsg.err != nil {
 		t.Fatalf("unexpected error saving report: %v", savedMsg.err)
 	}
@@ -250,8 +523,7 @@ func TestCandidateWriteProbe_DeniedWithoutUnlockFile(t *testing.T) {
 	m.advancedMode = true
 
 	_, cmd := m.Update(candidateProbeBeginMsg{device: candidate})
-	resultMsg := cmd()
-	result := resultMsg.(candidateProbeResultMsg)
+	result := runCmdForMsg[candidateProbeResultMsg](t, cmd)
 	if result.err == nil && result.report.Allowed {
 		t.Fatal("expected the probe to be denied without a matching unlock file present")
 	}
@@ -388,18 +660,7 @@ func TestView_ModalDimsBackgroundInsteadOfReplacingIt(t *testing.T) {
 	}
 	baselineHeaderLine := strings.Split(baseline, "\n")[0]
 
-	// Select JP108, navigate to Firmware Update, trigger it -> risk-ack modal.
-	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRight})
-	m = next.(Model)
-	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown}) // Diagnose -> Mapping Editor
-	m = next.(Model)
-	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown}) // Mapping Editor -> Firmware Update
-	m = next.(Model)
-	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	m = next.(Model)
-	if !m.modal.active {
-		t.Fatal("expected the risk-ack modal to be active after triggering Firmware Update")
-	}
+	m.modal = riskAckModal("run a test-only unsafe operation", nil)
 
 	withModal := m.View()
 	if !strings.Contains(withModal, "Unsafe operation acknowledgement") {
@@ -468,6 +729,38 @@ func TestStylePanelTitleAndStyleAccentAreDistinct(t *testing.T) {
 	const sample = "Sample"
 	if stylePanelTitle.Render(sample) == styleAccent.Render(sample) {
 		t.Fatal("expected stylePanelTitle and styleAccent to render differently, got identical output")
+	}
+}
+
+func TestTheme_AdaptiveAndNoColorReadableDistinctions(t *testing.T) {
+	prevProfile := lipgloss.ColorProfile()
+	prevDark := lipgloss.HasDarkBackground()
+	t.Cleanup(func() {
+		lipgloss.SetColorProfile(prevProfile)
+		lipgloss.SetHasDarkBackground(prevDark)
+	})
+
+	lipgloss.SetColorProfile(termenv.ANSI256)
+	darkRenderer := lipgloss.NewRenderer(os.Stdout)
+	darkRenderer.SetColorProfile(termenv.ANSI256)
+	darkRenderer.SetHasDarkBackground(true)
+	adaptiveAccent := semanticColorForEnv(false, "25", "111")
+	darkAccent := darkRenderer.NewStyle().Foreground(adaptiveAccent).Render("accent")
+	lightRenderer := lipgloss.NewRenderer(os.Stdout)
+	lightRenderer.SetColorProfile(termenv.ANSI256)
+	lightRenderer.SetHasDarkBackground(false)
+	lightAccent := lightRenderer.NewStyle().Foreground(adaptiveAccent).Render("accent")
+	if darkAccent == lightAccent {
+		t.Fatal("expected adaptive accent color to render differently on dark and light backgrounds")
+	}
+
+	lipgloss.SetColorProfile(termenv.Ascii)
+	row := styleSelectedRow.Render("› Firmware Update  (Deferred in 0.1.0)")
+	if strings.Contains(row, "\x1b[") {
+		t.Fatalf("NO_COLOR/ascii rendering should not rely on SGR escapes, got %q", row)
+	}
+	if !strings.Contains(row, "›") || !strings.Contains(row, "Deferred in 0.1.0") {
+		t.Fatalf("NO_COLOR/ascii rendering must retain glyph/text distinctions, got %q", row)
 	}
 }
 

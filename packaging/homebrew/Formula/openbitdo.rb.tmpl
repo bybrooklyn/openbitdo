@@ -1,21 +1,26 @@
 class Openbitdo < Formula
   desc "Beginner-first clean-room 8BitDo TUI utility"
   homepage "https://github.com/@REPOSITORY@"
-  license "GPL-3.0-or-later"
   version "@VERSION@"
+  license "GPL-3.0-or-later"
 
   on_macos do
-    if Hardware::CPU.arm?
+    depends_on arch: :arm64
+    depends_on macos: :ventura
+
+    on_arm do
       url "https://github.com/@REPOSITORY@/releases/download/@UPSTREAM_TAG@/openbitdo-@UPSTREAM_TAG@-macos-arm64.tar.gz"
       sha256 "@MACOS_ARM64_SHA256@"
     end
   end
 
   on_linux do
-    if Hardware::CPU.intel?
+    on_intel do
       url "https://github.com/@REPOSITORY@/releases/download/@UPSTREAM_TAG@/openbitdo-@UPSTREAM_TAG@-linux-x86_64.tar.gz"
       sha256 "@LINUX_X86_64_SHA256@"
-    elsif Hardware::CPU.arm?
+    end
+
+    on_arm do
       url "https://github.com/@REPOSITORY@/releases/download/@UPSTREAM_TAG@/openbitdo-@UPSTREAM_TAG@-linux-aarch64.tar.gz"
       sha256 "@LINUX_AARCH64_SHA256@"
     end
@@ -23,6 +28,9 @@ class Openbitdo < Formula
 
   def install
     bin.install "bin/openbitdo"
+    bash_completion.install "share/bash-completion/completions/openbitdo"
+    fish_completion.install "share/fish/vendor_completions.d/openbitdo.fish"
+    zsh_completion.install "share/zsh/site-functions/_openbitdo"
   end
 
   test do

@@ -2,11 +2,19 @@ package protocol
 
 import (
 	"context"
+	"fmt"
 	"runtime"
+	"sort"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/karalabe/hid"
+)
+
+const (
+	vendorConfigUsagePage uint16 = 0xffa0
+	vendorConfigUsage     uint16 = 0x0001
 )
 
 // linuxUdevHint is appended to a device-open failure on Linux. karalabe/hid
@@ -43,11 +51,23 @@ type EnumeratedDevice struct {
 	Manufacturer string
 	Serial       string
 	Path         string
+	UsagePage    uint16
+	Usage        uint16
+	Interface    int
+}
+
+// IsVendorConfigInterface reports whether this logical HID interface is the
+// vendor control channel OpenBitdo may send configuration commands through.
+func (d EnumeratedDevice) IsVendorConfigInterface() bool {
+	return d.UsagePage == vendorConfigUsagePage && d.Usage == vendorConfigUsage
 }
 
 // EnumerateHIDDevices lists every connected HID device.
 func EnumerateHIDDevices() []EnumeratedDevice {
-	infos := hid.Enumerate(0, 0)
+	return enumeratedDevicesFromHIDInfos(hid.Enumerate(0, 0))
+}
+
+func enumeratedDevicesFromHIDInfos(infos []hid.DeviceInfo) []EnumeratedDevice {
 	devices := make([]EnumeratedDevice, 0, len(infos))
 	for _, info := range infos {
 		devices = append(devices, EnumeratedDevice{
@@ -56,6 +76,9 @@ func EnumerateHIDDevices() []EnumeratedDevice {
 			Manufacturer: info.Manufacturer,
 			Serial:       info.Serial,
 			Path:         info.Path,
+			UsagePage:    info.UsagePage,
+			Usage:        info.Usage,
+			Interface:    info.Interface,
 		})
 	}
 	return devices
@@ -89,25 +112,136 @@ type hidDevice interface {
 
 // HidTransport is the real hidapi-backed Transport.
 type HidTransport struct {
-	mu     sync.Mutex
-	device hidDevice
-	target VidPid
+	mu        sync.Mutex
+	device    hidDevice
+	target    VidPid
+	enumerate func(uint16, uint16) []hid.DeviceInfo
+	open      func(hid.DeviceInfo) (hidDevice, error)
 }
 
 // NewHidTransport returns an unopened HID transport.
 func NewHidTransport() *HidTransport {
-	return &HidTransport{}
+	return newHidTransport(hid.Enumerate, openHidDevice)
+}
+
+func newHidTransport(enumerate func(uint16, uint16) []hid.DeviceInfo, open func(hid.DeviceInfo) (hidDevice, error)) *HidTransport {
+	return &HidTransport{enumerate: enumerate, open: open}
+}
+
+func isVendorConfigInterface(info hid.DeviceInfo) bool {
+	return info.UsagePage == vendorConfigUsagePage && info.Usage == vendorConfigUsage
+}
+
+// selectVendorConfigInterface deterministically selects the vendor control
+// interface regardless of enumeration order. Known gamepad/other interfaces
+// are never a fallback. Linux's sole-interface 0/0 metadata case is allowed
+// only when there is exactly one matching interface and therefore no choice
+// to guess between.
+func selectVendorConfigInterface(target VidPid, infos []hid.DeviceInfo) (hid.DeviceInfo, error) {
+	return selectVendorConfigInterfaceForGOOS(target, infos, runtime.GOOS)
+}
+
+func selectVendorConfigInterfaceForGOOS(target VidPid, infos []hid.DeviceInfo, goos string) (hid.DeviceInfo, error) {
+	matches := make([]hid.DeviceInfo, 0, 1)
+	targetInfos := make([]hid.DeviceInfo, 0, len(infos))
+	available := make([]string, 0, len(infos))
+	for _, info := range infos {
+		available = append(available, fmt.Sprintf("%#04x:%#04x interface=%d path=%q serial=%q", info.UsagePage, info.Usage, info.Interface, info.Path, info.Serial))
+		if info.VendorID != target.VID || info.ProductID != target.PID {
+			continue
+		}
+		targetInfos = append(targetInfos, info)
+		if isVendorConfigInterface(info) {
+			matches = append(matches, info)
+		}
+	}
+	if len(matches) == 0 {
+		// karalabe/hid cannot provide UsagePage/Usage on Linux. A sole
+		// matching 0/0 interface is unambiguous and therefore safe; multiple
+		// unknown interfaces are never guessed between, and known non-vendor
+		// metadata never falls back.
+		if goos == "linux" && len(targetInfos) == 1 && targetInfos[0].UsagePage == 0 && targetInfos[0].Usage == 0 {
+			return targetInfos[0], nil
+		}
+		sort.Strings(available)
+		detail := "none enumerated"
+		if len(available) > 0 {
+			detail = strings.Join(available, ", ")
+		}
+		if len(targetInfos) > 1 {
+			allUnknown := true
+			for _, info := range targetInfos {
+				if info.UsagePage != 0 || info.Usage != 0 {
+					allUnknown = false
+					break
+				}
+			}
+			if allUnknown {
+				return hid.DeviceInfo{}, errTransport(
+					"ambiguous HID interfaces for %s: %d interfaces have unknown usage metadata; vendor configuration interface %#04x:%#04x cannot be selected safely; available: %s",
+					target, len(targetInfos), vendorConfigUsagePage, vendorConfigUsage, detail,
+				)
+			}
+		}
+		return hid.DeviceInfo{}, errTransport(
+			"no vendor configuration HID interface (usage page %#04x, usage %#04x) found for %s; available: %s",
+			vendorConfigUsagePage, vendorConfigUsage, target, detail)
+	}
+	if goos == "darwin" && len(matches) > 1 {
+		// internal/machid re-matches by VID/PID/usage because macOS HID paths
+		// are unavailable in this stack. It cannot honor a path chosen here,
+		// so only duplicate matches carrying the same non-empty physical serial
+		// are safe to treat as one device. Distinct/missing serials are an
+		// ambiguous same-PID multi-controller open and must fail closed.
+		serial := strings.TrimSpace(matches[0].Serial)
+		for _, info := range matches[1:] {
+			if serial == "" || strings.TrimSpace(info.Serial) != serial {
+				return hid.DeviceInfo{}, errTransport(
+					"ambiguous macOS vendor configuration interfaces for %s: selected physical identity cannot be honored without a unique shared serial",
+					target)
+			}
+		}
+		if serial == "" {
+			return hid.DeviceInfo{}, errTransport(
+				"ambiguous macOS vendor configuration interfaces for %s: selected physical identity cannot be honored without a unique shared serial",
+				target)
+		}
+	}
+
+	sort.Slice(matches, func(i, j int) bool {
+		left, right := matches[i], matches[j]
+		if left.Serial != right.Serial {
+			return left.Serial < right.Serial
+		}
+		if left.Path != right.Path {
+			return left.Path < right.Path
+		}
+		return left.Interface < right.Interface
+	})
+	return matches[0], nil
 }
 
 func (h *HidTransport) Open(ctx context.Context, target VidPid) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	infos := hid.Enumerate(target.VID, target.PID)
+	enumerate := h.enumerate
+	if enumerate == nil {
+		enumerate = hid.Enumerate
+	}
+	open := h.open
+	if open == nil {
+		open = openHidDevice
+	}
+	infos := enumerate(target.VID, target.PID)
 	if len(infos) == 0 {
 		return errTransport("no HID device found for %s", target)
 	}
-	device, err := openHidDevice(infos[0])
+	selected, err := selectVendorConfigInterface(target, infos)
+	if err != nil {
+		return err
+	}
+	device, err := open(selected)
 	if err != nil {
 		return withLinuxOpenHint(errTransport("open failed for %s: %v", target, err))
 	}

@@ -11,6 +11,7 @@ type AppPolicyGateReason string
 
 const (
 	ReasonUnsupportedPid        AppPolicyGateReason = "UnsupportedPid"
+	ReasonFeatureUnavailable    AppPolicyGateReason = "FeatureUnavailable"
 	ReasonNotHardwareConfirmed  AppPolicyGateReason = "NotHardwareConfirmed"
 	ReasonUnsafeFlagsMissing    AppPolicyGateReason = "UnsafeFlagsMissing"
 	ReasonExperimentalRequired  AppPolicyGateReason = "ExperimentalRequired"

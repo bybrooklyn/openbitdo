@@ -24,6 +24,18 @@ type modal struct {
 	onConfirm    tea.Msg
 }
 
+type discardAction int
+
+const (
+	discardActionBack discardAction = iota
+	discardActionQuit
+	discardActionLoadSlot
+)
+
+type discardMappingMsg struct {
+	action discardAction
+}
+
 func newModal(title string, body []string, danger bool, confirmLabel string, onConfirm tea.Msg) modal {
 	if confirmLabel == "" {
 		confirmLabel = "Confirm"
@@ -52,6 +64,22 @@ func riskAckModal(action string, onConfirm tea.Msg) modal {
 		},
 		true, "I understand the risk", onConfirm,
 	)
+}
+
+func discardMappingModal(action discardAction) modal {
+	return newModal(
+		"Discard mapping draft?",
+		[]string{
+			"You have unapplied mapping changes.",
+			"",
+			"Discarding leaves the connected device unchanged.",
+		},
+		false, "Discard", discardMappingMsg{action: action},
+	)
+}
+
+func helpModal(help string) modal {
+	return newModal("Help", []string{help}, false, "OK", nil)
 }
 
 // view renders the modal box itself (no positioning/backdrop) — see

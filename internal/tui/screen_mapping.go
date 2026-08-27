@@ -122,6 +122,7 @@ type mappingState struct {
 	u2PreviewErr     error
 
 	cursor    int
+	rowOffset int
 	applying  bool
 	statusMsg string
 }
@@ -243,12 +244,20 @@ func (m Model) updateMapping(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.mapping.u2PreviewResult = nil
 				m.mapping.u2PreviewErr = nil
 			case "enter":
+				if m.mapping.dirty() {
+					m.modal = discardMappingModal(discardActionLoadSlot)
+					return m, nil
+				}
 				return m.loadPreviewedSlotIntoDraft()
 			}
 			return m, nil
 		}
 		switch msg.String() {
 		case "esc":
+			if m.mapping.dirty() {
+				m.modal = discardMappingModal(discardActionBack)
+				return m, nil
+			}
 			m.screen = screenDevices
 			return m, nil
 		case "p":
@@ -258,10 +267,12 @@ func (m Model) updateMapping(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "up", "k":
 			if m.mapping.cursor > 0 {
 				m.mapping.cursor--
+				m.ensureMappingCursorVisible()
 			}
 		case "down", "j":
 			if m.mapping.cursor < m.mapping.rowCount()-1 {
 				m.mapping.cursor++
+				m.ensureMappingCursorVisible()
 			}
 		case "left":
 			m.cycleMappingCursor(-1)
@@ -305,7 +316,48 @@ func (m Model) loadPreviewedSlotIntoDraft() (tea.Model, tea.Cmd) {
 	m.mapping.u2PreviewResult = nil
 	m.mapping.u2PreviewErr = nil
 	m.mapping.cursor = 0
+	m.mapping.rowOffset = 0
 	return m, nil
+}
+
+func (m *Model) ensureMappingCursorVisible() {
+	editableRows := m.mapping.rowCount() - 3
+	if m.mapping.cursor >= editableRows {
+		return
+	}
+	start, _, _ := viewportWindow(editableRows, m.mapping.cursor, m.mapping.rowOffset, m.mappingVisibleRows())
+	m.mapping.rowOffset = start
+}
+
+func (m Model) mappingVisibleRows() int {
+	reserved := 13
+	if m.mapping.kind == core.KindUltimate2 && calculateLayout(m.width, m.height).mode == layoutWide && m.height >= 32 {
+		reserved = 21
+	}
+	return min(12, max(1, m.height-reserved))
+}
+
+// mappingRowText is the single plain-text representation used for both
+// rendering and mouse hit resolution. Keeping this in one place prevents a
+// click from targeting a different logical row than the one visible on screen.
+func (m Model) mappingRowText(i int) string {
+	buttonCount := len(m.mapping.u2Draft.Mappings)
+	var label, value string
+	switch {
+	case m.mapping.kind == core.KindJP108:
+		row := m.mapping.jp108Draft[i]
+		label = fmt.Sprintf("%v", row.Button)
+		value = jp108TargetLabel(row.TargetHIDUsage)
+	case i < buttonCount:
+		row := m.mapping.u2Draft.Mappings[i]
+		label = fmt.Sprintf("%v", row.Button)
+		value = u2FunctionLabel(row.Target)
+	default:
+		row := m.mapping.u2Draft.PaddleMappings[i-buttonCount]
+		label = fmt.Sprintf("%v", row.Paddle)
+		value = u2FunctionLabel(row.Target)
+	}
+	return fmt.Sprintf("%-14s → %s", label, value)
 }
 
 func (m *Model) cycleMappingCursor(delta int) {
@@ -434,17 +486,20 @@ func (m Model) viewMapping(height int) string {
 	var b strings.Builder
 	kindLabel := "JP108 Dedicated Mapping"
 	if m.mapping.kind == core.KindUltimate2 {
-		kindLabel = "Ultimate2 Core Mapping"
+		kindLabel = "Ultimate2 Core Mapping Preview (mock-only)"
 	}
 	b.WriteString(stylePanelTitle.Render(kindLabel+": "+m.mapping.device.Name) + "\n\n")
 
 	if m.mapping.loading {
 		b.WriteString(styleFaint.Render("Loading mapping…"))
-		return stylePanel.Width(m.width - 2).Height(height - 2).Render(b.String())
+		return renderBoundedPanel(m.width-2, height-2, b.String())
 	}
 	if m.mapping.err != nil {
 		b.WriteString(styleDanger.Render("Error: " + m.mapping.err.Error()))
-		return stylePanel.Width(m.width - 2).Height(height - 2).Render(b.String())
+		return renderBoundedPanel(m.width-2, height-2, b.String())
+	}
+	if m.mapping.statusMsg != "" {
+		b.WriteString(styleFaint.Render(m.mapping.statusMsg) + "\n\n")
 	}
 
 	if m.mapping.u2PreviewLoading || m.mapping.u2PreviewResult != nil || m.mapping.u2PreviewErr != nil {
@@ -469,7 +524,7 @@ func (m Model) viewMapping(height int) string {
 			b.WriteString("\n" + styleWarning.Render("This is a read-only preview — nothing has changed yet."))
 			b.WriteString("\n" + styleFaint.Render("enter to load this slot into the editor · esc to dismiss · p for the next slot"))
 		}
-		return stylePanel.Width(m.width - 2).Height(height - 2).Render(b.String())
+		return renderBoundedPanel(m.width-2, height-2, b.String())
 	}
 
 	editableRows := m.mapping.rowCount() - 3
@@ -485,29 +540,20 @@ func (m Model) viewMapping(height int) string {
 			diagramSelectedIdx = int(m.mapping.u2Draft.Mappings[m.mapping.cursor].Button.WireIndex())
 		}
 	}
-	b.WriteString(renderControllerDiagram(m.mapping.kind, diagramSelectedIdx) + "\n\n")
+	if calculateLayout(m.width, m.height).mode == layoutWide && height >= 24 {
+		b.WriteString(renderControllerDiagram(m.mapping.kind, diagramSelectedIdx) + "\n\n")
+	}
 
 	if m.mapping.kind == core.KindUltimate2 && m.mapping.u2Draft.MappingsUnavailable != "" {
 		b.WriteString(styleWarningBlock.Render(styleWarning.Render("Button/paddle remapping isn't available yet: ")+m.mapping.u2Draft.MappingsUnavailable) + "\n\n")
 	}
 
-	for i := 0; i < editableRows; i++ {
-		var label, value string
-		switch {
-		case m.mapping.kind == core.KindJP108:
-			row := m.mapping.jp108Draft[i]
-			label = fmt.Sprintf("%v", row.Button)
-			value = jp108TargetLabel(row.TargetHIDUsage)
-		case i < buttonCount:
-			row := m.mapping.u2Draft.Mappings[i]
-			label = fmt.Sprintf("%v", row.Button)
-			value = u2FunctionLabel(row.Target)
-		default:
-			row := m.mapping.u2Draft.PaddleMappings[i-buttonCount]
-			label = fmt.Sprintf("%v", row.Paddle)
-			value = u2FunctionLabel(row.Target)
-		}
-		line := fmt.Sprintf("%-14s → %s", label, value)
+	start, end, more := viewportWindow(editableRows, m.mapping.cursor, m.mapping.rowOffset, m.mappingVisibleRows())
+	if more != "" {
+		b.WriteString(styleFaint.Render(more) + "\n")
+	}
+	for i := start; i < end; i++ {
+		line := m.mappingRowText(i)
 		if i == m.mapping.cursor {
 			// One Render call over the whole plain-text row (no embedded
 			// styling within line/value to clash with) so styleSelectedRow's
@@ -519,6 +565,9 @@ func (m Model) viewMapping(height int) string {
 		}
 	}
 
+	if more != "" {
+		b.WriteString(styleFaint.Render(more) + "\n")
+	}
 	b.WriteString("\n")
 	applyText := "Apply Changes"
 	applySuffix := ""
@@ -565,9 +614,5 @@ func (m Model) viewMapping(height int) string {
 		b.WriteString("\n" + styleHelp.Render("p to preview another slot before loading it into the editor"))
 	}
 
-	if m.mapping.statusMsg != "" {
-		b.WriteString("\n" + styleFaint.Render(m.mapping.statusMsg))
-	}
-
-	return stylePanel.Width(m.width - 2).Height(height - 2).Render(b.String())
+	return renderBoundedPanel(m.width-2, height-2, b.String())
 }

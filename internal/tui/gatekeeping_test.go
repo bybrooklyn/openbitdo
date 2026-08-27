@@ -14,21 +14,28 @@ import (
 
 func TestFirmwareDisabledReason_BlockedWithoutAck(t *testing.T) {
 	full := core.AppDevice{SupportTier: protocol.TierFull, Capability: protocol.PidCapability{SupportsFirmware: true}}
-	if reason := firmwareDisabledReason(full, false, false); reason == "" {
+	if reason := firmwareDisabledReason(full, true, false, false); reason == "" {
 		t.Fatal("expected firmware update blocked without unsafe acknowledgement")
 	}
 }
 
-func TestFirmwareDisabledReason_EnabledForFullTierWithAck(t *testing.T) {
+func TestFirmwareDisabledReason_DeferredByDefault(t *testing.T) {
 	full := core.AppDevice{SupportTier: protocol.TierFull, Capability: protocol.PidCapability{SupportsFirmware: true}}
-	if reason := firmwareDisabledReason(full, true, false); reason != "" {
+	if reason := firmwareDisabledReason(full, false, true, false); reason != "Deferred in 0.1.0" {
+		t.Fatalf("expected deferred reason, got %q", reason)
+	}
+}
+
+func TestFirmwareDisabledReason_EnabledForFullTierWithAckAndFeatureGate(t *testing.T) {
+	full := core.AppDevice{SupportTier: protocol.TierFull, Capability: protocol.PidCapability{SupportsFirmware: true}}
+	if reason := firmwareDisabledReason(full, true, true, false); reason != "" {
 		t.Fatalf("expected firmware update enabled for full-tier device with ack, got reason %q", reason)
 	}
 }
 
 func TestFirmwareDisabledReason_BlockedForNonFullTierEvenWithAck(t *testing.T) {
 	readOnly := core.AppDevice{SupportTier: protocol.TierCandidateReadOnly, Capability: protocol.PidCapability{SupportsFirmware: true}}
-	reason := firmwareDisabledReason(readOnly, true, false)
+	reason := firmwareDisabledReason(readOnly, true, true, false)
 	if reason == "" {
 		t.Fatal("expected firmware update blocked for a non-full-tier device even with ack")
 	}
@@ -39,19 +46,29 @@ func TestFirmwareDisabledReason_BlockedForNonFullTierEvenWithAck(t *testing.T) {
 
 func TestFirmwareDisabledReason_WriteLockOverridesEverything(t *testing.T) {
 	full := core.AppDevice{SupportTier: protocol.TierFull, Capability: protocol.PidCapability{SupportsFirmware: true}}
-	if reason := firmwareDisabledReason(full, true, true); reason != "Write locked until restart" {
+	if reason := firmwareDisabledReason(full, true, true, true); reason != "Write locked until restart" {
 		t.Fatalf("expected write-lock reason to take precedence, got %q", reason)
 	}
 }
 
 func TestMappingDisabledReason_RequiresConfirmedMappingCapability(t *testing.T) {
 	full := core.AppDevice{SupportTier: protocol.TierFull}
-	if reason := mappingDisabledReason(full, false); reason != "No confirmed mapping editor for this PID" {
+	if reason := mappingDisabledReason(full, false, false); reason != "No confirmed mapping editor for this PID" {
 		t.Fatalf("got %q", reason)
 	}
 	full.Capability.SupportsJP108DedicatedMap = true
-	if reason := mappingDisabledReason(full, false); reason != "" {
+	if reason := mappingDisabledReason(full, false, false); reason != "" {
 		t.Fatalf("expected enabled once JP108 mapping capability is set, got %q", reason)
+	}
+}
+
+func TestMappingDisabledReason_BlocksRealUltimate2Mapping(t *testing.T) {
+	full := core.AppDevice{SupportTier: protocol.TierFull, Capability: protocol.PidCapability{SupportsU2ButtonMap: true, SupportsU2SlotConfig: true}}
+	if reason := mappingDisabledReason(full, false, false); reason != "button-map framing not hardware-confirmed" {
+		t.Fatalf("expected real Ultimate2 mapping block, got %q", reason)
+	}
+	if reason := mappingDisabledReason(full, true, false); reason != "" {
+		t.Fatalf("expected mock-only Ultimate2 preview enabled, got %q", reason)
 	}
 }
 

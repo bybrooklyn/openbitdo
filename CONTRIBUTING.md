@@ -6,6 +6,8 @@ of that, please read this whole file before opening a PR.
 
 ## Building and Testing
 
+Use Go `1.26.7` for local development, CI parity, and release artifacts.
+
 This project uses [`just`](https://github.com/casey/just) as its command
 runner — see the `justfile` at the repo root, or run `just` with no arguments
 to list every recipe. The two you'll use most:
@@ -17,6 +19,14 @@ just run-mock  # launch the TUI against mock devices, no hardware needed
 
 Run `just check` before opening a PR — it's exactly what CI gates on, so a
 clean local run means CI should pass too.
+
+Release-blocking checks also include pinned `golangci-lint` `2.13.1`,
+`govulncheck` `v1.7.0` with zero reachable findings, and archived
+`govulncheck` JSON output.
+
+Live HID tests are never part of an ordinary local or CI run. Darwin hardware
+probes must carry the `manual` build tag, and every live hardware test command
+must be invoked with `-tags manual`.
 
 ## The Clean-Room Rule (read this)
 
@@ -45,6 +55,11 @@ into a PR against this repo. Follow the dirty-room evidence process instead
 `docs/spec/command_matrix.csv` and a dossier, and the Go registry is
 generated from those (`go generate ./...` — see
 `internal/protocol/gen/main.go`), not hand-edited.
+
+For the `v0.1.0-rc.1` line, firmware updates and real-hardware Ultimate 2
+mapping are explicitly deferred. Do not describe either as working in a PR,
+README change, issue response, package note, or release note unless a later
+release gate has been updated with hardware-confirmed evidence.
 
 ## Code Style
 

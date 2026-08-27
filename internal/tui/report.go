@@ -72,6 +72,7 @@ type reportScorecard struct {
 	ScorePercent            int          `toml:"score_percent"`
 	PromotionReady          bool         `toml:"promotion_ready"`
 	MissingEvidence         []string     `toml:"missing_evidence"`
+	ReleaseBlockers         []string     `toml:"release_blockers"`
 	VidPid                  reportVidPid `toml:"vid_pid"`
 }
 
@@ -155,11 +156,8 @@ func worksNowFor(d core.AppDevice) []string {
 		out = append(out, "profile read/write where policy allows")
 	}
 	if d.SupportTier == protocol.TierFull {
-		if d.Capability.SupportsJP108DedicatedMap || (d.Capability.SupportsU2ButtonMap && d.Capability.SupportsU2SlotConfig) {
-			out = append(out, "confirmed mapping editor")
-		}
-		if d.Capability.SupportsFirmware {
-			out = append(out, "firmware update")
+		if d.Capability.SupportsJP108DedicatedMap {
+			out = append(out, "confirmed JP108 mapping editor")
 		}
 	}
 	return out
@@ -175,12 +173,12 @@ func blockedOperationsFor(d core.AppDevice) []string {
 	case protocol.TierDetectOnly:
 		return []string{"diagnostics beyond identification, firmware, mapping, and writes are unavailable"}
 	default:
-		var out []string
-		if !d.Capability.SupportsFirmware {
-			out = append(out, "firmware: no verified path for this PID")
-		}
+		out := []string{"firmware: deferred in 0.1.0"}
 		if !d.Capability.SupportsJP108DedicatedMap && (!d.Capability.SupportsU2ButtonMap || !d.Capability.SupportsU2SlotConfig) {
 			out = append(out, "mapping: no confirmed editor for this PID")
+		}
+		if d.Capability.SupportsU2ButtonMap && d.Capability.SupportsU2SlotConfig {
+			out = append(out, "Ultimate2 mapping: button-map framing not hardware-confirmed")
 		}
 		return out
 	}
@@ -193,7 +191,8 @@ func scorecardToReport(s core.SupportScorecard) *reportScorecard {
 		SafeReadCoverage: string(s.SafeReadCoverage), SafeWriteReadiness: string(s.SafeWriteReadiness),
 		BackupReadbackReadiness: string(s.BackupReadbackReadiness), FirmwareStatus: string(s.FirmwareStatus),
 		ScorePercent: s.ScorePercent, PromotionReady: s.PromotionReady, MissingEvidence: s.MissingEvidence,
-		VidPid: reportVidPid{VID: s.VidPid.VID, PID: s.VidPid.PID},
+		ReleaseBlockers: s.ReleaseBlockers,
+		VidPid:          reportVidPid{VID: s.VidPid.VID, PID: s.VidPid.PID},
 	}
 }
 

@@ -286,7 +286,7 @@ func (m Model) viewFirmware(height int) string {
 		b.WriteString(styleHelp.Render("enter/esc to return"))
 	}
 
-	return stylePanel.Width(m.width - 2).Height(height - 2).Render(b.String())
+	return renderBoundedPanel(m.width-2, height-2, b.String())
 }
 
 func progressBar(percent, width int) string {

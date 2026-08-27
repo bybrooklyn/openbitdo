@@ -1,6 +1,10 @@
 package tui
 
-import "github.com/charmbracelet/lipgloss"
+import (
+	"os"
+
+	"github.com/charmbracelet/lipgloss"
+)
 
 // theme is OpenBitdo's visual identity: a restrained, modern palette in the
 // register of well-designed terminal apps (opencode and similar) rather than
@@ -16,32 +20,47 @@ import "github.com/charmbracelet/lipgloss"
 // stylePanel/stylePanelActive and the modal styles below follow that same
 // left-bar-only, no-full-box approach.
 type themeT struct {
-	Background lipgloss.Color
-	Surface    lipgloss.Color
-	BorderDim  lipgloss.Color
+	Background lipgloss.TerminalColor
+	Surface    lipgloss.TerminalColor
+	BorderDim  lipgloss.TerminalColor
 
-	Text      lipgloss.Color
-	TextFaint lipgloss.Color
+	Text      lipgloss.TerminalColor
+	TextFaint lipgloss.TerminalColor
 
-	Accent lipgloss.Color
+	Accent lipgloss.TerminalColor
 
-	Positive lipgloss.Color
-	Warning  lipgloss.Color
-	Danger   lipgloss.Color
+	Positive lipgloss.TerminalColor
+	Warning  lipgloss.TerminalColor
+	Danger   lipgloss.TerminalColor
+
+	SelectedText lipgloss.TerminalColor
+}
+
+func semanticColor(light, dark string) lipgloss.TerminalColor {
+	return semanticColorForEnv(os.Getenv("NO_COLOR") != "", light, dark)
+}
+
+func semanticColorForEnv(noColor bool, light, dark string) lipgloss.TerminalColor {
+	if noColor {
+		return lipgloss.NoColor{}
+	}
+	return lipgloss.AdaptiveColor{Light: light, Dark: dark}
 }
 
 var theme = themeT{
-	Surface:   lipgloss.Color("235"),
-	BorderDim: lipgloss.Color("238"),
+	Surface:   semanticColor("255", "235"),
+	BorderDim: semanticColor("244", "238"),
 
-	Text:      lipgloss.Color("252"),
-	TextFaint: lipgloss.Color("240"),
+	Text:      semanticColor("235", "252"),
+	TextFaint: semanticColor("244", "240"),
 
-	Accent: lipgloss.Color("111"), // soft azure
+	Accent: semanticColor("25", "111"), // deep/soft azure
 
-	Positive: lipgloss.Color("114"), // muted green
-	Warning:  lipgloss.Color("179"), // amber
-	Danger:   lipgloss.Color("174"), // muted coral-red
+	Positive: semanticColor("28", "114"),  // green
+	Warning:  semanticColor("130", "179"), // amber
+	Danger:   semanticColor("124", "174"), // coral-red
+
+	SelectedText: semanticColor("255", "235"),
 }
 
 // leftBar is a border with only a left-side vertical rule — no corners, no
@@ -52,7 +71,7 @@ var leftBar = lipgloss.Border{Left: "┃"}
 
 // barred applies a left-only accent bar in the given color, with a small
 // left-padding gap so the bar doesn't sit flush against the text.
-func barred(c lipgloss.Color) lipgloss.Style {
+func barred(c lipgloss.TerminalColor) lipgloss.Style {
 	return lipgloss.NewStyle().
 		Border(leftBar, false, false, false, true).
 		BorderForeground(c).
@@ -108,7 +127,7 @@ var (
 	// row's content already carries its own embedded styling and this
 	// whole-row wrap isn't safe to use.
 	styleSelectedRow = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("235")).
+				Foreground(theme.SelectedText).
 				Background(theme.Accent).
 				Bold(true)
 
@@ -121,7 +140,7 @@ var (
 	// background off partway through the row, a real (if subtle) rendering
 	// bug, not just a style-consistency nicety.
 	styleSelectedMarker = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("235")).
+				Foreground(theme.SelectedText).
 				Background(theme.Accent).
 				Bold(true)
 

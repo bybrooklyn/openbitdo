@@ -49,5 +49,5 @@ func (m Model) viewRecovery(height int) string {
 	}
 	b.WriteString(styleKey.Render("q") + " quit")
 
-	return stylePanel.Width(m.width - 2).Height(height - 2).Render(b.String())
+	return renderBoundedPanel(m.width-2, height-2, b.String())
 }

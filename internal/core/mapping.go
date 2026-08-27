@@ -7,6 +7,12 @@ import (
 	"github.com/bybrooklyn/openbitdo/internal/protocol"
 )
 
+const u2MappingDeferredReason = "button-map framing not hardware-confirmed"
+
+func u2MappingDeferredError() *Error {
+	return errPolicyDenied(ReasonNotHardwareConfirmed, u2MappingDeferredReason)
+}
+
 // JP108ReadDedicatedMapping reads the JP108 dedicated-button mapping table.
 func (c *OpenBitdoCore) JP108ReadDedicatedMapping(ctx context.Context, vidPid protocol.VidPid) ([]DedicatedButtonMapping, error) {
 	p := protocol.DeviceProfileFor(vidPid)
@@ -177,7 +183,7 @@ func (c *OpenBitdoCore) U2ReadCoreProfile(ctx context.Context, vidPid protocol.V
 	}
 	return U2CoreProfile{
 		Slot: activeSlot, Mode: mode.Mode, FirmwareVersion: firmwareVersion, L2Analog: l2, R2Analog: r2,
-		SupportsTriggerWrite: p.SupportTier == protocol.TierFull,
+		SupportsTriggerWrite: false,
 		Mappings:             mappings, PaddleMappings: paddleMappings, MappingsUnavailable: mappingsUnavailable,
 	}, nil
 }
@@ -272,7 +278,7 @@ func (c *OpenBitdoCore) U2PreviewSlot(ctx context.Context, vidPid protocol.VidPi
 	}
 	return U2CoreProfile{
 		Slot: slot, FirmwareVersion: "unknown", L2Analog: l2, R2Analog: r2,
-		SupportsTriggerWrite: p.SupportTier == protocol.TierFull,
+		SupportsTriggerWrite: false,
 		Mappings:             mappings, PaddleMappings: paddleMappings, MappingsUnavailable: mappingsUnavailable,
 	}, nil
 }
@@ -281,8 +287,8 @@ func formatFirmwareVersionDecimal(raw uint32) string {
 	return fmt.Sprintf("%d.%02d", raw/100, raw%100)
 }
 
-// U2ApplyCoreProfile applies mode/mapping/analog changes and returns the
-// backup ID (if requested).
+// U2ApplyCoreProfile applies mode/mapping/analog changes in mock mode and
+// rejects real devices until button-map framing is hardware-confirmed.
 func (c *OpenBitdoCore) U2ApplyCoreProfile(ctx context.Context, vidPid protocol.VidPid, slot U2SlotID, mode byte, mapChanges []U2ButtonMapping, l2Analog, r2Analog float32, backup bool) (ConfigBackupID, bool, error) {
 	report, err := c.U2ApplyCoreProfileWithRecovery(ctx, vidPid, slot, mode, mapChanges, l2Analog, r2Analog, backup)
 	if err != nil {
@@ -306,114 +312,34 @@ func (c *OpenBitdoCore) U2ApplyCoreProfile(ctx context.Context, vidPid protocol.
 }
 
 // U2ApplyCoreProfileWithRecovery applies mode/mapping/analog changes with a
-// backup-then-write-then-rollback-on-failure pattern.
+// backup in mock mode. Real devices are rejected before any I/O or backup.
 func (c *OpenBitdoCore) U2ApplyCoreProfileWithRecovery(ctx context.Context, vidPid protocol.VidPid, slot U2SlotID, mode byte, mapChanges []U2ButtonMapping, l2Analog, r2Analog float32, backup bool) (WriteRecoveryReport, error) {
 	p := protocol.DeviceProfileFor(vidPid)
 	if !p.Capability.SupportsU2SlotConfig || !p.Capability.SupportsU2ButtonMap {
 		return WriteRecoveryReport{}, errPolicyDenied(ReasonUnsupportedPid, "Ultimate2 core profile is not supported for %s", vidPid)
 	}
 
-	if c.config.MockMode {
-		report := WriteRecoveryReport{WriteApplied: true}
-		if backup {
-			report.BackupID = c.storeBackup(vidPid, configBackupPayload{
-				kind: backupU2,
-				u2Profile: U2CoreProfile{
-					Slot: slot, FirmwareVersion: "mock-1.0.0", L2Analog: 0.5, R2Analog: 0.5,
-					SupportsTriggerWrite: true, Mappings: defaultU2Mappings(), PaddleMappings: defaultU2PaddleMappings(),
-				},
-				u2ConfigBlob: make([]byte, 32),
-			})
-			report.HasBackupID = true
-		}
-		return report, nil
+	// Real Ultimate2 writes are blocked at the core boundary before backup
+	// reads, session creation, mode changes, or any other transport activity.
+	// The 22-entry button-map payload needs a hardware-confirmed framing
+	// scheme before partial profile writes can be made safely.
+	if !c.config.MockMode {
+		return WriteRecoveryReport{}, u2MappingDeferredError()
 	}
 
-	var backupID ConfigBackupID
-	hasBackup := false
+	report := WriteRecoveryReport{WriteApplied: true}
 	if backup {
-		current, err := c.U2ReadCoreProfile(ctx, vidPid, slot)
-		if err != nil {
-			return WriteRecoveryReport{}, err
-		}
-		session, err := c.openSessionForOps(ctx, vidPid)
-		if err != nil {
-			return WriteRecoveryReport{}, err
-		}
-		configBlob, blobErr := session.U2ReadConfigSlot(ctx, slot.WireValue())
-		_ = session.Close()
-		if blobErr != nil {
-			return WriteRecoveryReport{}, errProtocol(blobErr)
-		}
-		backupID = c.storeBackup(vidPid, configBackupPayload{kind: backupU2, u2Profile: current, u2ConfigBlob: configBlob})
-		hasBackup = true
+		report.BackupID = c.storeBackup(vidPid, configBackupPayload{
+			kind: backupU2,
+			u2Profile: U2CoreProfile{
+				Slot: slot, FirmwareVersion: "mock-1.0.0", L2Analog: 0.5, R2Analog: 0.5,
+				SupportsTriggerWrite: true, Mappings: defaultU2Mappings(), PaddleMappings: defaultU2PaddleMappings(),
+			},
+			u2ConfigBlob: make([]byte, 32),
+		})
+		report.HasBackupID = true
 	}
-
-	session, err := c.openSessionForOps(ctx, vidPid)
-	if err != nil {
-		return WriteRecoveryReport{}, err
-	}
-	applyErr := u2ApplyWrite(ctx, session, slot, mode, mapChanges, l2Analog, r2Analog)
-	_ = session.Close()
-
-	if applyErr == nil {
-		return WriteRecoveryReport{BackupID: backupID, HasBackupID: hasBackup, WriteApplied: true}, nil
-	}
-	return c.rollbackAfterWriteFailure(ctx, backupID, hasBackup, applyErr)
-}
-
-func u2ApplyWrite(ctx context.Context, session *protocol.DeviceSession, slot U2SlotID, mode byte, mapChanges []U2ButtonMapping, l2Analog, r2Analog float32) error {
-	if _, err := session.U2SetMode(ctx, mode); err != nil {
-		return err
-	}
-	wireMap := make([]protocol.IndexedFunction, 0, len(mapChanges))
-	for _, entry := range mapChanges {
-		wireMap = append(wireMap, protocol.IndexedFunction{Index: entry.Button.WireIndex(), Function: uint32(entry.Target)})
-	}
-	// U2WriteButtonMap is currently hard-blocked against real hardware (see
-	// its doc comment in internal/protocol) and always returns an error
-	// here regardless of wireMap's contents. Deliberately NOT swallowed:
-	// U2SetMode above may have already taken effect on the real device by
-	// this point, and letting this error propagate is what makes
-	// U2ApplyCoreProfileWithRecovery's existing backup/rollback path put
-	// the device back the way it was, with a clear "write failed" message
-	// carrying this error's explanation -- rather than silently reporting
-	// success while dropping the button-map/paddle changes the caller
-	// actually asked for. The practical effect: applying *anything* via the
-	// Ultimate2 Mapping Editor against real hardware is blocked (safely,
-	// with rollback) until chunking is confirmed -- see
-	// docs/clean-room-evidence/dossiers/6012/u2_core.toml. Mock mode is
-	// unaffected (never reaches this function).
-	//nolint:staticcheck // SA4023: always true today only because the block above is temporary.
-	if err := session.U2WriteButtonMap(ctx, slot.WireValue(), wireMap); err != nil {
-		return err
-	}
-	configBlob, err := session.U2ReadConfigSlot(ctx, slot.WireValue())
-	if err != nil {
-		return err
-	}
-	if len(configBlob) == 0 {
-		configBlob = make([]byte, 16)
-	}
-	if len(configBlob) > 6 {
-		configBlob[4] = slot.WireValue()
-		configBlob[5] = mode
-		if len(configBlob) > 8 {
-			configBlob[6] = clampToByte(l2Analog)
-			configBlob[7] = clampToByte(r2Analog)
-		}
-	}
-	return session.U2WriteConfigSlot(ctx, slot.WireValue(), configBlob)
-}
-
-func clampToByte(v float32) byte {
-	if v < 0 {
-		v = 0
-	}
-	if v > 1 {
-		v = 1
-	}
-	return byte(v*255.0 + 0.5)
+	return report, nil
 }
 
 // RestoreBackup replays a stored backup's payload back onto its target device.
@@ -428,6 +354,9 @@ func (c *OpenBitdoCore) RestoreBackup(ctx context.Context, backupID ConfigBackup
 	if c.config.MockMode {
 		return nil
 	}
+	if backup.payload.kind == backupU2 {
+		return u2MappingDeferredError()
+	}
 
 	session, err := c.openSessionForOps(ctx, backup.target)
 	if err != nil {
@@ -441,34 +370,6 @@ func (c *OpenBitdoCore) RestoreBackup(ctx context.Context, backupID ConfigBackup
 			if err := session.JP108WriteDedicatedMapping(ctx, entry.Button.WireIndex(), entry.TargetHIDUsage); err != nil {
 				return errProtocol(err)
 			}
-		}
-	case backupU2:
-		profile := backup.payload.u2Profile
-		if _, err := session.U2SetMode(ctx, profile.Mode); err != nil {
-			return errProtocol(err)
-		}
-		wireMap := make([]protocol.IndexedFunction, 0, len(profile.Mappings))
-		for _, entry := range profile.Mappings {
-			wireMap = append(wireMap, protocol.IndexedFunction{Index: entry.Button.WireIndex(), Function: uint32(entry.Target)})
-		}
-		// U2WriteButtonMap is hard-blocked against real hardware (see its
-		// doc comment in internal/protocol). Unlike u2ApplyWrite's use of
-		// this same call, that block is deliberately swallowed here: the
-		// only way a U2 backup reaches this restore path is via
-		// u2ApplyWrite's own button-map write having already failed with
-		// this exact block *before* the device's button map was ever
-		// touched, so there is nothing to actually restore on that front --
-		// treating the block as a genuine rollback failure here would wrongly
-		// report "device state is uncertain" for a device that was never
-		// touched. Any *other* error still fails the restore normally.
-		//nolint:staticcheck // SA4023: always true today only because the block above is temporary.
-		if err := session.U2WriteButtonMap(ctx, profile.Slot.WireValue(), wireMap); err != nil {
-			if pe, ok := err.(*protocol.Error); !ok || pe.Code() != protocol.CodeU2ButtonMapUnavailable {
-				return errProtocol(err)
-			}
-		}
-		if err := session.U2WriteConfigSlot(ctx, profile.Slot.WireValue(), backup.payload.u2ConfigBlob); err != nil {
-			return errProtocol(err)
 		}
 	}
 	return nil

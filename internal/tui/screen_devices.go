@@ -39,6 +39,7 @@ type devicesState struct {
 	devices    []core.AppDevice
 	filtered   []core.AppDevice
 	cursor     int
+	listOffset int
 	filterText string
 	filtering  bool
 	pane       devicePane
@@ -109,13 +110,16 @@ func (m Model) actionsForSelectedDevice() []actionItem {
 
 	items = append(items, actionItem{
 		label: "Mapping Editor", kind: actionMapping,
-		reason: mappingDisabledReason(device, m.writeLockUntilRestart),
+		reason: mappingDisabledReason(device, m.mockMode, m.writeLockUntilRestart),
 	})
+	if device.Capability.SupportsU2ButtonMap && m.mockMode {
+		items[len(items)-1].label = "Mapping Preview (mock-only)"
+	}
 	items = append(items, actionItem{
 		label: "Firmware Update", kind: actionFirmware,
 		// Risk acknowledgement is collected interactively via modal on
 		// trigger, not treated as a static precondition here.
-		reason: firmwareDisabledReason(device, true, m.writeLockUntilRestart),
+		reason: firmwareDisabledReason(device, m.core.FirmwareEnabled(), true, m.writeLockUntilRestart),
 	})
 	if device.SupportTier == protocol.TierCandidateReadOnly {
 		reason := ""
@@ -150,10 +154,15 @@ func (m Model) updateDevices(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// the core workflow and there was otherwise no way back into
 			// the device list after the one-shot load at startup.
 			return m, cmdLoadDevices(m.ctx, m.core)
+		case "s":
+			m.screen = screenSettings
+			m.settingsCursor = 0
+			return m, nil
 		case "up", "k":
 			if m.devices.pane == paneDeviceList {
 				if m.devices.cursor > 0 {
 					m.devices.cursor--
+					m.ensureDeviceCursorVisible()
 				}
 			} else if m.devices.actionIdx > 0 {
 				m.devices.actionIdx--
@@ -163,6 +172,7 @@ func (m Model) updateDevices(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.devices.pane == paneDeviceList {
 				if m.devices.cursor < len(m.devices.filtered)-1 {
 					m.devices.cursor++
+					m.ensureDeviceCursorVisible()
 				}
 			} else if items := m.actionsForSelectedDevice(); m.devices.actionIdx < len(items)-1 {
 				m.devices.actionIdx++
@@ -205,7 +215,17 @@ func (m Model) updateDeviceFilterInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.devices.cursor >= len(m.devices.filtered) {
 		m.devices.cursor = 0
 	}
+	m.devices.listOffset = 0
 	return m, nil
+}
+
+func (m *Model) ensureDeviceCursorVisible() {
+	start, _, _ := viewportWindow(len(m.devices.filtered), m.devices.cursor, m.devices.listOffset, m.deviceVisibleRows())
+	m.devices.listOffset = start
+}
+
+func (m Model) deviceVisibleRows() int {
+	return max(1, m.height-7)
 }
 
 func (m Model) triggerDevicesEnter() (tea.Model, tea.Cmd) {
@@ -223,7 +243,7 @@ func (m Model) triggerDevicesEnter() (tea.Model, tea.Cmd) {
 	}
 	item := items[m.devices.actionIdx]
 	if item.reason != "" {
-		return m, nil
+		return m.setNotice(noticeWarning, item.label+": "+item.reason, false)
 	}
 	device, _ := m.devices.selected()
 
@@ -284,6 +304,9 @@ func (m Model) triggerDevicesEnter() (tea.Model, tea.Cmd) {
 }
 
 func (m Model) viewDevices(height int) string {
+	if calculateLayout(m.width, m.height).mode == layoutCompact {
+		return m.viewDevicesCompact(m.width-2, height)
+	}
 	listWidth := m.width * 2 / 5
 	if listWidth < 24 {
 		listWidth = 24
@@ -293,6 +316,94 @@ func (m Model) viewDevices(height int) string {
 	list := m.viewDeviceList(listWidth, height)
 	detail := m.viewDeviceDetail(detailWidth, height)
 	return lipgloss.JoinHorizontal(lipgloss.Top, list, " ", detail)
+}
+
+func (m Model) viewDevicesCompact(width, height int) string {
+	if m.devices.pane == paneActions {
+		return m.viewDevicesCompactActions(width, height)
+	}
+	var b strings.Builder
+	b.WriteString(stylePanelTitle.Render("Status") + "\n")
+	if len(m.devices.filtered) == 0 {
+		b.WriteString(styleFaint.Render("No controller detected. Press r to rescan, s for settings, or run --mock to preview.") + "\n")
+	} else if device, ok := m.devices.selected(); ok {
+		b.WriteString(deviceRowLabel(device) + "\n")
+		b.WriteString(styleFaint.Render(pidLabel(device.VidPid)+" · "+string(device.ProtocolFamily)) + "\n")
+	}
+
+	b.WriteString("\n" + stylePanelTitle.Render("Works now") + "\n")
+	if device, ok := m.devices.selected(); ok {
+		b.WriteString(styleBody.Render("Safe diagnostics and support reports") + "\n")
+		if device.Capability.SupportsJP108DedicatedMap {
+			b.WriteString(styleBody.Render("JP108 mapping editor") + "\n")
+		}
+		if m.mockMode && device.Capability.SupportsU2ButtonMap {
+			b.WriteString(styleBody.Render("Mock-only Ultimate2 mapping preview") + "\n")
+		}
+	} else {
+		b.WriteString(styleFaint.Render("Settings and device rescan") + "\n")
+	}
+
+	if device, ok := m.devices.selected(); ok {
+		blocked := blockedLinesForDevice(device, m.core.FirmwareEnabled(), m.mockMode, m.acknowledgedRisk, m.advancedMode, m.acknowledgedRisk, m.writeLockUntilRestart)
+		if len(blocked) > 0 {
+			b.WriteString("\n" + stylePanelTitle.Render("Blocked") + "\n")
+			for _, line := range blocked {
+				b.WriteString(styleFaint.Render(line) + "\n")
+			}
+		}
+	}
+
+	b.WriteString("\n" + stylePanelTitle.Render("Next step") + "\n")
+	if len(m.devices.filtered) == 0 {
+		b.WriteString(styleBody.Render("Connect an 8BitDo controller, then press r.") + "\n")
+	} else if m.devices.pane == paneActions {
+		for i, item := range m.actionsForSelectedDevice() {
+			label := item.label
+			if item.reason != "" {
+				label += " (" + item.reason + ")"
+			}
+			if i == m.devices.actionIdx {
+				b.WriteString(styleSelectedRow.Render("› "+label) + "\n")
+			} else {
+				b.WriteString("  " + styleBody.Render(label) + "\n")
+			}
+		}
+	} else {
+		b.WriteString(styleBody.Render("Choose a controller, then enter/right for actions.") + "\n")
+	}
+
+	return renderBoundedPanelWithStyle(stylePanelActive, width, height-2, b.String())
+}
+
+func (m Model) viewDevicesCompactActions(width, height int) string {
+	var b strings.Builder
+	device, ok := m.devices.selected()
+	if !ok {
+		b.WriteString(stylePanelTitle.Render("Actions") + "\n")
+		b.WriteString(styleFaint.Render("No selected device."))
+		return renderBoundedPanelWithStyle(stylePanelActive, width, height-2, b.String())
+	}
+
+	b.WriteString(stylePanelTitle.Render("Actions: "+device.Name) + "\n")
+	b.WriteString(styleFaint.Render(pidLabel(device.VidPid)+" · "+string(device.ProtocolFamily)) + "\n")
+	items := m.actionsForSelectedDevice()
+	for i, item := range items {
+		label := item.label
+		if item.reason != "" {
+			label += " (" + item.reason + ")"
+		}
+		if i == m.devices.actionIdx {
+			b.WriteString(styleSelectedRow.Render("› "+label) + "\n")
+			if item.reason != "" {
+				b.WriteString(styleWarning.Render("  "+item.reason) + "\n")
+			}
+		} else {
+			b.WriteString("  " + styleBody.Render(label) + "\n")
+		}
+	}
+	b.WriteString("\n" + styleFaint.Render("left/esc returns to dashboard summary"))
+	return renderBoundedPanelWithStyle(stylePanelActive, width, height-2, b.String())
 }
 
 func (m Model) viewDeviceList(width, height int) string {
@@ -311,7 +422,12 @@ func (m Model) viewDeviceList(width, height int) string {
 			b.WriteString("\n" + styleFaint.Render("Press r to rescan once it's plugged in."))
 		}
 	}
-	for i, d := range m.devices.filtered {
+	start, end, more := viewportWindow(len(m.devices.filtered), m.devices.cursor, m.devices.listOffset, m.deviceVisibleRows())
+	if more != "" {
+		b.WriteString(styleFaint.Render(more) + "\n")
+	}
+	for i := start; i < end; i++ {
+		d := m.devices.filtered[i]
 		row := deviceRowLabel(d)
 		if i == m.devices.cursor {
 			row = styleSelectedRow.Render(" " + row + " ")
@@ -320,12 +436,15 @@ func (m Model) viewDeviceList(width, height int) string {
 		}
 		b.WriteString(row + "\n")
 	}
-
-	style := stylePanel
-	if m.devices.pane == paneDeviceList {
-		style = stylePanelActive
+	if more != "" {
+		b.WriteString(styleFaint.Render(more) + "\n")
 	}
-	return style.Width(width).Height(height - 2).Render(stylePanelTitle.Render(title) + "\n\n" + b.String())
+
+	content := stylePanelTitle.Render(title) + "\n\n" + b.String()
+	if m.devices.pane == paneDeviceList {
+		return renderBoundedPanelWithStyle(stylePanelActive, width, height-2, content)
+	}
+	return renderBoundedPanel(width, height-2, content)
 }
 
 func deviceRowLabel(d core.AppDevice) string {
@@ -342,7 +461,7 @@ func deviceRowLabel(d core.AppDevice) string {
 func (m Model) viewDeviceDetail(width, height int) string {
 	device, ok := m.devices.selected()
 	if !ok {
-		return stylePanel.Width(width).Height(height - 2).Render(styleFaint.Render("Select a device to see details."))
+		return renderBoundedPanel(width, height-2, styleFaint.Render("Select a device to see details."))
 	}
 
 	var b strings.Builder
@@ -357,17 +476,13 @@ func (m Model) viewDeviceDetail(width, height int) string {
 	var blocks []string
 	blocks = append(blocks, styleBody.Render("Status: "+string(device.SupportStatus()))+"\n"+styleBody.Render("Evidence: "+string(device.Evidence)))
 
-	if blocked := blockedLinesForDevice(device, m.acknowledgedRisk, m.advancedMode, m.acknowledgedRisk, m.writeLockUntilRestart); len(blocked) > 0 {
+	if blocked := blockedLinesForDevice(device, m.core.FirmwareEnabled(), m.mockMode, m.acknowledgedRisk, m.advancedMode, m.acknowledgedRisk, m.writeLockUntilRestart); len(blocked) > 0 {
 		var blockedText strings.Builder
 		blockedText.WriteString(styleWarning.Render("Blocked:"))
 		for _, line := range blocked {
 			blockedText.WriteString("\n" + styleFaint.Render("  · "+line))
 		}
 		blocks = append(blocks, blockedText.String())
-	}
-
-	if device.SupportTier != protocol.TierFull {
-		blocks = append(blocks, candidateTierExplanation(device))
 	}
 
 	var actions strings.Builder
@@ -377,11 +492,13 @@ func (m Model) viewDeviceDetail(width, height int) string {
 		label := item.label
 		style := styleBody
 		if item.reason != "" {
-			style = styleFaint
 			label += "  (" + item.reason + ")"
-		} else if m.devices.pane == paneActions && i == m.devices.actionIdx {
+		}
+		if m.devices.pane == paneActions && i == m.devices.actionIdx {
 			style = styleSelectedRow
 			label = "› " + label
+		} else if item.reason != "" {
+			style = styleFaint
 		} else {
 			label = "  " + label
 		}
@@ -389,13 +506,16 @@ func (m Model) viewDeviceDetail(width, height int) string {
 	}
 	blocks = append(blocks, actions.String())
 
+	if device.SupportTier != protocol.TierFull {
+		blocks = append(blocks, candidateTierExplanation(device))
+	}
+
 	b.WriteString(strings.Join(blocks, "\n\n"))
 
-	style := stylePanel
 	if m.devices.pane == paneActions {
-		style = stylePanelActive
+		return renderBoundedPanelWithStyle(stylePanelActive, width, height-2, b.String())
 	}
-	return style.Width(width).Height(height - 2).Render(b.String())
+	return renderBoundedPanel(width, height-2, b.String())
 }
 
 // candidateTierExplanation is the GitHub-issue-#15 fix: candidate-readonly

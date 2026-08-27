@@ -55,37 +55,37 @@ requirements:
     description: SDK shall support reading and writing JP108 dedicated button mappings for A/B/K1-K8.
     acceptance: Unit and hardware tests verify read/write/readback for A, B, and at least one K button.
   - id: REQ-JP108-002
-    title: JP108 firmware path
-    description: SDK shall support JP108 firmware preflight and transfer with existing unsafe gates.
-    acceptance: Hardware smoke validates JP108 firmware preflight and guarded transfer path.
+    title: JP108 firmware deferral
+    description: JP108 firmware preflight and transfer shall remain unavailable in the v0.1.0 release line.
+    acceptance: Production UI and runtime gates reject JP108 firmware actions; isolated tests may cover firmware code only with injected ephemeral keys and a local HTTP server.
   - id: REQ-U2-001
-    title: Ultimate2 core profile support
-    description: SDK shall support Ultimate2 mode, slot, and core button-map operations.
-    acceptance: Unit and hardware tests verify mode read/set/readback and slot/profile read/write/readback.
+    title: Ultimate2 mock-only mapping preview
+    description: TUI shall keep an honestly labeled Ultimate2 mapping preview for mock-mode UI testing while blocking real-hardware Ultimate2 mapping.
+    acceptance: Real Ultimate2 devices reject mapping apply/reset/write paths with `button-map framing not hardware-confirmed`; mock-mode tests may exercise the preview editor without hardware writes.
   - id: REQ-U2-002
-    title: Ultimate2 firmware path
-    description: SDK shall support Ultimate2 firmware preflight and transfer with existing unsafe gates.
-    acceptance: Hardware smoke validates Ultimate2 firmware preflight and guarded transfer path.
+    title: Ultimate2 firmware deferral
+    description: Ultimate2 firmware preflight and transfer shall remain unavailable in the v0.1.0 release line.
+    acceptance: Production UI and runtime gates reject Ultimate2 firmware actions; isolated tests may cover firmware code only with injected ephemeral keys and a local HTTP server.
   - id: REQ-WIZ-001
     title: Beginner guided configuration flows
-    description: TUI wizard shall provide dedicated JP108 and Ultimate2 configuration paths with mouse support.
-    acceptance: TUI tests verify end-to-end wizard transitions for mapping/profile apply and guided button test.
+    description: TUI wizard shall provide dedicated JP108 configuration paths and an Ultimate2 mock-only preview with mouse support.
+    acceptance: TUI tests verify JP108 mapping/profile apply, Ultimate2 disabled real-hardware messaging, mock-only Ultimate2 preview navigation, and guided button test.
   - id: REQ-WIZ-002
     title: Backup and rollback safety
-    description: Mapping/profile writes shall create rollback snapshots and auto-rollback on failure.
-    acceptance: App-core tests verify backup creation, rollback on failure, and deterministic retry guidance.
+    description: Enabled mapping/profile writes shall create rollback snapshots and auto-rollback on failure.
+    acceptance: App-core tests verify backup creation, rollback on failure, deterministic retry guidance, and no rollback snapshot for disabled firmware or real Ultimate2 mapping actions.
   - id: REQ-HW-001
-    title: Required hardware gates for target lines
-    description: CI shall enforce required blocking hardware jobs for Ultimate2 and JP108 targets.
-    acceptance: workflow includes required jobs that fail deterministically on missing fixture or command failure.
+    title: Required v0.1.0 Ultimate2 hardware gate
+    description: v0.1.0-rc.1 publication shall require one non-destructive hardware qualification using the current Ultimate2 on the final PR tree.
+    acceptance: Gate evidence records every physically available USB/controller mode, the resulting 0x2dc8 PID and HID interfaces, one mode with both vendor config and Generic Desktop Gamepad usage 0x0001:0x0005, passing safe-read diagnostics with real response bytes and transport_ready=true, physical TUI navigation, hotplug refresh within three seconds, and no mapping/candidate-probe/bootloader/firmware write.
   - id: REQ-DR-001
     title: Dossier completeness
     description: Every wave target PID shall have sanitized dossier files for each scoped operation group.
-    acceptance: `docs/clean-room-evidence/dossiers/<pid_hex>/*.toml` exists and includes all required schema fields.
+    acceptance: "`docs/clean-room-evidence/dossiers/<pid_hex>/*.toml` exists and includes all required schema fields."
   - id: REQ-DR-002
     title: Dossier traceability
     description: Dossiers and command matrix rows shall be linked by stable dossier IDs.
-    acceptance: command matrix `dossier_id` references an existing dossier artifact.
+    acceptance: "command matrix `dossier_id` references an existing dossier artifact."
   - id: REQ-DR-W2-001
     title: Wave 2 dossier minimum per PID
     description: Each Wave 2 target PID shall include `core_diag`, `mode_or_profile_read`, and `firmware_preflight` dossiers.
@@ -120,9 +120,9 @@ requirements:
     acceptance: template and docs explicitly prohibit raw snippet submission.
   - id: REQ-GH-001
     title: Release-governance variables
-    description: Repository variables for AUR/Homebrew publication gates shall be configured through GitHub settings.
-    acceptance: variables `AUR_PUBLISH_ENABLED`, `HOMEBREW_PUBLISH_ENABLED`, and `HOMEBREW_TAP_REPO` are present.
+    description: Repository variables for AUR/Homebrew publication gates and the manual Ultimate2 release gate shall be configured through GitHub settings.
+    acceptance: "variables `AUR_PUBLISH_ENABLED`, `HOMEBREW_PUBLISH_ENABLED`, `HOMEBREW_TAP_REPO`, and `ULTIMATE2_RC_GATE_SHA` are present; `ULTIMATE2_RC_GATE_SHA` must equal the exact tagged main commit after strict manual hardware qualification."
   - id: REQ-GH-002
     title: Hardware-constrained required checks
-    description: Branch protection required checks shall reflect currently available hardware fixtures.
-    acceptance: required checks include `hardware-108jp` and `hardware-ultimate2`, excluding unavailable hardware families.
+    description: Branch protection required checks shall reflect source gates plus currently available non-destructive hardware qualification; fixture-backed hardware CI is deferred.
+    acceptance: required checks include source validation and release metadata gates, while v0.1.0-rc.1 publication records the manual Ultimate2 qualification evidence from REQ-HW-001.

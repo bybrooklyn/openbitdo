@@ -9,8 +9,8 @@ the 8BitDo command/diagnostic protocol documented in `docs/spec/protocol_spec.md
 
 The Rust implementation had no gamepad input handling at all (verified: no
 `gilrs`/`sdl2`/joystick dependency anywhere in `sdk/`). The Go rewrite adds
-it so the TUI can be navigated with a controller's own d-pad/buttons, not
-just a keyboard.
+it so the TUI can be navigated with a controller's own d-pad/buttons when
+the OS exposes the controller as a standard HID gamepad, not just a keyboard.
 
 This is decoded entirely from the **standard USB-HID gamepad usage page**
 (USB HID Usage Tables, Generic Desktop Page `0x01` and Button Page `0x09`) —
@@ -64,19 +64,19 @@ and does not touch the clean-room evidence boundary.
      hack that hasn't matched the real `IOHIDDevice` layout since OS X 10.5
      and produces a garbage `io_service_t` — meaning `Path` is empty for
      *every* device on a modern macOS system, not just non-8BitDo ones.
-     Verified end-to-end against real hardware (no 8BitDo controller is
-     available in this project's environment, but real IOKit HID devices
-     are): `internal/input/descriptor_darwin_test.go` genuinely acquires
-     and parses report descriptors from whatever real HID devices exist on
-     the machine running it. **If a future change ever "simplifies" this
-     back to using `info.Path` on darwin, it will silently break** — this
-     isn't a style preference, `Path` is broken at the dependency level.
+     Verified end-to-end against real IOKit HID devices:
+     `internal/input/descriptor_darwin_test.go` genuinely acquires and parses
+     report descriptors from whatever real HID devices exist on the machine
+     running it. Real 8BitDo controller navigation still depends on a connected
+     mode that exposes Generic Desktop Gamepad usage `0x0001:0x0005`; the
+     `v0.1.0-rc.1` gate in `docs/RC_CHECKLIST.md` records that requirement.
+     **If a future change ever "simplifies" this back to using `info.Path` on
+     darwin, it will silently break** — this isn't a style preference, `Path`
+     is broken at the dependency level.
    - **Other platforms** (`descriptor_other.go`, e.g. Windows): still
      unimplemented — there is no release artifact for these platforms
      currently (see `RC_CHECKLIST.md`), so this degrades to keyboard-only
-     navigation there by design, not by oversight. See `MIGRATION.md` for
-     the still-outstanding real-8BitDo-hardware validation gap that applies
-     across all platforms regardless of acquisition method.
+     navigation there by design, not by oversight.
 
 4. **Nav-only, separate from the command session**: the nav stream opens a
    read-only input-report loop on every enumerated `vid==0x2dc8` device at

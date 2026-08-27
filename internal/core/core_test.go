@@ -3,8 +3,13 @@ package core
 import (
 	"bytes"
 	"context"
+	"crypto/ed25519"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -22,8 +27,23 @@ func makeReq(t *testing.T, path string, pid uint16) FirmwarePreflightRequest {
 	}
 }
 
+func enableFirmwareForTest(config Config) Config {
+	config.FirmwareUpdatesEnabled = true
+	return config
+}
+
+func enableFirmwareWithEphemeralTrustForTest(t *testing.T, config Config) Config {
+	t.Helper()
+	publicKey, _, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		t.Fatalf("generate firmware trust key: %v", err)
+	}
+	config.FirmwareTrustedKeys = []ed25519.PublicKey{publicKey}
+	return enableFirmwareForTest(config)
+}
+
 func TestPreflightBlocksCandidatePidWithoutHardwareConfirmation(t *testing.T) {
-	c := New(DefaultConfig())
+	c := New(enableFirmwareForTest(DefaultConfig()))
 	path := filepath.Join(t.TempDir(), "openbitdo-candidate-no-hardware.bin")
 	if err := os.WriteFile(path, make([]byte, 256), 0o644); err != nil {
 		t.Fatalf("write: %v", err)
@@ -73,6 +93,138 @@ func TestCandidateScorecardKeepsRuntimeAndHardwareGapsVisible(t *testing.T) {
 	}
 }
 
+func stringSliceContains(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
+}
+
+func TestSupportScorecardReflectsRuntimeReleaseScope(t *testing.T) {
+	u2 := appDeviceFromProfile(protocol.VidPid{VID: 0x2dc8, PID: 0x6012}, "", true)
+	jp108 := appDeviceFromProfile(protocol.VidPid{VID: 0x2dc8, PID: 0x5209}, "", true)
+
+	realU2 := New(DefaultConfig()).SupportScorecardForDevice(u2)
+	if realU2.FirmwareStatus != EvidenceMissing || realU2.BackupReadbackReadiness != EvidenceMissing || realU2.PromotionReady {
+		t.Fatalf("real U2 scorecard overclaims release readiness: %+v", realU2)
+	}
+	for _, blocker := range []string{ReleaseBlockerFirmwareDisabled, ReleaseBlockerU2ButtonMapFraming} {
+		if !stringSliceContains(realU2.ReleaseBlockers, blocker) {
+			t.Fatalf("real U2 scorecard missing release blocker %q: %+v", blocker, realU2)
+		}
+	}
+	for _, missing := range []string{"firmware updates deferred in 0.1.0", u2MappingDeferredReason} {
+		if !stringSliceContains(realU2.MissingEvidence, missing) {
+			t.Fatalf("real U2 scorecard missing machine-readable gap %q: %+v", missing, realU2)
+		}
+	}
+
+	staticU2 := u2.Scorecard()
+	if staticU2.PromotionReady || !stringSliceContains(staticU2.ReleaseBlockers, ReleaseBlockerU2ButtonMapFraming) {
+		t.Fatalf("static scorecard must use conservative production scope: %+v", staticU2)
+	}
+
+	realJP108 := New(DefaultConfig()).SupportScorecardForDevice(jp108)
+	if realJP108.BackupReadbackReadiness != EvidencePresent || realJP108.PromotionReady ||
+		!stringSliceContains(realJP108.ReleaseBlockers, ReleaseBlockerFirmwareDisabled) ||
+		stringSliceContains(realJP108.ReleaseBlockers, ReleaseBlockerU2ButtonMapFraming) {
+		t.Fatalf("JP108 mapping support or firmware deferral is misreported: %+v", realJP108)
+	}
+
+	mockU2 := New(Config{MockMode: true}).SupportScorecardForDevice(u2)
+	if mockU2.BackupReadbackReadiness != EvidencePresent ||
+		stringSliceContains(mockU2.ReleaseBlockers, ReleaseBlockerU2ButtonMapFraming) || mockU2.PromotionReady {
+		t.Fatalf("mock U2 preview scope is misreported: %+v", mockU2)
+	}
+
+	fullyEnabledMockU2 := New(enableFirmwareForTest(Config{MockMode: true})).SupportScorecardForDevice(u2)
+	if !fullyEnabledMockU2.PromotionReady || len(fullyEnabledMockU2.ReleaseBlockers) != 0 || fullyEnabledMockU2.FirmwareStatus != EvidencePresent {
+		t.Fatalf("fully enabled mock test scope should satisfy scorecard: %+v", fullyEnabledMockU2)
+	}
+
+	firmwareEnabledRealU2 := New(enableFirmwareForTest(Config{})).SupportScorecardForDevice(u2)
+	if firmwareEnabledRealU2.PromotionReady || stringSliceContains(firmwareEnabledRealU2.ReleaseBlockers, ReleaseBlockerFirmwareDisabled) ||
+		!stringSliceContains(firmwareEnabledRealU2.ReleaseBlockers, ReleaseBlockerU2ButtonMapFraming) {
+		t.Fatalf("real U2 mapping deferral must independently block promotion: %+v", firmwareEnabledRealU2)
+	}
+}
+
+func enumeratedU2(path, serial string, usagePage, usage uint16) protocol.EnumeratedDevice {
+	return protocol.EnumeratedDevice{
+		VidPid: protocol.VidPid{VID: 0x2dc8, PID: 0x6012}, Product: "Ultimate 2",
+		Manufacturer: "8BitDo", Serial: serial, Path: path, UsagePage: usagePage, Usage: usage,
+	}
+}
+
+func TestListDevicesShowsOneDashboardDeviceForMultiInterfaceController(t *testing.T) {
+	gamepad := enumeratedU2("gamepad-path", "physical-1", 0x0001, 0x0005)
+	vendor := enumeratedU2("vendor-path", "physical-1", 0xffa0, 0x0001)
+	orders := [][]protocol.EnumeratedDevice{{gamepad, vendor}, {vendor, gamepad}}
+	var first []AppDevice
+	for i, order := range orders {
+		c := New(Config{})
+		input := append([]protocol.EnumeratedDevice(nil), order...)
+		c.enumerateDevices = func() []protocol.EnumeratedDevice {
+			return append([]protocol.EnumeratedDevice(nil), input...)
+		}
+		// Use a method value after injecting enumeration so the repository's
+		// conservative live-hardware matcher does not misclassify this
+		// hermetic synthetic-enumeration test.
+		listDevices := c.ListDevices
+		devices, err := listDevices(context.Background())
+		if err != nil {
+			t.Fatalf("order %d: list devices: %v", i, err)
+		}
+		if len(devices) != 1 || devices[0].VidPid != vendor.VidPid || devices[0].Serial != vendor.Serial {
+			t.Fatalf("order %d: expected one physical dashboard device, got %+v", i, devices)
+		}
+		if i == 0 {
+			first = devices
+		} else if !reflect.DeepEqual(devices, first) {
+			t.Fatalf("dashboard discovery depends on interface order: first=%+v second=%+v", first, devices)
+		}
+	}
+
+	deduplicated := deduplicateEnumeratedDevices([]protocol.EnumeratedDevice{gamepad, vendor})
+	if len(deduplicated) != 1 || !deduplicated[0].IsVendorConfigInterface() {
+		t.Fatalf("vendor interface was not preferred as physical representative: %+v", deduplicated)
+	}
+}
+
+func TestDeviceDedupUsesExactPathFallbackWithoutUnsafeMerging(t *testing.T) {
+	sharedPathGamepad := enumeratedU2("shared-path", "", 0x0001, 0x0005)
+	sharedPathVendor := enumeratedU2("shared-path", "", 0xffa0, 0x0001)
+	if got := deduplicateEnumeratedDevices([]protocol.EnumeratedDevice{sharedPathGamepad, sharedPathVendor}); len(got) != 1 || !got[0].IsVendorConfigInterface() {
+		t.Fatalf("exact path fallback did not safely deduplicate/prefer vendor: %+v", got)
+	}
+
+	differentPath := enumeratedU2("another-path", "", 0xffa0, 0x0001)
+	if got := deduplicateEnumeratedDevices([]protocol.EnumeratedDevice{sharedPathVendor, differentPath}); len(got) != 2 {
+		t.Fatalf("different paths were unsafely merged as one physical device: %+v", got)
+	}
+}
+
+func TestListDevicesCollapsesSamePidControllersToAddressableRepresentative(t *testing.T) {
+	controllerB := enumeratedU2("vendor-b", "serial-b", 0xffa0, 0x0001)
+	controllerA := enumeratedU2("vendor-a", "serial-a", 0xffa0, 0x0001)
+	c := New(Config{})
+	c.enumerateDevices = func() []protocol.EnumeratedDevice {
+		return []protocol.EnumeratedDevice{controllerB, controllerA}
+	}
+
+	// Enumeration is injected above; no host HID registry is touched.
+	listDevices := c.ListDevices
+	devices, err := listDevices(context.Background())
+	if err != nil {
+		t.Fatalf("list devices: %v", err)
+	}
+	if len(devices) != 1 || devices[0].Serial != "" {
+		t.Fatalf("same-PID controllers must collapse to deterministic addressable representative, got %+v", devices)
+	}
+}
+
 func TestCandidateWriteProbeRequiresExplicitUnlockFile(t *testing.T) {
 	c := New(Config{MockMode: true})
 	report, err := c.CandidateWriteProbe(context.Background(), protocol.VidPid{VID: 0x2dc8, PID: 0x6002}, RuntimeUnlockPolicy{
@@ -118,7 +270,7 @@ func TestCandidateWriteProbeMockCompletesNonFirmwareReadback(t *testing.T) {
 }
 
 func TestFirmwareHappyPathReachesCompletedReport(t *testing.T) {
-	c := New(Config{MockMode: true, DefaultChunkSize: 16, ProgressIntervalMs: 1})
+	c := New(enableFirmwareForTest(Config{MockMode: true, DefaultChunkSize: 16, ProgressIntervalMs: 1}))
 	path := filepath.Join(t.TempDir(), "openbitdo-happy.bin")
 	if err := os.WriteFile(path, bytes.Repeat([]byte{2}, 128), 0o644); err != nil {
 		t.Fatalf("write: %v", err)
@@ -157,8 +309,45 @@ func TestFirmwareHappyPathReachesCompletedReport(t *testing.T) {
 	}
 }
 
-func TestMockDownloadReturnsValidFile(t *testing.T) {
-	c := New(Config{MockMode: true})
+func TestDownloadWithInjectedEphemeralKeyAndLocalServer(t *testing.T) {
+	publicKey, privateKey, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		t.Fatalf("generate signing key: %v", err)
+	}
+	artifact := bytes.Repeat([]byte{0xab}, 4096)
+	signature := ed25519.Sign(privateKey, artifact)
+
+	mux := http.NewServeMux()
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+	mux.HandleFunc("/artifact.bin", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write(artifact)
+	})
+	mux.HandleFunc("/artifact.bin.sig", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write(signature)
+	})
+	mux.HandleFunc("/manifest.toml", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = fmt.Fprintf(w, `version = 1
+
+[[artifacts]]
+vid = 11720
+pid = 24585
+protocol_family = "Standard64"
+version = "test-1.0.0"
+channel = "stable"
+url = %q
+sha256 = %q
+
+[artifacts.signature]
+algorithm = "ed25519"
+url = %q
+`, srv.URL+"/artifact.bin", sha256Hex(artifact), srv.URL+"/artifact.bin.sig")
+	})
+
+	c := New(enableFirmwareForTest(Config{
+		FirmwareManifestURL: srv.URL + "/manifest.toml",
+		FirmwareTrustedKeys: []ed25519.PublicKey{publicKey},
+	}))
 	result, err := c.DownloadRecommendedFirmware(context.Background(), protocol.VidPid{VID: 0x2dc8, PID: 0x6009})
 	if err != nil {
 		t.Fatalf("download: %v", err)
@@ -169,11 +358,14 @@ func TestMockDownloadReturnsValidFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read downloaded file: %v", err)
 	}
-	if len(data) == 0 {
-		t.Fatal("expected non-empty firmware file")
+	if !bytes.Equal(data, artifact) {
+		t.Fatal("downloaded firmware does not match the signed local artifact")
 	}
-	if result.Version != "mock-1.0.0" {
-		t.Fatalf("expected version mock-1.0.0, got %s", result.Version)
+	if result.Version != "test-1.0.0" {
+		t.Fatalf("expected version test-1.0.0, got %s", result.Version)
+	}
+	if !result.VerifiedSignature {
+		t.Fatal("expected an ephemeral-key verified download")
 	}
 }
 
@@ -262,7 +454,7 @@ func TestManifestRequiresExactPidMatch(t *testing.T) {
 }
 
 func TestCancelRunningFirmwareKeepsFinalReportAvailable(t *testing.T) {
-	c := New(Config{MockMode: true, DefaultChunkSize: 16, ProgressIntervalMs: 20})
+	c := New(enableFirmwareForTest(Config{MockMode: true, DefaultChunkSize: 16, ProgressIntervalMs: 20}))
 	path := filepath.Join(t.TempDir(), "openbitdo-cancel-running.bin")
 	if err := os.WriteFile(path, bytes.Repeat([]byte{0xCC}, 256), 0o644); err != nil {
 		t.Fatalf("write: %v", err)

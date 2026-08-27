@@ -1,99 +1,158 @@
-# OpenBitdo RC Checklist (`v0.1.0`)
+# OpenBitdo RC Checklist (`v0.1.0-rc.1`)
 
-This checklist defines the release-candidate gate for the current public release tag.
+This checklist defines the release-candidate gate for `v0.1.0-rc.1` and the later stable
+`v0.1.0` promotion.
 
-`v0.1.0` is the first Go/Bubbletea release: a from-scratch, clean-room rewrite of the prior Rust
-CLI (`v0.0.2`), not an iterative RC of it — same functional capability, a redesigned TUI, and
-controller/keyboard navigation. See `CHANGELOG.md` and `docs/MIGRATION.md` for what changed.
+`v0.1.0-rc.1` is the first Go/Bubbletea release candidate: a from-scratch, clean-room rewrite of
+the prior Rust CLI (`v0.0.2`) with a redesigned TUI, keyboard/mouse navigation, and controller
+navigation when the OS exposes a standard HID gamepad interface. See `CHANGELOG.md` and
+`docs/MIGRATION.md` for the user-facing contract.
 
 ## Release Policy
 
-- Tag format: `v*`
-- Current release tag: `v0.1.0`
+- Preparation branch: `rewrite/go-tui`
+- Stale worktree branch policy: leave any `worktree-agent-*` branch untouched; it is not a release
+  source for `v0.1.0-rc.1`.
+- Current RC tag: `v0.1.0-rc.1`
 - Tag source: `main` only
-- Release trigger: tag push
-- Public release rule: zero open issues labeled `release-blocker`
+- Release trigger: exact tag push for `v0.1.0-rc.1`
+- Public release rule: zero open issues labeled `release-blocker`, `P0`, or `P1`
+- Manual Ultimate 2 release control: repo variable `ULTIMATE2_RC_GATE_SHA` must equal the exact
+  tagged `main` commit after strict manual hardware qualification
+- Stable promotion rule: seven clean days after `v0.1.0-rc.1`, with any release-impacting fix
+  producing `rc.2` and restarting the soak
 
-## Required CI Checks
+Current source reference: commit `22f0c6f` on `rewrite/go-tui` has successful GitHub Actions run
+<https://github.com/bybrooklyn/openbitdo/actions/runs/33111934016>. Re-run required checks on the
+final PR tree, the merged `main` tree, and the exact tag commit.
 
-From `.github/workflows/ci.yml`:
+Safety note: no macOS-wide live hardware test may run unless the Darwin probe has the `manual`
+build tag and the command is invoked with `-tags manual`. One prior planning run may have sent up
+to three non-firmware `GetMode` requests if PID `0x6013` was connected; it could not perform
+mapping or firmware writes.
 
-- `guard`
-- `aur-validate`
-- `tui-smoke-test`
-- `build-macos-arm64`
-- `build-linux-x86_64`
-- `build-linux-aarch64`
-- `test` (aggregates the above via `needs:`, plus `go vet`/`golangci-lint`/`go test -race`)
+## Required Source Gates
 
-## Clean Tree Gate
+Run these before opening or merging the RC PR:
 
-From the repository root:
+- generated registry diff check
+- `gofmt`
+- `go vet`
+- pinned `golangci-lint` (`2.13.1`)
+- pinned `govulncheck` (`v1.7.0`) with zero reachable findings; archive the JSON output
+- `go test -race ./...`
+- `go mod verify`
+- clean-room/evidence guards
+- docs consistency checks
+- TUI golden and teatest matrix for `60x18`, `80x24`, `96x24`, `100x30`, and `120x40`
 
-```bash
-git status --porcelain
-git clean -ndX
-```
+The release toolchain is Go `1.26.7` for development checks, CI, and artifacts.
 
-Expected:
+## Scope Contract
 
-- no tracked modifications or staged changes
-- ignored-output review only from `git clean -ndX`
+| Area | `v0.1.0-rc.1` contract |
+| --- | --- |
+| Linux support | `x86_64` and `aarch64`, Ubuntu 22.04-era glibc or newer |
+| macOS support | arm64, deployment target macOS 13, unsigned and non-notarized |
+| Intel macOS | unsupported |
+| Firmware | unavailable in production; implementation kept only for isolated tests with injected ephemeral keys and a local server |
+| Ultimate 2 mapping | mock preview only; real hardware blocked because `button-map framing not hardware-confirmed` |
+| JP108 mapping | in scope |
+| Controller navigation | available only when the OS exposes a standard HID gamepad interface |
+| Hardware CI fixtures | deferred |
 
-## Artifact Expectations
+## Artifact Manifest
 
-Release assets must include:
+The GitHub prerelease must contain exactly these 14 nonempty assets:
 
-- `openbitdo-v0.1.0-linux-x86_64.tar.gz`
-- `openbitdo-v0.1.0-linux-x86_64`
-- `openbitdo-v0.1.0-linux-aarch64.tar.gz`
-- `openbitdo-v0.1.0-linux-aarch64`
-- `openbitdo-v0.1.0-macos-arm64.tar.gz`
-- `openbitdo-v0.1.0-macos-arm64`
-- `openbitdo-v0.1.0-macos-arm64.pkg`
-- `.sha256` files for every artifact above
+- `openbitdo-v0.1.0-rc.1-linux-x86_64`
+- `openbitdo-v0.1.0-rc.1-linux-x86_64.sha256`
+- `openbitdo-v0.1.0-rc.1-linux-x86_64.tar.gz`
+- `openbitdo-v0.1.0-rc.1-linux-x86_64.tar.gz.sha256`
+- `openbitdo-v0.1.0-rc.1-linux-aarch64`
+- `openbitdo-v0.1.0-rc.1-linux-aarch64.sha256`
+- `openbitdo-v0.1.0-rc.1-linux-aarch64.tar.gz`
+- `openbitdo-v0.1.0-rc.1-linux-aarch64.tar.gz.sha256`
+- `openbitdo-v0.1.0-rc.1-macos-arm64`
+- `openbitdo-v0.1.0-rc.1-macos-arm64.sha256`
+- `openbitdo-v0.1.0-rc.1-macos-arm64.tar.gz`
+- `openbitdo-v0.1.0-rc.1-macos-arm64.tar.gz.sha256`
+- `openbitdo-v0.1.0-rc.1-macos-arm64.pkg`
+- `openbitdo-v0.1.0-rc.1-macos-arm64.pkg.sha256`
+
+Checksum sidecars must contain basenames only. Missing checksum tools are fatal.
+
+## Artifact Gates
+
+- Linux `x86_64` and `aarch64` builds run on Ubuntu 22.04 runners.
+- No imported `GLIBC_*` symbol may exceed `2.35`.
+- Extracted Linux artifacts launch on Ubuntu 22.04 and Debian 12.
+- Linux archives and AUR metadata include shell completions and the udev rule in conventional
+  system paths, with rule reload/replug instructions documented.
+- macOS arm64 builds use `MACOSX_DEPLOYMENT_TARGET=13.0`.
+- The Mach-O minimum OS is asserted before publication.
+- The `.pkg` installs `openbitdo` to `/usr/local/bin`.
+- Homebrew metadata includes completions and renders `version "0.1.0-rc.1"`.
+- AUR metadata renders `pkgver=0.1.0rc1`.
+- Final `v0.1.0` metadata must upgrade cleanly from the RC package-manager versions.
+
+## Hardware Gate
+
+`v0.1.0-rc.1` remains blocked until the current Ultimate 2 passes one non-destructive hardware
+qualification on the final PR tree:
+
+- Try each physically available USB/controller mode.
+- Record the resulting `0x2dc8` PID and HID interfaces.
+- Confirm one mode exposes both the vendor configuration channel and Generic Desktop Gamepad usage
+  `0x0001:0x0005`.
+- Confirm all applicable, non-experimental safe-read diagnostics pass with real response bytes and
+  `transport_ready=true`.
+- Confirm physical up/down/left/right plus Confirm/Cancel drive the real TUI.
+- Confirm unplug/reconnect updates the dashboard within three seconds, without duplicate devices or
+  restart.
+- Perform no mapping writes, candidate probes, bootloader entry, or firmware writes.
+
+If no mode meets every requirement, do not weaken the gate; produce a later RC after the blocker is
+closed.
 
 ## Distribution Gate
 
-- GitHub prerelease assets must be published successfully.
-- AUR publish must render checksum-pinned metadata and update `openbitdo-bin`.
-- Homebrew publish must render a checksum-pinned formula and update `bybrooklyn/homebrew-openbitdo`.
-- Both `AUR_PUBLISH_ENABLED` and `HOMEBREW_PUBLISH_ENABLED` repo variables are live with real
-  credentials configured — a `v0.1.0` tag push triggers genuine external publishes, not a dry run.
+- Repo variable `ULTIMATE2_RC_GATE_SHA` equals the exact tagged `main` commit that passed the
+  strict manual Ultimate 2 hardware gate.
+- GitHub prerelease assets are published successfully and match the exact 14-file manifest.
+- The release body includes only the matching `CHANGELOG.md` section for `v0.1.0-rc.1`.
+- AUR publish has required variables and credential write access before publication.
+- Homebrew publish has required variables and credential write access before publication.
+- Clone/install canaries verify AUR `0.1.0rc1` and Homebrew `0.1.0-rc.1`.
 
-## macOS Packaging Gate
+## Stable Promotion
 
-- `.pkg` remains unsigned and non-notarized for this release.
-- Gatekeeper friction is expected and must be documented.
-- Tarball and standalone binary remain the fallback paths.
-- No Apple Developer credentials exist yet; unrelated to and unchanged by the Go rewrite.
+After `v0.1.0-rc.1`:
 
-## Manual Smoke Expectations
-
-1. Linux `x86_64`: launch `openbitdo --mock`
-2. Linux `aarch64`: launch `openbitdo --mock`
-3. macOS arm64 standalone binary: launch `openbitdo --mock`
-4. macOS arm64 `.pkg`: confirm payload installation path and launch behavior where possible
-5. Controller navigation: on Linux and macOS, confirm the device dashboard responds to an
-   attached 8BitDo controller's own buttons, not just keyboard input — this is genuinely
-   untested against real hardware as of `v0.1.0` (no 8BitDo controller was available during
-   development; see `docs/spec/gamepad_input.md`) and is the first thing to verify manually.
+1. Soak for at least seven days with zero open release-blocker, P0, or P1 regressions.
+2. If a release-impacting fix lands, cut `rc.2` and restart the seven-day soak.
+3. Before stable promotion, perform a real macOS 13 launch.
+4. Repeat package-manager canaries and the Ultimate 2 canary.
+5. Update version and release notes to `v0.1.0`.
+6. Re-run all gates.
+7. Merge to `main` and tag the exact stable commit.
 
 ## Current Status Snapshot
 
 | Gate | Status | Notes |
 | --- | --- | --- |
-| Rewrite functional parity | Done | Ported from the Rust `v0.0.2` implementation; behavioral test suites ported alongside it; TUI redesigned rather than 1:1 ported. |
-| Local build/test verification | Done | `go build`, `go vet`, `go test`, `go test -race`, `golangci-lint`, `gofmt`, `cleanroom_guard.sh`, `check_docs_consistency.sh` all clean. |
-| Real CI run on GitHub Actions | Done | Confirmed green on real GitHub Actions runners as of run #202 (`rewrite/go-tui`, commit `2888ae5`) and every push since; re-verify once more on the exact commit tagged for release. |
-| GitHub prerelease assets | Pending | Verify `v0.1.0` assets after the tag workflow completes. |
-| AUR publication | Pending | Verify `openbitdo-bin` updates to `v0.1.0` after release publication. |
-| Homebrew publication | Pending | Verify `bybrooklyn/homebrew-openbitdo` updates to `v0.1.0` after release publication. |
-| macOS notarization | Deferred | Explicitly out of scope until Apple credentials exist. |
-| Real-hardware validation | Partial — real protocol-response mystery found | 2026-08-27, real Ultimate2 (PID `0x6013`, serial `22EC9EA4DF`) connected and tested via `--diagnostics-dump` and a new manual `teatest`-driven integration run (`internal/tui/manual_hardware_test.go`, `-tags manual`). **Confirmed working**: device enumeration, `Open`/`Write` all succeed end-to-end through the whole app (Phase 1's `internal/machid` IOKit fix genuinely works, not just in isolated manual tests); the Devices, Diagnostics, and Mapping Editor screens all handle a real non-mock session honestly — no crash, no hang, accurate "0/12 passed" with correct per-command detail, real report saved under the device's real serial. **Confirmed broken, pre-existing, NOT introduced by the rewrite**: this specific controller never sends a response to any protocol command (all 12 `DiagProbe` checks — including `Confidence:"confirmed"` ones like `GetPid`/`GetMode`/`Version` — get `bytes_written=64, bytes_read=0`); this was already documented as an open mystery in `internal/machid/machid_darwin.go`'s package doc before tonight and is now reconfirmed via the full app, not just an isolated transport test. Root cause needs hardware-informed protocol reverse-engineering (a real USB traffic capture against the vendor app, most likely) — a distinct, larger effort from anything in this rewrite, tracked separately, not a `v0.1.0` blocker in itself since the app already degrades honestly. **Real controller navigation tested and root-caused (not a code bug)**: a live capture (`internal/input/manual_nav_capture_test.go`, two runs with the user actively pressing buttons/d-pad/sticks, second one with `-count=1` to rule out a stale Go test-cache hit on the first) received zero `EventDPadChanged`/`EventButtonDown` events both times. Direct enumeration (`hid.Enumerate(0x2dc8, 0)`) shows this controller currently exposes exactly **one** HID interface — `usagePage=0xffa0, usage=0x0001`, the same vendor config channel diagnostics already couldn't get a response from — not a standard Generic-Desktop Gamepad interface (`usagePage=0x0001, usage=0x0005`). The app opens and reads everything the OS enumerates for this vid; there's nothing else there to open. This looks like a controller-mode question (8BitDo controllers commonly expose different USB interfaces per mode — X-input/D-input/Switch/etc., usually switched via a button-combo or physical switch) rather than anything fixable in this codebase; needs the user to try a different connection mode and re-test, not further code changes. Hotplug connect/disconnect (`internal/input`'s poller) has synthetic/unit coverage but not yet a live unplug/replug confirmation — needs the user's physical action to close out. |
+| Source branch | In progress | Work is on `rewrite/go-tui`; merge to `main` is still required before tagging. |
+| Current CI reference | Done | Run `33111934016` succeeded for `rewrite/go-tui` at `22f0c6f`; re-run required checks on the final tree. |
+| Firmware production availability | Deferred | Public UI must keep Firmware Update disabled as `Deferred in 0.1.0`. |
+| Ultimate 2 real mapping | Deferred | Mock preview only until button-map framing is hardware-confirmed. |
+| GitHub prerelease assets | Pending | Verify the exact `v0.1.0-rc.1` 14-asset manifest after tag workflow completion. |
+| AUR publication | Pending | Verify `openbitdo-bin` updates to `0.1.0rc1`. |
+| Homebrew publication | Pending | Verify `bybrooklyn/homebrew-openbitdo` updates to `0.1.0-rc.1`. |
+| Real Ultimate 2 hardware gate | Blocking | Must pass the non-destructive gate above on the final PR tree before RC publication. |
+| macOS 13 launch | Promotion blocker | Required before stable `v0.1.0`, not before `rc.1`. |
 
 ## Historical Notes
 
-- Historical RC activity for earlier (Rust-era) candidates is preserved in commit history and the
+- Historical RC activity for earlier Rust-era candidates is preserved in commit history and the
   changelog.
 - Troubleshooting for AUR SSH publication lives in `docs/process/aur_publish_troubleshooting.md`.

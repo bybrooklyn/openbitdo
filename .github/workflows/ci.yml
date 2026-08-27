@@ -6,148 +6,340 @@ on:
   schedule:
     # 07:30 UTC is 02:30 America/New_York during standard time.
     # (GitHub cron does not support time zones/DST directly.)
-    - cron: '30 7 * * *'
+    - cron: "30 7 * * *"
   workflow_dispatch:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  GOTOOLCHAIN: local
+  OPENBITDO_EXPECT_DIRTY: "false"
+  RELEASE_TAG: v0.1.0-rc.1
 
 jobs:
   guard:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: Clean-room guard
         run: ./scripts/cleanroom_guard.sh
+      - name: Evidence readiness
+        run: python3 ./scripts/check_evidence_readiness.py
+      - name: Documentation consistency
+        run: ./scripts/check_docs_consistency.sh
+      - name: Keep live hardware tests manual-only
+        run: ./scripts/check_manual_hardware_test_tags.sh
+
+  generated-registry:
+    runs-on: ubuntu-22.04
+    needs: guard
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Verify pinned Go toolchain
+        run: ./scripts/check_go_toolchain.sh
+      - name: Check generated registry drift
+        run: ./scripts/check_generated_registry.sh
 
   aur-validate:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     needs: guard
+    timeout-minutes: 15
     container: archlinux:base
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: Install packaging validation toolchain
-        run: |
-          pacman -Sy --noconfirm --needed base-devel git jq
+        run: pacman -Sy --noconfirm --needed base-devel git jq ripgrep ruby
       - name: Validate release metadata rendering
         run: |
           set -euo pipefail
           test -f scripts/render_release_metadata.sh
           test -f packaging/aur/openbitdo-bin/PKGBUILD.tmpl
+          test ! -e packaging/aur/openbitdo-bin/PKGBUILD
+          test ! -e packaging/aur/openbitdo-bin/.SRCINFO
           test -f packaging/homebrew/Formula/openbitdo.rb.tmpl
-          test ! -f packaging/homebrew/Formula/openbitdo.rb
+          test ! -e packaging/homebrew/Formula/openbitdo.rb
           bash scripts/test_render_release_metadata.sh
+          bash scripts/test_package_layouts.sh
       - name: Validate Homebrew tap sync helper
-        run: |
-          set -euo pipefail
-          bash packaging/homebrew/test_sync_tap.sh
-      - name: Validate PKGBUILD and .SRCINFO
-        run: |
-          useradd -m builder
-          chown -R builder:builder "$GITHUB_WORKSPACE"
-          su builder -s /bin/bash -c "set -euo pipefail; \
-            cd '$GITHUB_WORKSPACE/packaging/aur/openbitdo-bin'; \
-            makepkg --printsrcinfo > /tmp/openbitdo-bin.srcinfo; \
-            diff -u .SRCINFO /tmp/openbitdo-bin.srcinfo"
+        run: bash packaging/homebrew/test_sync_tap.sh
       - name: Check docs consistency
-        run: |
-          set -euo pipefail
-          bash scripts/check_docs_consistency.sh
+        run: bash scripts/check_docs_consistency.sh
 
   tui-smoke-test:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     needs: guard
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
-      - name: Install system deps
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - name: Install system dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y libudev-dev pkg-config build-essential
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version-file: go.mod
-      - name: Run TUI package tests (includes teatest end-to-end scenarios)
+          cache: true
+      - name: Verify pinned Go toolchain
+        run: ./scripts/check_go_toolchain.sh
+      - name: Run TUI tests
         run: go test ./internal/tui/... -v
+
+  macos-safe-tests:
+    runs-on: macos-14
+    needs: guard
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - name: Recheck live hardware isolation before any test
+        run: ./scripts/check_manual_hardware_test_tags.sh
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Verify pinned Go toolchain
+        run: ./scripts/check_go_toolchain.sh
+      - name: Run hermetic macOS tests without manual tag
+        run: go test ./...
+      - name: Compile manual macOS tests without executing them
+        run: go test -tags manual ./... -run '^$'
+
+  vulnerability-scan:
+    runs-on: ubuntu-22.04
+    needs: guard
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Verify pinned Go toolchain
+        run: ./scripts/check_go_toolchain.sh
+      - name: Install govulncheck v1.7.0
+        run: go install golang.org/x/vuln/cmd/govulncheck@v1.7.0
+      - name: Scan for reachable vulnerabilities
+        run: |
+          set +e
+          mkdir -p vulnerability-results
+          "$(go env GOPATH)/bin/govulncheck" -json ./... \
+            >vulnerability-results/govulncheck.json \
+            2>vulnerability-results/govulncheck.stderr
+          status=$?
+          set -e
+          if [[ "$status" -ne 0 ]]; then
+            cat vulnerability-results/govulncheck.stderr >&2
+            echo "govulncheck found a reachable vulnerability or could not complete" >&2
+            exit "$status"
+          fi
+      - name: Archive govulncheck JSON
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: govulncheck-json-${{ github.sha }}
+          path: vulnerability-results/
+          if-no-files-found: error
+          retention-days: 90
+
+  build-linux-x86_64:
+    runs-on: ubuntu-22.04
+    needs: guard
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - name: Install build and audit dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y binutils libudev-dev pkg-config build-essential python3
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Verify pinned Go toolchain
+        run: ./scripts/check_go_toolchain.sh
+      - name: Build/package Linux x86_64 artifacts
+        run: ./scripts/package-linux.sh "$RELEASE_TAG" x86_64
+      - name: Verify package manifest, glibc ceiling, and Ubuntu smoke
+        run: |
+          ./scripts/verify_release_assets.sh "$RELEASE_TAG" dist linux-x86_64
+          ./scripts/check_binary_arch.sh "dist/openbitdo-${RELEASE_TAG}-linux-x86_64" linux x86_64
+          ./scripts/check_glibc_compat.sh "dist/openbitdo-${RELEASE_TAG}-linux-x86_64" 2.35
+          ./scripts/smoke_release_archive.sh "$RELEASE_TAG" linux x86_64 dist
+      - name: Run extracted artifact on Debian 12
+        run: |
+          docker run --rm \
+            -e RELEASE_TAG="$RELEASE_TAG" \
+            -e OPENBITDO_EXPECT_COMMIT="$(git rev-parse --short=12 HEAD)" \
+            -e OPENBITDO_EXPECT_DIRTY="false" \
+            -v "$GITHUB_WORKSPACE:/workspace:ro" \
+            -w /workspace \
+            debian:12 \
+            bash -euo pipefail -c '
+              apt-get update
+              apt-get install -y --no-install-recommends ca-certificates libudev1 python3
+              ./scripts/smoke_release_archive.sh "$RELEASE_TAG" linux x86_64 dist
+            '
+      - name: Upload Linux x86_64 artifacts
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: ci-linux-x86_64-package
+          path: dist/openbitdo-${{ env.RELEASE_TAG }}-linux-x86_64*
+          if-no-files-found: error
+          retention-days: 7
+
+  build-linux-aarch64:
+    runs-on: ubuntu-22.04-arm
+    needs: guard
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - name: Install build and audit dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y binutils libudev-dev pkg-config build-essential python3
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Verify pinned Go toolchain
+        run: ./scripts/check_go_toolchain.sh
+      - name: Build/package Linux aarch64 artifacts
+        run: ./scripts/package-linux.sh "$RELEASE_TAG" aarch64
+      - name: Verify package manifest, glibc ceiling, and Ubuntu smoke
+        run: |
+          ./scripts/verify_release_assets.sh "$RELEASE_TAG" dist linux-aarch64
+          ./scripts/check_binary_arch.sh "dist/openbitdo-${RELEASE_TAG}-linux-aarch64" linux aarch64
+          ./scripts/check_glibc_compat.sh "dist/openbitdo-${RELEASE_TAG}-linux-aarch64" 2.35
+          ./scripts/smoke_release_archive.sh "$RELEASE_TAG" linux aarch64 dist
+      - name: Run extracted artifact on Debian 12
+        run: |
+          docker run --rm \
+            -e RELEASE_TAG="$RELEASE_TAG" \
+            -e OPENBITDO_EXPECT_COMMIT="$(git rev-parse --short=12 HEAD)" \
+            -e OPENBITDO_EXPECT_DIRTY="false" \
+            -v "$GITHUB_WORKSPACE:/workspace:ro" \
+            -w /workspace \
+            debian:12 \
+            bash -euo pipefail -c '
+              apt-get update
+              apt-get install -y --no-install-recommends ca-certificates libudev1 python3
+              ./scripts/smoke_release_archive.sh "$RELEASE_TAG" linux aarch64 dist
+            '
+      - name: Upload Linux aarch64 artifacts
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: ci-linux-aarch64-package
+          path: dist/openbitdo-${{ env.RELEASE_TAG }}-linux-aarch64*
+          if-no-files-found: error
+          retention-days: 7
 
   build-macos-arm64:
     runs-on: macos-14
     needs: guard
+    timeout-minutes: 30
+    env:
+      MACOSX_DEPLOYMENT_TARGET: "13.0"
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version-file: go.mod
+          cache: true
+      - name: Verify pinned Go toolchain
+        run: ./scripts/check_go_toolchain.sh
       - name: Build/package macOS arm64 artifacts
-        run: ./scripts/package-macos.sh v0.0.0-ci arm64
-      - name: Upload macOS arm64 artifact sample
+        run: ./scripts/package-macos.sh "$RELEASE_TAG" arm64
+      - name: Verify package manifest, minimum OS, and archive smoke
+        run: |
+          ./scripts/verify_release_assets.sh "$RELEASE_TAG" dist macos-arm64
+          ./scripts/check_binary_arch.sh "dist/openbitdo-${RELEASE_TAG}-macos-arm64" macos arm64
+          ./scripts/check_macos_minos.sh "dist/openbitdo-${RELEASE_TAG}-macos-arm64" 13.0
+          ./scripts/smoke_release_archive.sh "$RELEASE_TAG" macos arm64 dist
+      - name: Verify and install macOS package
+        run: |
+          pkg="dist/openbitdo-${RELEASE_TAG}-macos-arm64.pkg"
+          payload="$(pkgutil --payload-files "$pkg")"
+          if grep -Eq '(^|/)\._' <<<"$payload"; then
+            echo "macOS package contains AppleDouble metadata files" >&2
+            exit 1
+          fi
+          for required in \
+            usr/local/bin/openbitdo \
+            usr/local/share/bash-completion/completions/openbitdo \
+            usr/local/share/fish/vendor_completions.d/openbitdo.fish \
+            usr/local/share/zsh/site-functions/_openbitdo; do
+            grep -Fq "$required" <<<"$payload"
+          done
+          sudo installer -pkg "$pkg" -target /
+          /usr/local/bin/openbitdo --version | grep -F "openbitdo ${RELEASE_TAG}"
+      - name: Upload macOS arm64 artifacts
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: ci-macos-arm64-package
-          path: dist/openbitdo-v0.0.0-ci-macos-arm64*
-
-  build-linux-x86_64:
-    runs-on: ubuntu-latest
-    needs: guard
-    steps:
-      - uses: actions/checkout@v4
-      - name: Install system deps
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libudev-dev pkg-config build-essential
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
-      - name: Build/package linux x86_64 artifacts
-        run: ./scripts/package-linux.sh v0.0.0-ci x86_64
-      - name: Upload linux x86_64 artifact sample
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: ci-linux-x86_64-package
-          path: dist/openbitdo-v0.0.0-ci-linux-x86_64*
-
-  build-linux-aarch64:
-    runs-on: ubuntu-24.04-arm
-    needs: guard
-    steps:
-      - uses: actions/checkout@v4
-      - name: Install system deps
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libudev-dev pkg-config build-essential
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
-      - name: Build/package linux aarch64 artifacts
-        run: ./scripts/package-linux.sh v0.0.0-ci aarch64
-      - name: Upload linux aarch64 artifact sample
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: ci-linux-aarch64-package
-          path: dist/openbitdo-v0.0.0-ci-linux-aarch64*
+          path: dist/openbitdo-${{ env.RELEASE_TAG }}-macos-arm64*
+          if-no-files-found: error
+          retention-days: 7
 
   test:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
+    if: ${{ always() }}
     needs:
       - guard
-      - tui-smoke-test
+      - generated-registry
       - aur-validate
-      - build-macos-arm64
+      - tui-smoke-test
+      - macos-safe-tests
+      - vulnerability-scan
       - build-linux-x86_64
       - build-linux-aarch64
+      - build-macos-arm64
+    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
-      - name: Install system deps
+      - name: Require every prerequisite CI job
+        env:
+          NEEDS_JSON: ${{ toJSON(needs) }}
+        run: |
+          jq -e 'all(.[]; .result == "success")' <<<"$NEEDS_JSON"
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - name: Install system dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y libudev-dev pkg-config build-essential
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version-file: go.mod
-      - name: Lint (strict)
-        uses: golangci/golangci-lint-action@v9
+          cache: true
+      - name: Verify pinned Go toolchain
+        run: ./scripts/check_go_toolchain.sh
+      - name: Verify module downloads
+        run: go mod verify
+      - name: Check formatting
+        run: |
+          unformatted="$(gofmt -l .)"
+          if [[ -n "$unformatted" ]]; then
+            printf 'files require gofmt:\n%s\n' "$unformatted" >&2
+            exit 1
+          fi
+      - name: Lint with golangci-lint 2.13.1
+        uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
         with:
-          version: latest
+          version: v2.13.1
       - name: Vet
         run: go vet ./...
-      - name: Run tests (race detector)
+      - name: Run tests with race detector
         run: go test -race ./...
+      - name: Compile manual Linux tests without executing them
+        run: go test -tags manual ./... -run '^$'

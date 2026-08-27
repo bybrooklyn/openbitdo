@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/ed25519"
 	"encoding/base64"
-	"encoding/hex"
 	"fmt"
 	"io"
 	"net/http"
@@ -17,22 +16,35 @@ import (
 	"github.com/bybrooklyn/openbitdo/internal/protocol"
 )
 
+const firmwareDeferredMessage = "Firmware updates are deferred in 0.1.0."
+
+func firmwareDisabledError() *Error {
+	return errPolicyDenied(ReasonFeatureUnavailable, firmwareDeferredMessage)
+}
+
+func (c *OpenBitdoCore) validateFirmwareDownloadConfig() error {
+	if c.config.FirmwareManifestURL == "" {
+		return errManifest("firmware manifest URL is not configured")
+	}
+	if len(c.config.FirmwareTrustedKeys) == 0 {
+		return errManifest("no trusted firmware signing keys configured")
+	}
+	for _, key := range c.config.FirmwareTrustedKeys {
+		if len(key) != ed25519.PublicKeySize {
+			return errManifest("trusted key length must be %d bytes", ed25519.PublicKeySize)
+		}
+	}
+	return nil
+}
+
 // DownloadRecommendedFirmware fetches, hash-verifies, and signature-verifies
 // the stable-channel firmware artifact for target, writing it to a temp file.
 func (c *OpenBitdoCore) DownloadRecommendedFirmware(ctx context.Context, target protocol.VidPid) (FirmwareDownloadResult, error) {
-	if c.config.MockMode {
-		path := filepath.Join(os.TempDir(), fmt.Sprintf("openbitdo-fw-mock-%04x-%s.bin", target.PID, newID()))
-		payload := make([]byte, 4096)
-		for i := range payload {
-			payload[i] = 0xAB
-		}
-		if err := os.WriteFile(path, payload, 0o644); err != nil {
-			return FirmwareDownloadResult{}, errIO(err)
-		}
-		return FirmwareDownloadResult{
-			FirmwarePath: path, Version: "mock-1.0.0", SourceURL: "mock://firmware",
-			SHA256: sha256Hex(payload), VerifiedSignature: true,
-		}, nil
+	if !c.FirmwareEnabled() {
+		return FirmwareDownloadResult{}, firmwareDisabledError()
+	}
+	if err := c.validateFirmwareDownloadConfig(); err != nil {
+		return FirmwareDownloadResult{}, err
 	}
 
 	manifestRaw, err := c.fetchBytes(ctx, c.config.FirmwareManifestURL, "manifest")
@@ -96,8 +108,19 @@ func (c *OpenBitdoCore) fetchBytes(ctx context.Context, url, what string) ([]byt
 }
 
 func (c *OpenBitdoCore) verifyArtifactSignature(ctx context.Context, artifact FirmwareArtifact, artifactBytes []byte) error {
+	if !c.FirmwareEnabled() {
+		return firmwareDisabledError()
+	}
 	if !strings.EqualFold(artifact.Signature.Algorithm, "ed25519") {
 		return errManifest("unsupported signature algorithm: %s", artifact.Signature.Algorithm)
+	}
+	if len(c.config.FirmwareTrustedKeys) == 0 {
+		return errManifest("no trusted firmware signing keys configured")
+	}
+	for _, key := range c.config.FirmwareTrustedKeys {
+		if len(key) != ed25519.PublicKeySize {
+			return errManifest("trusted key length must be %d bytes", ed25519.PublicKeySize)
+		}
 	}
 
 	sigBody, err := c.fetchBytes(ctx, artifact.Signature.URL, "signature")
@@ -117,25 +140,21 @@ func (c *OpenBitdoCore) verifyArtifactSignature(ctx context.Context, artifact Fi
 		return errManifest("invalid signature format: expected %d bytes, got %d", ed25519.SignatureSize, len(sigBytes))
 	}
 
-	for _, keyHex := range []string{pinnedEd25519ActivePublicKeyHex, pinnedEd25519NextPublicKeyHex} {
-		keyBytes, err := hex.DecodeString(keyHex)
-		if err != nil {
-			return errManifest("invalid pinned key hex: %v", err)
-		}
-		if len(keyBytes) != ed25519.PublicKeySize {
-			return errManifest("pinned key length must be %d bytes", ed25519.PublicKeySize)
-		}
-		if ed25519.Verify(ed25519.PublicKey(keyBytes), artifactBytes, sigBytes) {
+	for _, key := range c.config.FirmwareTrustedKeys {
+		if ed25519.Verify(key, artifactBytes, sigBytes) {
 			return nil
 		}
 	}
 
-	return errPolicyDenied(ReasonImageValidationFailed, "signature verification failed for active and next pinned keys")
+	return errPolicyDenied(ReasonImageValidationFailed, "signature verification failed for all trusted keys")
 }
 
 // PreflightFirmware validates the firmware image and gates, and computes a
 // transfer plan, without sending anything to the device yet.
 func (c *OpenBitdoCore) PreflightFirmware(ctx context.Context, request FirmwarePreflightRequest) (FirmwarePreflightResult, error) {
+	if !c.FirmwareEnabled() {
+		return deniedPreflight(ReasonFeatureUnavailable, firmwareDeferredMessage), nil
+	}
 	p := protocol.DeviceProfileFor(request.VidPid)
 	if p.SupportTier != protocol.TierFull {
 		return deniedPreflight(ReasonNotHardwareConfirmed, "Firmware updates are available only after per-PID hardware confirmation."), nil
@@ -185,6 +204,9 @@ func (c *OpenBitdoCore) PreflightFirmware(ctx context.Context, request FirmwareP
 
 // StartFirmware moves a preflighted session to AwaitingConfirmation.
 func (c *OpenBitdoCore) StartFirmware(ctx context.Context, request FirmwareStartRequest) (FirmwareUpdatePlan, error) {
+	if !c.FirmwareEnabled() {
+		return FirmwareUpdatePlan{}, firmwareDisabledError()
+	}
 	handle, err := c.sessionHandle(request.SessionID)
 	if err != nil {
 		return FirmwareUpdatePlan{}, err
@@ -203,6 +225,9 @@ func (c *OpenBitdoCore) StartFirmware(ctx context.Context, request FirmwareStart
 
 // ConfirmFirmware starts the actual transfer in the background.
 func (c *OpenBitdoCore) ConfirmFirmware(ctx context.Context, request FirmwareConfirmRequest) (FirmwareUpdatePlan, error) {
+	if !c.FirmwareEnabled() {
+		return FirmwareUpdatePlan{}, firmwareDisabledError()
+	}
 	if !request.AcknowledgedRisk {
 		return FirmwareUpdatePlan{}, errPolicyDenied(ReasonUnsafeFlagsMissing, "You must acknowledge firmware risk before continuing")
 	}
@@ -234,6 +259,9 @@ func (c *OpenBitdoCore) ConfirmFirmware(ctx context.Context, request FirmwareCon
 
 // CancelFirmware requests cancellation and waits for a terminal report.
 func (c *OpenBitdoCore) CancelFirmware(ctx context.Context, request FirmwareCancelRequest) (FirmwareFinalReport, error) {
+	if !c.FirmwareEnabled() {
+		return FirmwareFinalReport{}, firmwareDisabledError()
+	}
 	handle, err := c.sessionHandle(request.SessionID)
 	if err != nil {
 		return FirmwareFinalReport{}, err
@@ -286,6 +314,9 @@ func (c *OpenBitdoCore) CancelFirmware(ctx context.Context, request FirmwareCanc
 // FirmwareReport returns the terminal report for a session, or nil if the
 // transfer hasn't finished yet.
 func (c *OpenBitdoCore) FirmwareReport(ctx context.Context, sessionID FirmwareUpdateSessionID) (*FirmwareFinalReport, error) {
+	if !c.FirmwareEnabled() {
+		return nil, firmwareDisabledError()
+	}
 	handle, err := c.sessionHandle(sessionID)
 	if err != nil {
 		return nil, err
@@ -298,6 +329,9 @@ func (c *OpenBitdoCore) FirmwareReport(ctx context.Context, sessionID FirmwareUp
 // SubscribeEvents returns a channel receiving progress events for a session,
 // published from the moment of subscription onward.
 func (c *OpenBitdoCore) SubscribeEvents(sessionID FirmwareUpdateSessionID) (<-chan FirmwareProgressEvent, error) {
+	if !c.FirmwareEnabled() {
+		return nil, firmwareDisabledError()
+	}
 	handle, err := c.sessionHandle(sessionID)
 	if err != nil {
 		return nil, err

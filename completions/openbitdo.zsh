@@ -8,6 +8,8 @@ _openbitdo() {
     _arguments \
         '--mock[Use mock transport/devices]' \
         '--debug-log[Write detailed protocol traces to a file]:log file:_files' \
+        '--version[Print version and build information]' \
+        '--diagnostics-dump[Print diagnostics reports without launching the TUI]' \
         '(-h --help)'{-h,--help}'[Print help]'
 }
 

@@ -123,3 +123,7 @@ type reportSavedMsg struct {
 type settingsSavedMsg struct {
 	err error
 }
+
+type noticeExpiredMsg struct {
+	id int
+}

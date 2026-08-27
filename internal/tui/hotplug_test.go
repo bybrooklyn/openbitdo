@@ -85,6 +85,14 @@ func TestReplacePIDNote(t *testing.T) {
 		t.Fatalf("expected a different PID's note to be appended, not replace, got %v", notes)
 	}
 
+	// A release-qualified controller exposes both a vendor interface and a
+	// standard gamepad interface. A later vendor-interface note must not hide
+	// the active gamepad state merely because enumeration order put it last.
+	notes = replacePIDNote(notes, 0x6012, "pid=0x6012: report descriptor is not a gamepad")
+	if !strings.Contains(strings.Join(notes, "|"), "pid=0x6012: gamepad nav active") {
+		t.Fatalf("expected active gamepad note to outrank sibling vendor-interface note, got %v", notes)
+	}
+
 	// The core case: a disconnect for 0x6012 must replace its "active" note
 	// in place, not accumulate a second entry alongside it.
 	notes = replacePIDNote(notes, 0x6012, "pid=0x6012: disconnected")

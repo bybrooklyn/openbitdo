@@ -1,6 +1,7 @@
 package core
 
 import (
+	"strings"
 	"time"
 
 	"github.com/bybrooklyn/openbitdo/internal/protocol"
@@ -88,7 +89,9 @@ type U2PaddleMapping struct {
 	Target U2Function
 }
 
-// U2CoreProfile is the full readable/writable Ultimate2 core state.
+// U2CoreProfile is the readable Ultimate2 core state and the editable mock
+// preview state. Real-device writes are deferred until button-map framing is
+// hardware-confirmed.
 type U2CoreProfile struct {
 	Slot                 U2SlotID
 	Mode                 byte
@@ -167,6 +170,15 @@ const (
 
 func (s EvidenceState) isPresent() bool { return s == EvidencePresent || s == EvidenceNotApplicable }
 
+const (
+	// ReleaseBlockerFirmwareDisabled is emitted when static device support
+	// exists but the v0.1.0 runtime firmware feature gate is off.
+	ReleaseBlockerFirmwareDisabled = "firmware_disabled_v0_1_0"
+	// ReleaseBlockerU2ButtonMapFraming is emitted when Ultimate2 mapping is
+	// mock-preview-only because real button-map framing is not confirmed.
+	ReleaseBlockerU2ButtonMapFraming = "u2_button_map_framing_unconfirmed"
+)
+
 // SupportScorecard is the 7-dimension evidence/promotion scorecard for a device.
 type SupportScorecard struct {
 	VidPid                  protocol.VidPid
@@ -181,6 +193,7 @@ type SupportScorecard struct {
 	ScorePercent            int
 	PromotionReady          bool
 	MissingEvidence         []string
+	ReleaseBlockers         []string
 }
 
 // RuntimeUnlockPolicy is the caller-supplied gate state for a candidate
@@ -213,23 +226,37 @@ func deniedUnlockReport(vidPid protocol.VidPid, scorecard SupportScorecard, mess
 	}
 }
 
-func blockedOperationSummary(device AppDevice) string {
+func (c *OpenBitdoCore) blockedOperationSummary(device AppDevice) string {
+	blocked := make([]string, 0, 3)
+	if !c.FirmwareEnabled() {
+		blocked = append(blocked, "firmware updates (deferred in 0.1.0)")
+	} else if device.SupportTier != protocol.TierFull || !device.Capability.SupportsFirmware {
+		blocked = append(blocked, "firmware updates without a verified path")
+	}
+
+	hasJP108Editor := device.Capability.SupportsJP108DedicatedMap
+	hasU2Editor := device.Capability.SupportsU2ButtonMap && device.Capability.SupportsU2SlotConfig
+	realU2MappingDeferred := hasU2Editor && !c.config.MockMode
+
 	switch device.SupportTier {
 	case protocol.TierCandidateReadOnly:
-		return "firmware, mapping, and profile writes"
+		if realU2MappingDeferred {
+			blocked = append(blocked, "Ultimate2 mapping ("+u2MappingDeferredReason+")")
+		} else {
+			blocked = append(blocked, "mapping and profile writes pending hardware confirmation")
+		}
 	case protocol.TierDetectOnly:
-		return "diagnostics beyond identification, firmware, mapping, and writes"
+		blocked = append(blocked, "diagnostics beyond identification", "mapping and writes without a verified path")
 	default: // Full
-		hasFirmware := device.Capability.SupportsFirmware
-		hasEditor := device.Capability.SupportsJP108DedicatedMap ||
-			(device.Capability.SupportsU2ButtonMap && device.Capability.SupportsU2SlotConfig)
-		switch {
-		case hasFirmware && hasEditor:
-			return "none for confirmed capabilities"
-		case hasFirmware:
-			return "mapping writes without a confirmed editor"
-		default:
-			return "firmware without a verified path"
+		if realU2MappingDeferred {
+			blocked = append(blocked, "Ultimate2 mapping ("+u2MappingDeferredReason+")")
+		} else if !hasJP108Editor && !hasU2Editor {
+			blocked = append(blocked, "mapping writes without a confirmed editor")
 		}
 	}
+
+	if len(blocked) == 0 {
+		return "none for confirmed capabilities"
+	}
+	return strings.Join(blocked, ", ")
 }

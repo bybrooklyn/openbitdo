@@ -9,7 +9,7 @@ _openbitdo() {
     COMPREPLY=()
     cur="${COMP_WORDS[COMP_CWORD]}"
     prev="${COMP_WORDS[COMP_CWORD - 1]}"
-    opts="--mock --debug-log --help -h"
+    opts="--mock --debug-log --version --diagnostics-dump --help -h"
 
     case "$prev" in
         --debug-log)

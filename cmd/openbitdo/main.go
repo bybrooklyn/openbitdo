@@ -5,12 +5,15 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"log"
 	"os"
 	"os/signal"
 	"runtime"
+	"runtime/debug"
+	"strings"
 	"syscall"
 
 	"github.com/bybrooklyn/openbitdo/internal/core"
@@ -19,12 +22,82 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-// Set via -ldflags "-X main.appVersion=... -X main.gitCommit=... -X main.buildDate=..."
+// Set by scripts/build_metadata.sh via -ldflags. Keep the first three symbol
+// names stable: existing downstream packaging already sets them directly.
 var (
-	appVersion = "dev"
-	gitCommit  = "unknown"
-	buildDate  = "unknown"
+	appVersion    = "v0.1.0-rc.1"
+	gitCommit     = ""
+	buildDate     = ""
+	buildPlatform = ""
+	gitDirty      = ""
 )
+
+type buildMetadata struct {
+	Version  string
+	Commit   string
+	Date     string
+	Platform string
+	Dirty    string
+}
+
+// resolvedBuildMetadata combines explicit release linker values with Go's
+// embedded VCS settings. The latter keep ordinary local `go build` binaries
+// informative without making release builds depend on implicit tool behavior.
+func resolvedBuildMetadata() buildMetadata {
+	meta := buildMetadata{
+		Version:  valueOrUnknown(appVersion),
+		Commit:   strings.TrimSpace(gitCommit),
+		Date:     valueOrUnknown(buildDate),
+		Platform: strings.TrimSpace(buildPlatform),
+		Dirty:    strings.ToLower(strings.TrimSpace(gitDirty)),
+	}
+
+	var vcsRevision, vcsDirty string
+	if info, ok := debug.ReadBuildInfo(); ok {
+		for _, setting := range info.Settings {
+			switch setting.Key {
+			case "vcs.revision":
+				vcsRevision = setting.Value
+			case "vcs.modified":
+				vcsDirty = strings.ToLower(setting.Value)
+			}
+		}
+	}
+
+	if meta.Commit == "" {
+		meta.Commit = vcsRevision
+	}
+	meta.Commit = shortCommit(valueOrUnknown(meta.Commit))
+	if meta.Platform == "" {
+		meta.Platform = runtime.GOOS + "/" + runtime.GOARCH
+	}
+	if meta.Dirty == "" {
+		meta.Dirty = vcsDirty
+	}
+	if meta.Dirty != "true" && meta.Dirty != "false" {
+		meta.Dirty = "unknown"
+	}
+	return meta
+}
+
+func valueOrUnknown(value string) string {
+	if value = strings.TrimSpace(value); value != "" {
+		return value
+	}
+	return "unknown"
+}
+
+func shortCommit(commit string) string {
+	if len(commit) > 12 && commit != "unknown" {
+		return commit[:12]
+	}
+	return commit
+}
+
+func (m buildMetadata) versionString() string {
+	return fmt.Sprintf("openbitdo %s (commit %s, built %s, %s, dirty=%s)",
+		m.Version, m.Commit, m.Date, m.Platform, m.Dirty)
+}
 
 const helpText = `Usage: openbitdo [OPTIONS]
 
@@ -69,17 +142,31 @@ func main() {
 	}
 }
 
-func run() error {
+type cliOptions struct {
+	mock            *bool
+	debugLogPath    *string
+	showVersion     *bool
+	diagnosticsDump *bool
+}
+
+func newFlagSet() (*flag.FlagSet, cliOptions) {
 	fs := flag.NewFlagSet("openbitdo", flag.ContinueOnError)
 	fs.Usage = func() {
 		// A failed write to stdout here isn't actionable — there's nothing
 		// left to report it through — so the error is deliberately discarded.
 		_, _ = fmt.Fprint(os.Stdout, helpText)
 	}
-	mock := fs.Bool("mock", false, "Use mock transport/devices")
-	debugLogPath := fs.String("debug-log", "", "Write detailed protocol traces to this file")
-	showVersion := fs.Bool("version", false, "Print version/build info and exit")
-	diagnosticsDump := fs.Bool("diagnostics-dump", false, "Run diagnostics against every enumerated device and print TOML reports to stdout")
+	options := cliOptions{
+		mock:            fs.Bool("mock", false, "Use mock transport/devices"),
+		debugLogPath:    fs.String("debug-log", "", "Write detailed protocol traces to this file"),
+		showVersion:     fs.Bool("version", false, "Print version/build info and exit"),
+		diagnosticsDump: fs.Bool("diagnostics-dump", false, "Run diagnostics against every enumerated device and print TOML reports to stdout"),
+	}
+	return fs, options
+}
+
+func run() error {
+	fs, options := newFlagSet()
 	if err := fs.Parse(os.Args[1:]); err != nil {
 		return err
 	}
@@ -88,15 +175,15 @@ func run() error {
 		return fmt.Errorf("unexpected argument: %s", fs.Arg(0))
 	}
 
+	metadata := resolvedBuildMetadata()
 	build := tui.BuildInfo{
-		AppVersion: appVersion, Commit: gitCommit, BuildDate: buildDate,
-		Platform: runtime.GOOS + "/" + runtime.GOARCH,
+		AppVersion: metadata.Version, Commit: metadata.Commit, BuildDate: metadata.Date,
+		Platform: metadata.Platform, Dirty: metadata.Dirty,
 	}
-	if *showVersion {
+	if *options.showVersion {
 		// Same reasoning as --help: nothing left to report a write failure
 		// through, so it's deliberately discarded rather than checked.
-		_, _ = fmt.Fprintf(os.Stdout, "openbitdo %s (commit %s, built %s, %s)\n",
-			build.AppVersion, build.Commit, build.BuildDate, build.Platform)
+		_, _ = fmt.Fprintln(os.Stdout, metadata.versionString())
 		return nil
 	}
 
@@ -107,24 +194,23 @@ func run() error {
 	}
 
 	var debugLog *log.Logger
-	if *debugLogPath != "" {
-		f, err := os.OpenFile(*debugLogPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	if *options.debugLogPath != "" {
+		f, err := os.OpenFile(*options.debugLogPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
 		if err != nil {
 			return fmt.Errorf("open --debug-log file: %w", err)
 		}
 		defer func() { _ = f.Close() }()
 		debugLog = log.New(f, "", log.LstdFlags|log.Lmicroseconds)
-		debugLog.Printf("=== openbitdo %s starting (mock=%v) ===", appVersion, *mock)
+		debugLog.Printf("=== %s starting (mock=%v) ===", metadata.versionString(), *options.mock)
 	}
 
 	c := core.New(core.Config{
-		MockMode: *mock, AdvancedMode: settings.AdvancedMode,
+		MockMode: *options.mock, AdvancedMode: settings.AdvancedMode,
 		DefaultChunkSize: 56, ProgressIntervalMs: 5,
-		FirmwareManifestURL: core.DefaultConfig().FirmwareManifestURL,
-		DebugLog:            debugLog,
+		DebugLog: debugLog,
 	})
 
-	if *diagnosticsDump {
+	if *options.diagnosticsDump {
 		return runDiagnosticsDump(context.Background(), c)
 	}
 
@@ -142,11 +228,22 @@ func run() error {
 
 	model := tui.NewModel(ctx, cancel, c, nav, tui.Options{
 		Build:    build,
-		Settings: settings, SettingsPath: path, MockMode: *mock, NavNotes: nav.Notes,
+		Settings: settings, SettingsPath: path, MockMode: *options.mock, NavNotes: nav.Notes,
 	})
 
 	program := tea.NewProgram(model, tea.WithAltScreen(), tea.WithMouseCellMotion(), tea.WithContext(ctx))
 	_, err := program.Run()
+	return normalizeProgramExitError(err)
+}
+
+// normalizeProgramExitError distinguishes an expected user/signal shutdown
+// from an actual Bubble Tea failure. The TUI cancels its shared context before
+// returning tea.Quit so background HID work stops promptly; Bubble Tea reports
+// that otherwise-graceful path as ErrProgramKilled wrapping context.Canceled.
+func normalizeProgramExitError(err error) error {
+	if errors.Is(err, context.Canceled) {
+		return nil
+	}
 	return err
 }
 

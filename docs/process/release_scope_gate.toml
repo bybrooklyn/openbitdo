@@ -1,6 +1,23 @@
 [rc_scope]
+# Current public release candidate.
+version = "v0.1.0-rc.1"
+
 # Set to true once full 108-key mapping coverage is implemented and validated.
 jp108_full_keyboard_mapping = false
 
-# Set to true once expanded Ultimate2 mapping coverage is implemented and validated.
+# JP108 dedicated mapping remains in scope for v0.1.0-rc.1.
+jp108_dedicated_mapping = true
+
+# Set to true only after Ultimate2 button-map framing is hardware-confirmed.
 ultimate2_expanded_mapping = false
+ultimate2_real_hardware_mapping = false
+ultimate2_mapping_reason = "button-map framing not hardware-confirmed"
+ultimate2_mock_preview = true
+
+# Firmware is deferred from the v0.1.0 line. Production feeds and release keys must stay absent.
+firmware_production_available = false
+firmware_ui_label = "Deferred in 0.1.0"
+firmware_test_only = true
+
+# Fixture-backed hardware CI is not part of this release candidate.
+fixture_backed_hardware_ci = false

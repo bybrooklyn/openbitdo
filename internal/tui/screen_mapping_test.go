@@ -251,28 +251,10 @@ func TestMappingDraft_U2MappingsUnavailableRendersWithoutPanicking(t *testing.T)
 // MockMode branches short-circuit before ever calling it), so this covers
 // the case that's actually usable today.
 //
-// Uses a tall (60-row) terminal deliberately, not this file's usual 30:
-// the Ultimate2 Mapping Editor's 21 button/paddle rows plus diagram/action
-// rows/help text exceed a 30-row terminal's available body height, and
-// investigation found that once this screen's rendered content overflows
-// stylePanel's Height() constraint, bubbletea's eventLoop stops picking up
-// any further tm.Send messages in this test harness (reproduced with a
-// bare WindowSizeMsg resend loop and zero interaction beyond the initial
-// render; confirmed pre-existing and unrelated to this change via git
-// stash bisection against the 17-button-only model that predates the
-// paddle rows added here; confirmed the render function itself has no
-// bug via 50 direct, non-bubbletea calls to viewMapping completing
-// instantly). Root cause is presumably in lipgloss's height-clipping
-// interacting with bubbletea's tea.WithANSICompressor() frame diffing,
-// not this package's code -- not fixed here, out of scope for the button-
-// map encoding fix this pass exists for, and unconfirmed whether it
-// affects a real terminal (which doesn't go through teatest's virtual
-// output buffer/ANSI compressor at all) or is confined to this test
-// harness. Flagged for a future pass; a real fix likely means adding
-// scrolling to the Mapping Editor's row list rather than just avoiding
-// the trigger here.
+// Runs at 100x30 to lock the RC layout contract: the title and action rows
+// remain reachable while the Ultimate2 button/paddle rows scroll internally.
 func TestTeatest_U2PaddleRemapDraftAndApply(t *testing.T) {
-	tm, _, _ := newTeatestModel(t, filepath.Join(t.TempDir(), "config.toml"), 100, 60)
+	tm, _, _ := newTeatestModel(t, filepath.Join(t.TempDir(), "config.toml"), 100, 30)
 	waitForOutput(t, tm, "PID_108JP")
 
 	tm.Send(tea.KeyMsg{Type: tea.KeyDown}) // JP108 -> Ultimate2 (mock device order)
@@ -281,7 +263,7 @@ func TestTeatest_U2PaddleRemapDraftAndApply(t *testing.T) {
 	waitForOutput(t, tm, "› Diagnose")
 	tm.Send(tea.KeyMsg{Type: tea.KeyDown}) // Diagnose(0) -> Mapping Editor(1)
 	tm.Send(tea.KeyMsg{Type: tea.KeyEnter})
-	waitForAllOutputs(t, tm, "Ultimate2 Core Mapping", "Paddle1")
+	waitForAllOutputs(t, tm, "Ultimate2 Core Mapping", "more below")
 
 	for range core.AllU2Buttons { // move the cursor past all 17 button rows onto Paddle1's row
 		tm.Send(tea.KeyMsg{Type: tea.KeyDown})

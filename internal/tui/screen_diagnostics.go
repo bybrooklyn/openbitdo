@@ -8,6 +8,7 @@ import (
 	"github.com/bybrooklyn/openbitdo/internal/core"
 	"github.com/bybrooklyn/openbitdo/internal/protocol"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/x/ansi"
 )
 
 type diagFilter int
@@ -24,7 +25,10 @@ type diagnosticsState struct {
 	ranAt              time.Time // when result was produced; zero if not yet set
 	err                error
 	cursor             int
+	rowOffset          int
+	supportOffset      int
 	filter             diagFilter
+	showDetail         bool
 	showSupportRequest bool
 }
 
@@ -79,15 +83,18 @@ func (m Model) updateDiagnostics(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "s":
 			if m.diag.device.SupportTier != protocol.TierFull {
 				m.diag.showSupportRequest = true
+				m.diag.supportOffset = 0
 			}
 			return m, nil
 		case "up", "k":
 			if m.diag.cursor > 0 {
 				m.diag.cursor--
+				m.ensureDiagnosticsCursorVisible()
 			}
 		case "down", "j":
 			if m.diag.cursor < len(m.diag.visibleChecks())-1 {
 				m.diag.cursor++
+				m.ensureDiagnosticsCursorVisible()
 			}
 		case "tab":
 			if m.diag.filter == diagFilterAll {
@@ -96,6 +103,9 @@ func (m Model) updateDiagnostics(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.diag.filter = diagFilterAll
 			}
 			m.diag.cursor = 0
+			m.diag.rowOffset = 0
+		case "d":
+			m.diag.showDetail = !m.diag.showDetail
 		case "r":
 			m.diag.loading = true
 			return m, cmdDiagProbeFresh(m.ctx, m.core, m.diag.device)
@@ -104,37 +114,67 @@ func (m Model) updateDiagnostics(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+func (m *Model) ensureDiagnosticsCursorVisible() {
+	checks := len(m.diag.visibleChecks())
+	if checks == 0 {
+		m.diag.rowOffset = 0
+		return
+	}
+	start, _, _ := viewportWindow(checks, m.diag.cursor, m.diag.rowOffset, m.diagnosticsVisibleRows())
+	m.diag.rowOffset = start
+}
+
+func (m Model) diagnosticsVisibleRows() int {
+	reserved := 13
+	if calculateLayout(m.width, m.height).mode == layoutWide {
+		reserved = 15
+	}
+	return max(1, m.height-reserved)
+}
+
 func (m Model) viewDiagnostics(height int) string {
-	var b strings.Builder
-	b.WriteString(stylePanelTitle.Render("Diagnostics: "+m.diag.device.Name) + "  " + styleFaint.Render(pidLabel(m.diag.device.VidPid)))
-	b.WriteString("\n\n")
+	panelHeight := max(1, height-2)
+	lines := []string{
+		stylePanelTitle.Render("Diagnostics: " + m.diag.device.Name),
+		styleFaint.Render(pidLabel(m.diag.device.VidPid)),
+		"",
+	}
 
 	if m.diag.loading {
-		b.WriteString(styleFaint.Render("Running diagnostics…"))
-		return stylePanel.Width(m.width - 2).Height(height - 2).Render(b.String())
+		lines = append(lines, styleFaint.Render("Running diagnostics…"))
+		return renderBoundedPanel(m.width-2, panelHeight, strings.Join(lines, "\n"))
 	}
 	if m.diag.err != nil {
-		b.WriteString(styleDanger.Render(fmt.Sprintf("Diagnostics failed: %v", m.diag.err)))
+		lines = append(lines, styleDanger.Render(fmt.Sprintf("Diagnostics failed: %v", m.diag.err)))
 		if coreErr, ok := m.diag.err.(*core.Error); ok && coreErr.Kind == core.KindDeviceDisconnected {
-			b.WriteString("\n" + styleFaint.Render("Reconnect the device, then go back and press r on the dashboard to rescan."))
+			lines = append(lines, styleFaint.Render("Reconnect the device, then go back and press r on the dashboard to rescan."))
 		}
-		return stylePanel.Width(m.width - 2).Height(height - 2).Render(b.String())
+		return renderBoundedPanel(m.width-2, panelHeight, m.fitDiagnosticsLines(lines))
 	}
 
 	if m.diag.showSupportRequest {
-		b.WriteString(stylePanelTitle.Render("Support request — select and copy the text below") + "\n\n")
-		b.WriteString(supportRequestBody(m.diag.device, m.diag.result))
-		b.WriteString("\n" + styleHelp.Render("esc to go back"))
-		return stylePanel.Width(m.width - 2).Height(height - 2).Render(b.String())
+		lines = append(lines, stylePanelTitle.Render("Support request — select and copy"))
+		bodyLines := strings.Split(supportRequestBody(m.diag.device, m.diag.result), "\n")
+		limit := max(1, panelHeight-len(lines)-2)
+		start, end, more := viewportWindow(len(bodyLines), m.diag.supportOffset, m.diag.supportOffset, limit)
+		lines = append(lines, bodyLines[start:end]...)
+		if more != "" {
+			lines = append(lines, styleFaint.Render(more))
+		}
+		lines = append(lines, styleHelp.Render("esc to go back"))
+		return renderBoundedPanel(m.width-2, panelHeight, m.fitDiagnosticsLines(lines))
 	}
 
 	if m.diag.device.SupportTier != protocol.TierFull {
-		b.WriteString(candidateTierExplanation(m.diag.device))
-		b.WriteString("\n" + styleFaint.Render("Press s to generate a support-request report you can paste into a new GitHub issue.") + "\n\n")
+		lines = append(lines,
+			styleWarning.Render("Not hardware-confirmed yet."),
+			styleFaint.Render("Press s for a support-request report."),
+			"",
+		)
 	}
 
 	if !m.diag.ranAt.IsZero() {
-		b.WriteString(styleFaint.Render(fmt.Sprintf("Last run: %s  (r to rerun)", formatAge(time.Since(m.diag.ranAt)))) + "\n\n")
+		lines = append(lines, styleFaint.Render(fmt.Sprintf("Last run: %s  (r to rerun)", formatAge(time.Since(m.diag.ranAt)))))
 	}
 
 	passed, total := 0, len(m.diag.result.CommandChecks)
@@ -143,19 +183,37 @@ func (m Model) viewDiagnostics(height int) string {
 			passed++
 		}
 	}
-	b.WriteString(styleBody.Render(fmt.Sprintf("Checks: %d/%d passed", passed, total)))
-	if m.diag.filter == diagFilterIssues {
-		b.WriteString("  " + styleWarning.Render("[showing issues only — tab to show all]"))
-	} else {
-		b.WriteString("  " + styleFaint.Render("[tab to show issues only]"))
+	transport := "not ready"
+	if m.diag.result.TransportReady {
+		transport = "ready"
 	}
-	b.WriteString("\n\n")
+	lines = append(lines, stylePositiveBlock.Render(styleBody.Render(fmt.Sprintf("Summary: %d/%d checks passed; transport %s.", passed, total, transport))))
+	if m.diag.device.SupportTier != protocol.TierFull {
+		lines = append(lines, styleFaint.Render("Next: save a support request for hardware evidence."))
+	} else {
+		lines = append(lines, styleFaint.Render("Next: open details only when raw evidence is needed."))
+	}
+
+	checkHeader := styleBody.Render(fmt.Sprintf("Checks: %d/%d passed", passed, total))
+	if m.diag.filter == diagFilterIssues {
+		checkHeader += "  " + styleWarning.Render("[issues]")
+	} else {
+		checkHeader += "  " + styleFaint.Render("[tab: issues]")
+	}
+	lines = append(lines, "", checkHeader)
 
 	checks := m.diag.visibleChecks()
 	if len(checks) == 0 {
-		b.WriteString(stylePositiveBlock.Render(stylePositive.Render("No issues.")) + "\n")
+		lines = append(lines, stylePositiveBlock.Render(stylePositive.Render("No issues.")))
 	}
-	for i, c := range checks {
+	detailReserve := 3
+	if m.diag.showDetail {
+		detailReserve = 4
+	}
+	checkLimit := max(1, panelHeight-len(lines)-detailReserve)
+	start, end, more := viewportWindow(len(checks), m.diag.cursor, m.diag.rowOffset, checkLimit)
+	for i := start; i < end; i++ {
+		c := checks[i]
 		line := diagCheckLine(c)
 		if i == m.diag.cursor {
 			// diagCheckLine already embeds its own styled pass/fail icon
@@ -167,21 +225,40 @@ func (m Model) viewDiagnostics(height int) string {
 		} else {
 			line = "  " + line
 		}
-		b.WriteString(line + "\n")
+		lines = append(lines, line)
+	}
+	if more != "" {
+		lines = append(lines, styleFaint.Render(more))
 	}
 
 	if m.diag.cursor < len(checks) {
 		c := checks[m.diag.cursor]
-		b.WriteString("\n" + stylePanelTitle.Render("Detail") + "\n")
-		b.WriteString(styleBody.Render(fmt.Sprintf("command=%s confidence=%s experimental=%v attempts=%d", c.Command, c.Confidence, c.IsExperimental, c.Attempts)) + "\n")
-		b.WriteString(styleBody.Render(fmt.Sprintf("validator=%s", c.Validator)) + "\n")
-		b.WriteString(styleFaint.Render(c.Detail) + "\n")
-		if !c.OK && c.Confidence == protocol.EvidenceConfirmed && m.diag.device.SupportTier != protocol.TierFull {
-			b.WriteString(styleWarning.Render("This check's validator is tuned to hardware-confirmed devices — a failure here on an unconfirmed PID is expected, not a sign of a broken connection.") + "\n")
+		lines = append(lines, stylePanelTitle.Render("Detail"))
+		if m.diag.showDetail {
+			lines = append(lines, styleBody.Render(fmt.Sprintf("command=%s confidence=%s experimental=%v attempts=%d", c.Command, c.Confidence, c.IsExperimental, c.Attempts)))
+			lines = append(lines, styleBody.Render(fmt.Sprintf("validator=%s", c.Validator)))
+			lines = append(lines, styleFaint.Render(c.Detail))
+			if !c.OK && c.Confidence == protocol.EvidenceConfirmed && m.diag.device.SupportTier != protocol.TierFull {
+				lines = append(lines, styleWarning.Render("Confirmed-device validator; candidate failures can be expected."))
+			}
+		} else {
+			lines = append(lines, styleFaint.Render("Press d for raw command, validator, confidence, and response."))
 		}
 	}
 
-	return stylePanel.Width(m.width - 2).Height(height - 2).Render(b.String())
+	if len(lines) > panelHeight {
+		lines = lines[:panelHeight]
+	}
+	return renderBoundedPanel(m.width-2, panelHeight, m.fitDiagnosticsLines(lines))
+}
+
+func (m Model) fitDiagnosticsLines(lines []string) string {
+	limit := max(1, m.width-4)
+	out := make([]string, len(lines))
+	for i, line := range lines {
+		out[i] = ansi.Cut(line, 0, limit)
+	}
+	return strings.Join(out, "\n")
 }
 
 // formatAge renders a cache-staleness duration as a short, human-readable

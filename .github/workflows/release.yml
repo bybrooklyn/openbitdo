@@ -3,263 +3,389 @@ name: Release
 on:
   push:
     tags:
-      - "v*"
+      - "v0.1.0-rc.1"
 
 permissions:
   contents: write
   checks: read
   issues: read
 
+defaults:
+  run:
+    shell: bash
+
+env:
+  GOTOOLCHAIN: local
+  OPENBITDO_EXPECT_DIRTY: "false"
+
 jobs:
   preflight:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
+    timeout-minutes: 40
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 0
 
+      - name: Require the exact RC tag and version
+        run: ./scripts/check_release_tag.sh "$GITHUB_REF_NAME"
+
       - name: Ensure tag commit is on main
-        working-directory: ${{ github.workspace }}
         run: |
           set -euo pipefail
-          git fetch origin main
+          git fetch --no-tags origin main
           if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
-            echo "Tag commit is not reachable from origin/main" >&2
+            echo "tag commit is not reachable from origin/main" >&2
             exit 1
           fi
 
-      - name: Ensure no open release blockers
-        working-directory: ${{ github.workspace }}
+      - name: Ensure no open release blockers, P0s, or P1s
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          blocker_count="$(gh api "repos/${GITHUB_REPOSITORY}/issues?state=open&labels=release-blocker&per_page=100" \
-            --jq '[.[] | select(.pull_request == null)] | length')"
-          if [[ "$blocker_count" != "0" ]]; then
-            echo "Open release-blocker issues detected: ${blocker_count}" >&2
-            gh issue list --repo "$GITHUB_REPOSITORY" --state open --label release-blocker
-            exit 1
-          fi
+          blocked=0
+          for label in release-blocker severity:p0 severity:p1; do
+            count="$(gh issue list \
+              --repo "$GITHUB_REPOSITORY" \
+              --state open \
+              --label "$label" \
+              --limit 100 \
+              --json number \
+              --jq 'length')"
+            if [[ "$count" != "0" ]]; then
+              echo "open ${label} issues detected: ${count}" >&2
+              gh issue list --repo "$GITHUB_REPOSITORY" --state open --label "$label"
+              blocked=1
+            fi
+          done
+          exit "$blocked"
 
-      - name: Preflight required publish secrets
-        if: vars.AUR_PUBLISH_ENABLED == '1'
-        working-directory: ${{ github.workspace }}
+      - name: Require hardware qualification for this exact commit
+        env:
+          ULTIMATE2_RC_GATE_SHA: ${{ vars.ULTIMATE2_RC_GATE_SHA }}
+        run: |
+          set -euo pipefail
+          [[ -n "$ULTIMATE2_RC_GATE_SHA" ]] || {
+            echo "ULTIMATE2_RC_GATE_SHA is unset; the strict manual Ultimate 2 gate has not qualified this release commit" >&2
+            exit 1
+          }
+          [[ "$ULTIMATE2_RC_GATE_SHA" == "$GITHUB_SHA" ]] || {
+            echo "Ultimate 2 qualification covers ${ULTIMATE2_RC_GATE_SHA}, not tagged commit ${GITHUB_SHA}" >&2
+            exit 1
+          }
+          echo "Ultimate 2 hardware qualification matches exact tagged commit ${GITHUB_SHA}"
+
+      - name: Require both external publishing channels
+        env:
+          AUR_PUBLISH_ENABLED: ${{ vars.AUR_PUBLISH_ENABLED }}
+          HOMEBREW_PUBLISH_ENABLED: ${{ vars.HOMEBREW_PUBLISH_ENABLED }}
+        run: |
+          set -euo pipefail
+          [[ "$AUR_PUBLISH_ENABLED" == "1" ]] || {
+            echo "AUR_PUBLISH_ENABLED must be configured as 1" >&2
+            exit 1
+          }
+          [[ "$HOMEBREW_PUBLISH_ENABLED" == "1" ]] || {
+            echo "HOMEBREW_PUBLISH_ENABLED must be configured as 1" >&2
+            exit 1
+          }
+
+      - name: Verify AUR credentials have write access
         env:
           AUR_USERNAME: ${{ secrets.AUR_USERNAME }}
           AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
         run: |
           set -euo pipefail
-          [[ -n "${AUR_USERNAME:-}" ]] || { echo "missing required secret: AUR_USERNAME" >&2; exit 1; }
-          [[ -n "${AUR_SSH_PRIVATE_KEY:-}" ]] || { echo "missing required secret: AUR_SSH_PRIVATE_KEY" >&2; exit 1; }
+          [[ -n "$AUR_USERNAME" ]] || { echo "missing required secret: AUR_USERNAME" >&2; exit 1; }
+          [[ -n "$AUR_SSH_PRIVATE_KEY" ]] || { echo "missing required secret: AUR_SSH_PRIVATE_KEY" >&2; exit 1; }
+          ssh_root="$(mktemp -d)"
+          trap 'rm -rf "$ssh_root"' EXIT
+          install -m 600 /dev/null "$ssh_root/key"
+          printf '%s\n' "$AUR_SSH_PRIVATE_KEY" >"$ssh_root/key"
+          ssh-keyscan -H aur.archlinux.org >"$ssh_root/known_hosts"
+          export GIT_SSH_COMMAND="ssh -i $ssh_root/key -o IdentitiesOnly=yes -o UserKnownHostsFile=$ssh_root/known_hosts -o StrictHostKeyChecking=yes"
+          git clone aur@aur.archlinux.org:openbitdo-bin.git "$ssh_root/openbitdo-bin"
+          git -C "$ssh_root/openbitdo-bin" \
+            -c user.name=openbitdo-access-check \
+            -c user.email=actions@users.noreply.github.com \
+            commit --allow-empty --no-gpg-sign -m access-check
+          git -C "$ssh_root/openbitdo-bin" push --dry-run origin HEAD:master
 
-      - name: Preflight Homebrew tap repository access
-        if: vars.HOMEBREW_PUBLISH_ENABLED == '1'
-        working-directory: ${{ github.workspace }}
+      - name: Verify Homebrew tap credentials have write access
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
           HOMEBREW_TAP_REPO: ${{ vars.HOMEBREW_TAP_REPO }}
         run: |
           set -euo pipefail
-          [[ -n "${HOMEBREW_TAP_TOKEN:-}" ]] || { echo "missing required secret: HOMEBREW_TAP_TOKEN" >&2; exit 1; }
-          [[ -n "${HOMEBREW_TAP_REPO:-}" ]] || { echo "missing required variable: HOMEBREW_TAP_REPO" >&2; exit 1; }
-          gh repo view "${HOMEBREW_TAP_REPO}" >/dev/null
+          [[ -n "$GH_TOKEN" ]] || { echo "missing required secret: HOMEBREW_TAP_TOKEN" >&2; exit 1; }
+          [[ -n "$HOMEBREW_TAP_REPO" ]] || { echo "missing required variable: HOMEBREW_TAP_REPO" >&2; exit 1; }
+          permission="$(gh api "repos/${HOMEBREW_TAP_REPO}" \
+            --jq '.permissions.push or .permissions.maintain or .permissions.admin')"
+          [[ "$permission" == "true" ]] || {
+            echo "HOMEBREW_TAP_TOKEN does not report write access to ${HOMEBREW_TAP_REPO}" >&2
+            exit 1
+          }
+          tap_root="$(mktemp -d)"
+          trap 'rm -rf "$tap_root"' EXIT
+          gh auth setup-git
+          gh repo clone "$HOMEBREW_TAP_REPO" "$tap_root/tap"
+          tap_branch="$(git -C "$tap_root/tap" symbolic-ref --short HEAD)"
+          git -C "$tap_root/tap" \
+            -c user.name=openbitdo-access-check \
+            -c user.email=actions@users.noreply.github.com \
+            commit --allow-empty --no-gpg-sign -m access-check
+          git -C "$tap_root/tap" push --dry-run origin "HEAD:${tap_branch}"
 
-      - name: Require successful CI checks on tagged commit
-        working-directory: ${{ github.workspace }}
+      - name: Require successful CI checks on the exact tagged commit
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          set -euo pipefail
-          required_checks=(
-            guard
-            aur-validate
-            tui-smoke-test
-            build-macos-arm64
+          ./scripts/check_required_checks.sh \
+            "$GITHUB_REPOSITORY" \
+            "$GITHUB_SHA" \
+            guard \
+            generated-registry \
+            aur-validate \
+            tui-smoke-test \
+            macos-safe-tests \
+            vulnerability-scan \
+            build-linux-x86_64 \
+            build-linux-aarch64 \
+            build-macos-arm64 \
             test
-          )
-          max_attempts=120
-          sleep_seconds=10
-          declare -A final_state
 
-          for attempt in $(seq 1 "${max_attempts}"); do
-            if ! check_runs_json="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${GITHUB_SHA}/check-runs")"; then
-              echo "attempt ${attempt}/${max_attempts}: unable to fetch check-runs; retrying in ${sleep_seconds}s"
-              if [[ "${attempt}" -lt "${max_attempts}" ]]; then
-                sleep "${sleep_seconds}"
-              fi
-              continue
-            fi
-
-            all_success=1
-            echo "check-run preflight attempt ${attempt}/${max_attempts}"
-            for check in "${required_checks[@]}"; do
-              state="$(
-                jq -r --arg name "$check" '
-                  [.check_runs[] | select(.name == $name)] as $runs
-                  | if ($runs | length) == 0 then
-                      "missing"
-                    elif any($runs[]; .conclusion == "success") then
-                      "success"
-                    elif any($runs[]; .conclusion == "failure" or .conclusion == "timed_out" or .conclusion == "action_required" or .conclusion == "startup_failure" or .conclusion == "stale") then
-                      "failing"
-                    else
-                      "pending"
-                    end
-                ' <<<"$check_runs_json"
-              )"
-              final_state["$check"]="$state"
-              echo " - ${check}: ${state}"
-              if [[ "${state}" != "success" ]]; then
-                all_success=0
-              fi
-            done
-
-            if [[ "${all_success}" -eq 1 ]]; then
-              echo "all required CI checks are successful on ${GITHUB_SHA}"
-              exit 0
-            fi
-
-            if [[ "${attempt}" -lt "${max_attempts}" ]]; then
-              sleep "${sleep_seconds}"
-            fi
-          done
-
-          echo "timed out waiting for required CI checks on ${GITHUB_SHA}" >&2
-          for check in "${required_checks[@]}"; do
-            echo " - ${check}: ${final_state[$check]:-missing}" >&2
-          done
-          exit 1
-
-      - name: Install system deps
+      - name: Install system dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y libudev-dev pkg-config build-essential
-
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version-file: go.mod
-
-      - name: Guard
-        run: ./scripts/cleanroom_guard.sh
-
-      - name: Tests
-        run: go test -race ./...
+          cache: true
+      - name: Re-run release safety gates
+        run: |
+          ./scripts/check_go_toolchain.sh
+          ./scripts/cleanroom_guard.sh
+          python3 ./scripts/check_evidence_readiness.py
+          ./scripts/check_docs_consistency.sh
+          ./scripts/check_manual_hardware_test_tags.sh
+          ./scripts/check_generated_registry.sh
+          go mod verify
+          go test -race ./...
 
   build-linux-x86_64:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     needs: preflight
+    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Install system deps
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - name: Install build and audit dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libudev-dev pkg-config build-essential
-
-      - uses: actions/setup-go@v5
+          sudo apt-get install -y binutils libudev-dev pkg-config build-essential python3
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version-file: go.mod
-
-      - name: Package linux x86_64
-        run: ./scripts/package-linux.sh "${GITHUB_REF_NAME}" x86_64
-
-      - name: Upload linux x86_64 assets
-        uses: actions/upload-artifact@v4
+          cache: true
+      - name: Package and verify Linux x86_64
+        run: |
+          ./scripts/check_go_toolchain.sh
+          ./scripts/package-linux.sh "$GITHUB_REF_NAME" x86_64
+          ./scripts/verify_release_assets.sh "$GITHUB_REF_NAME" dist linux-x86_64
+          ./scripts/check_binary_arch.sh "dist/openbitdo-${GITHUB_REF_NAME}-linux-x86_64" linux x86_64
+          ./scripts/check_glibc_compat.sh "dist/openbitdo-${GITHUB_REF_NAME}-linux-x86_64" 2.35
+          ./scripts/smoke_release_archive.sh "$GITHUB_REF_NAME" linux x86_64 dist
+      - name: Smoke extracted artifact on Debian 12
+        run: |
+          docker run --rm \
+            -e RELEASE_TAG="$GITHUB_REF_NAME" \
+            -e OPENBITDO_EXPECT_COMMIT="$(git rev-parse --short=12 HEAD)" \
+            -e OPENBITDO_EXPECT_DIRTY="false" \
+            -v "$GITHUB_WORKSPACE:/workspace:ro" \
+            -w /workspace \
+            debian:12 \
+            bash -euo pipefail -c '
+              apt-get update
+              apt-get install -y --no-install-recommends ca-certificates libudev1 python3
+              ./scripts/smoke_release_archive.sh "$RELEASE_TAG" linux x86_64 dist
+            '
+      - name: Upload Linux x86_64 release assets
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: release-linux-x86_64
-          path: dist/openbitdo-${{ github.ref_name }}-linux-x86_64*
+          path: |
+            dist/openbitdo-${{ github.ref_name }}-linux-x86_64
+            dist/openbitdo-${{ github.ref_name }}-linux-x86_64.sha256
+            dist/openbitdo-${{ github.ref_name }}-linux-x86_64.tar.gz
+            dist/openbitdo-${{ github.ref_name }}-linux-x86_64.tar.gz.sha256
+          if-no-files-found: error
 
   build-linux-aarch64:
-    runs-on: ubuntu-24.04-arm
+    runs-on: ubuntu-22.04-arm
     needs: preflight
+    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Install system deps
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - name: Install build and audit dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libudev-dev pkg-config build-essential
-
-      - uses: actions/setup-go@v5
+          sudo apt-get install -y binutils libudev-dev pkg-config build-essential python3
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version-file: go.mod
-
-      - name: Package linux aarch64
-        run: ./scripts/package-linux.sh "${GITHUB_REF_NAME}" aarch64
-
-      - name: Upload linux aarch64 assets
-        uses: actions/upload-artifact@v4
+          cache: true
+      - name: Package and verify Linux aarch64
+        run: |
+          ./scripts/check_go_toolchain.sh
+          ./scripts/package-linux.sh "$GITHUB_REF_NAME" aarch64
+          ./scripts/verify_release_assets.sh "$GITHUB_REF_NAME" dist linux-aarch64
+          ./scripts/check_binary_arch.sh "dist/openbitdo-${GITHUB_REF_NAME}-linux-aarch64" linux aarch64
+          ./scripts/check_glibc_compat.sh "dist/openbitdo-${GITHUB_REF_NAME}-linux-aarch64" 2.35
+          ./scripts/smoke_release_archive.sh "$GITHUB_REF_NAME" linux aarch64 dist
+      - name: Smoke extracted artifact on Debian 12
+        run: |
+          docker run --rm \
+            -e RELEASE_TAG="$GITHUB_REF_NAME" \
+            -e OPENBITDO_EXPECT_COMMIT="$(git rev-parse --short=12 HEAD)" \
+            -e OPENBITDO_EXPECT_DIRTY="false" \
+            -v "$GITHUB_WORKSPACE:/workspace:ro" \
+            -w /workspace \
+            debian:12 \
+            bash -euo pipefail -c '
+              apt-get update
+              apt-get install -y --no-install-recommends ca-certificates libudev1 python3
+              ./scripts/smoke_release_archive.sh "$RELEASE_TAG" linux aarch64 dist
+            '
+      - name: Upload Linux aarch64 release assets
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: release-linux-aarch64
-          path: dist/openbitdo-${{ github.ref_name }}-linux-aarch64*
+          path: |
+            dist/openbitdo-${{ github.ref_name }}-linux-aarch64
+            dist/openbitdo-${{ github.ref_name }}-linux-aarch64.sha256
+            dist/openbitdo-${{ github.ref_name }}-linux-aarch64.tar.gz
+            dist/openbitdo-${{ github.ref_name }}-linux-aarch64.tar.gz.sha256
+          if-no-files-found: error
 
   build-macos-arm64:
     runs-on: macos-14
     needs: preflight
+    timeout-minutes: 30
+    env:
+      MACOSX_DEPLOYMENT_TARGET: "13.0"
     steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version-file: go.mod
-
-      - name: Package macOS arm64
-        run: ./scripts/package-macos.sh "${GITHUB_REF_NAME}" arm64
-
-      - name: Upload macOS arm64 assets
-        uses: actions/upload-artifact@v4
+          cache: true
+      - name: Package and verify macOS arm64
+        run: |
+          ./scripts/check_go_toolchain.sh
+          ./scripts/package-macos.sh "$GITHUB_REF_NAME" arm64
+          ./scripts/verify_release_assets.sh "$GITHUB_REF_NAME" dist macos-arm64
+          ./scripts/check_binary_arch.sh "dist/openbitdo-${GITHUB_REF_NAME}-macos-arm64" macos arm64
+          ./scripts/check_macos_minos.sh "dist/openbitdo-${GITHUB_REF_NAME}-macos-arm64" 13.0
+          ./scripts/smoke_release_archive.sh "$GITHUB_REF_NAME" macos arm64 dist
+      - name: Verify and install macOS package
+        run: |
+          pkg="dist/openbitdo-${GITHUB_REF_NAME}-macos-arm64.pkg"
+          payload="$(pkgutil --payload-files "$pkg")"
+          if grep -Eq '(^|/)\._' <<<"$payload"; then
+            echo "macOS package contains AppleDouble metadata files" >&2
+            exit 1
+          fi
+          for required in \
+            usr/local/bin/openbitdo \
+            usr/local/share/bash-completion/completions/openbitdo \
+            usr/local/share/fish/vendor_completions.d/openbitdo.fish \
+            usr/local/share/zsh/site-functions/_openbitdo; do
+            grep -Fq "$required" <<<"$payload"
+          done
+          sudo installer -pkg "$pkg" -target /
+          /usr/local/bin/openbitdo --version | grep -F "openbitdo ${GITHUB_REF_NAME}"
+      - name: Upload macOS arm64 release assets
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: release-macos-arm64
-          path: dist/openbitdo-${{ github.ref_name }}-macos-arm64*
+          path: |
+            dist/openbitdo-${{ github.ref_name }}-macos-arm64
+            dist/openbitdo-${{ github.ref_name }}-macos-arm64.sha256
+            dist/openbitdo-${{ github.ref_name }}-macos-arm64.tar.gz
+            dist/openbitdo-${{ github.ref_name }}-macos-arm64.tar.gz.sha256
+            dist/openbitdo-${{ github.ref_name }}-macos-arm64.pkg
+            dist/openbitdo-${{ github.ref_name }}-macos-arm64.pkg.sha256
+          if-no-files-found: error
 
   publish:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     needs:
       - build-linux-x86_64
       - build-linux-aarch64
       - build-macos-arm64
+    timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
-
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: Download packaged assets
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
+          pattern: release-*
           path: release-assets
-
-      - name: Determine prerelease flag
-        id: prerelease
+          merge-multiple: true
+      - name: Verify exact asset manifest and release notes
         run: |
-          if [[ "${GITHUB_REF_NAME}" == *"-rc."* ]]; then
-            echo "value=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "value=false" >> "$GITHUB_OUTPUT"
+          ./scripts/check_release_tag.sh "$GITHUB_REF_NAME"
+          ./scripts/verify_release_assets.sh "$GITHUB_REF_NAME" release-assets all
+          ./scripts/extract_changelog_section.sh "$GITHUB_REF_NAME" >release-notes.md
+          test -s release-notes.md
+      - name: Publish GitHub prerelease
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
+        with:
+          prerelease: true
+          body_path: release-notes.md
+          fail_on_unmatched_files: true
+          files: |
+            release-assets/openbitdo-${{ github.ref_name }}-linux-x86_64
+            release-assets/openbitdo-${{ github.ref_name }}-linux-x86_64.sha256
+            release-assets/openbitdo-${{ github.ref_name }}-linux-x86_64.tar.gz
+            release-assets/openbitdo-${{ github.ref_name }}-linux-x86_64.tar.gz.sha256
+            release-assets/openbitdo-${{ github.ref_name }}-linux-aarch64
+            release-assets/openbitdo-${{ github.ref_name }}-linux-aarch64.sha256
+            release-assets/openbitdo-${{ github.ref_name }}-linux-aarch64.tar.gz
+            release-assets/openbitdo-${{ github.ref_name }}-linux-aarch64.tar.gz.sha256
+            release-assets/openbitdo-${{ github.ref_name }}-macos-arm64
+            release-assets/openbitdo-${{ github.ref_name }}-macos-arm64.sha256
+            release-assets/openbitdo-${{ github.ref_name }}-macos-arm64.tar.gz
+            release-assets/openbitdo-${{ github.ref_name }}-macos-arm64.tar.gz.sha256
+            release-assets/openbitdo-${{ github.ref_name }}-macos-arm64.pkg
+            release-assets/openbitdo-${{ github.ref_name }}-macos-arm64.pkg.sha256
+      - name: Verify published release before external publication
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          published_assets="$(mktemp -d)"
+          gh release download "$GITHUB_REF_NAME" \
+            --repo "$GITHUB_REPOSITORY" \
+            --dir "$published_assets"
+          ./scripts/verify_release_assets.sh "$GITHUB_REF_NAME" "$published_assets" all
+          prerelease="$(gh release view "$GITHUB_REF_NAME" \
+            --repo "$GITHUB_REPOSITORY" \
+            --json isPrerelease \
+            --jq .isPrerelease)"
+          [[ "$prerelease" == "true" ]] || { echo "published release is not marked prerelease" >&2; exit 1; }
+          expected_body="$(<release-notes.md)"
+          published_body="$(gh release view "$GITHUB_REF_NAME" \
+            --repo "$GITHUB_REPOSITORY" \
+            --json body \
+            --jq .body)"
+          if [[ "$published_body" != "$expected_body" ]]; then
+            echo "published release body does not match the selected changelog section" >&2
+            exit 1
           fi
 
-      - name: Publish GitHub release
-        uses: softprops/action-gh-release@v2
-        with:
-          prerelease: ${{ steps.prerelease.outputs.value }}
-          body_path: CHANGELOG.md
-          files: |
-            release-assets/**/openbitdo-${{ github.ref_name }}-linux-x86_64
-            release-assets/**/openbitdo-${{ github.ref_name }}-linux-x86_64.sha256
-            release-assets/**/openbitdo-${{ github.ref_name }}-linux-x86_64.tar.gz
-            release-assets/**/openbitdo-${{ github.ref_name }}-linux-x86_64.tar.gz.sha256
-            release-assets/**/openbitdo-${{ github.ref_name }}-linux-aarch64
-            release-assets/**/openbitdo-${{ github.ref_name }}-linux-aarch64.sha256
-            release-assets/**/openbitdo-${{ github.ref_name }}-linux-aarch64.tar.gz
-            release-assets/**/openbitdo-${{ github.ref_name }}-linux-aarch64.tar.gz.sha256
-            release-assets/**/openbitdo-${{ github.ref_name }}-macos-arm64
-            release-assets/**/openbitdo-${{ github.ref_name }}-macos-arm64.sha256
-            release-assets/**/openbitdo-${{ github.ref_name }}-macos-arm64.tar.gz
-            release-assets/**/openbitdo-${{ github.ref_name }}-macos-arm64.tar.gz.sha256
-            release-assets/**/openbitdo-${{ github.ref_name }}-macos-arm64.pkg
-            release-assets/**/openbitdo-${{ github.ref_name }}-macos-arm64.pkg.sha256
-
   publish-homebrew:
-    if: vars.HOMEBREW_PUBLISH_ENABLED == '1'
     needs: publish
     uses: ./.github/workflows/homebrew-publish.yml
     with:
@@ -267,9 +393,42 @@ jobs:
     secrets: inherit
 
   publish-aur:
-    if: vars.AUR_PUBLISH_ENABLED == '1'
     needs: publish
     uses: ./.github/workflows/aur-publish.yml
     with:
       tag: ${{ github.ref_name }}
     secrets: inherit
+
+  release-complete:
+    runs-on: ubuntu-22.04
+    needs:
+      - publish-homebrew
+      - publish-aur
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - name: Re-download and verify published GitHub assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          assets="$(mktemp -d)"
+          gh release download "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --dir "$assets"
+          ./scripts/verify_release_assets.sh "$GITHUB_REF_NAME" "$assets" all
+      - name: Verify published AUR metadata
+        run: |
+          set -euo pipefail
+          aur_root="$(mktemp -d)"
+          git clone https://aur.archlinux.org/openbitdo-bin.git "$aur_root/openbitdo-bin"
+          grep -Fqx 'pkgver=0.1.0rc1' "$aur_root/openbitdo-bin/PKGBUILD"
+          grep -Fqx '_upstream_tag=v0.1.0-rc.1' "$aur_root/openbitdo-bin/PKGBUILD"
+      - name: Verify published Homebrew metadata
+        env:
+          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          HOMEBREW_TAP_REPO: ${{ vars.HOMEBREW_TAP_REPO }}
+        run: |
+          set -euo pipefail
+          tap_root="$(mktemp -d)"
+          gh auth setup-git
+          gh repo clone "$HOMEBREW_TAP_REPO" "$tap_root/tap"
+          grep -Fq 'version "0.1.0-rc.1"' "$tap_root/tap/Formula/openbitdo.rb"

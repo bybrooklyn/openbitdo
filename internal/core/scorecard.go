@@ -2,11 +2,28 @@ package core
 
 import "github.com/bybrooklyn/openbitdo/internal/protocol"
 
-// SupportScorecardForDevice computes the 7-dimension evidence/promotion
-// scorecard for a device: static evidence, runtime evidence, hardware
-// confirmation, safe-read coverage, safe-write readiness, backup/readback
-// readiness, and firmware status.
+type supportRuntimeScope struct {
+	firmwareEnabled  bool
+	u2MappingEnabled bool
+}
+
+// SupportScorecardForDevice computes a conservative production scorecard.
+// Callers that own an OpenBitdoCore should use its method of the same name so
+// mock/test runtime availability is represented precisely.
 func SupportScorecardForDevice(device AppDevice) SupportScorecard {
+	return supportScorecardForDevice(device, supportRuntimeScope{})
+}
+
+// SupportScorecardForDevice computes the 7 evidence dimensions plus current
+// runtime release blockers for this core instance.
+func (c *OpenBitdoCore) SupportScorecardForDevice(device AppDevice) SupportScorecard {
+	return supportScorecardForDevice(device, supportRuntimeScope{
+		firmwareEnabled:  c.FirmwareEnabled(),
+		u2MappingEnabled: c.config.MockMode,
+	})
+}
+
+func supportScorecardForDevice(device AppDevice, scope supportRuntimeScope) SupportScorecard {
 	present := func(cond bool) EvidenceState {
 		if cond {
 			return EvidencePresent
@@ -31,7 +48,11 @@ func SupportScorecardForDevice(device AppDevice) SupportScorecard {
 	}
 
 	var backupReadbackReadiness EvidenceState
+	realU2MappingDeferred := device.Capability.SupportsU2ButtonMap &&
+		device.Capability.SupportsU2SlotConfig && !scope.u2MappingEnabled
 	switch {
+	case realU2MappingDeferred:
+		backupReadbackReadiness = EvidenceMissing
 	case device.SupportTier == protocol.TierFull:
 		backupReadbackReadiness = EvidencePresent
 	case device.Capability.SupportsProfileRW || device.Capability.SupportsJP108DedicatedMap || device.Capability.SupportsU2ButtonMap:
@@ -44,6 +65,8 @@ func SupportScorecardForDevice(device AppDevice) SupportScorecard {
 	switch {
 	case !device.Capability.SupportsFirmware:
 		firmwareStatus = EvidenceNotApplicable
+	case !scope.firmwareEnabled:
+		firmwareStatus = EvidenceMissing
 	case device.SupportTier == protocol.TierFull:
 		firmwareStatus = EvidencePresent
 	default:
@@ -82,13 +105,29 @@ func SupportScorecardForDevice(device AppDevice) SupportScorecard {
 		missing = append(missing, "backup and readback verification")
 	}
 	if firmwareStatus == EvidenceMissing {
-		missing = append(missing, "firmware preflight and hardware confirmation")
+		if !scope.firmwareEnabled && device.Capability.SupportsFirmware {
+			missing = append(missing, "firmware updates deferred in 0.1.0")
+		} else {
+			missing = append(missing, "firmware preflight and hardware confirmation")
+		}
+	}
+	if realU2MappingDeferred {
+		missing = append(missing, u2MappingDeferredReason)
 	}
 
-	promotionReady := device.SupportTier == protocol.TierFull ||
-		(staticEvidence == EvidencePresent && runtimeEvidence == EvidencePresent &&
-			hardwareConfirmation == EvidencePresent && safeWriteReadiness.isPresent() &&
-			backupReadbackReadiness.isPresent())
+	var releaseBlockers []string
+	if !scope.firmwareEnabled && device.Capability.SupportsFirmware {
+		releaseBlockers = append(releaseBlockers, ReleaseBlockerFirmwareDisabled)
+	}
+	if realU2MappingDeferred {
+		releaseBlockers = append(releaseBlockers, ReleaseBlockerU2ButtonMapFraming)
+	}
+
+	promotionReady := device.SupportTier == protocol.TierFull &&
+		staticEvidence.isPresent() && runtimeEvidence.isPresent() &&
+		hardwareConfirmation.isPresent() && safeReadCoverage.isPresent() &&
+		safeWriteReadiness.isPresent() && backupReadbackReadiness.isPresent() &&
+		firmwareStatus.isPresent() && len(releaseBlockers) == 0
 
 	return SupportScorecard{
 		VidPid: device.VidPid, SupportTier: device.SupportTier,
@@ -96,6 +135,6 @@ func SupportScorecardForDevice(device AppDevice) SupportScorecard {
 		HardwareConfirmation: hardwareConfirmation, SafeReadCoverage: safeReadCoverage,
 		SafeWriteReadiness: safeWriteReadiness, BackupReadbackReadiness: backupReadbackReadiness,
 		FirmwareStatus: firmwareStatus, ScorePercent: scorePercent,
-		PromotionReady: promotionReady, MissingEvidence: missing,
+		PromotionReady: promotionReady, MissingEvidence: missing, ReleaseBlockers: releaseBlockers,
 	}
 }

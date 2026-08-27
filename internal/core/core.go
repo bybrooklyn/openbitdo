@@ -2,8 +2,11 @@ package core
 
 import (
 	"context"
+	"crypto/ed25519"
 	"fmt"
 	"net/http"
+	"sort"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -29,6 +32,10 @@ type OpenBitdoCore struct {
 
 	http *http.Client
 
+	// enumerateDevices is injectable for hermetic multi-interface discovery
+	// tests. Production always uses protocol.EnumerateHIDDevices.
+	enumerateDevices func() []protocol.EnumeratedDevice
+
 	// transportOverride lets tests inject a protocol.MockTransport in place
 	// of real HID access, without needing physical hardware. Unset in normal
 	// use, where transport() falls back to protocol.NewHidTransport().
@@ -50,16 +57,33 @@ func (c *OpenBitdoCore) transport() protocol.Transport {
 
 // New constructs an OpenBitdoCore from config.
 func New(config Config) *OpenBitdoCore {
+	// Treat configuration as immutable after construction. In particular,
+	// copying the trusted key bytes prevents a caller from swapping trust
+	// material while a download is in progress.
+	if len(config.FirmwareTrustedKeys) > 0 {
+		keys := make([]ed25519.PublicKey, len(config.FirmwareTrustedKeys))
+		for i, key := range config.FirmwareTrustedKeys {
+			keys[i] = append([]byte(nil), key...)
+		}
+		config.FirmwareTrustedKeys = keys
+	}
 	c := &OpenBitdoCore{
-		config:    config,
-		sessions:  make(map[FirmwareUpdateSessionID]*firmwareSessionHandle),
-		backups:   make(map[ConfigBackupID]configBackup),
-		diagCache: make(map[diagCacheKey]DiagCacheEntry),
-		http:      &http.Client{},
+		config:           config,
+		sessions:         make(map[FirmwareUpdateSessionID]*firmwareSessionHandle),
+		backups:          make(map[ConfigBackupID]configBackup),
+		diagCache:        make(map[diagCacheKey]DiagCacheEntry),
+		http:             &http.Client{},
+		enumerateDevices: protocol.EnumerateHIDDevices,
 	}
 	c.advancedMode.Store(config.AdvancedMode)
 	return c
 }
+
+// FirmwareEnabled reports whether the dormant firmware implementation was
+// explicitly enabled for this core instance. It is false in production for
+// v0.1.0 and is exposed so callers can render capability state without
+// duplicating configuration policy.
+func (c *OpenBitdoCore) FirmwareEnabled() bool { return c.config.FirmwareUpdatesEnabled }
 
 // SetAdvancedMode toggles advanced mode. Advanced mode enables inferred
 // SafeRead commands only — write/unsafe inferred commands stay blocked by
@@ -72,6 +96,9 @@ func (c *OpenBitdoCore) AdvancedMode() bool { return c.advancedMode.Load() }
 // ListDevices enumerates connected 8BitDo devices (or fixed mock devices in
 // mock mode).
 func (c *OpenBitdoCore) ListDevices(ctx context.Context) ([]AppDevice, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if c.config.MockMode {
 		return []AppDevice{
 			mockDevice(protocol.VidPid{VID: 0x2dc8, PID: 0x5209}, true),
@@ -80,7 +107,7 @@ func (c *OpenBitdoCore) ListDevices(ctx context.Context) ([]AppDevice, error) {
 		}, nil
 	}
 
-	devices := protocol.EnumerateHIDDevices()
+	devices := addressableEnumeratedDevices(c.enumerateDevices())
 	out := make([]AppDevice, 0, len(devices))
 	for _, d := range devices {
 		if d.VidPid.VID != 0x2dc8 {
@@ -94,6 +121,113 @@ func (c *OpenBitdoCore) ListDevices(ctx context.Context) ([]AppDevice, error) {
 		})
 	}
 	return out, nil
+}
+
+func stablePhysicalDeviceKey(device protocol.EnumeratedDevice) (string, bool) {
+	serial := strings.TrimSpace(device.Serial)
+	if serial != "" {
+		return fmt.Sprintf("serial:%04x:%04x:%s", device.VidPid.VID, device.VidPid.PID, serial), true
+	}
+	path := strings.TrimSpace(device.Path)
+	if path != "" {
+		return fmt.Sprintf("path:%04x:%04x:%s", device.VidPid.VID, device.VidPid.PID, path), true
+	}
+	return "", false
+}
+
+func preferEnumeratedDevice(left, right protocol.EnumeratedDevice) bool {
+	if left.IsVendorConfigInterface() != right.IsVendorConfigInterface() {
+		return left.IsVendorConfigInterface()
+	}
+	if left.Serial != right.Serial {
+		return left.Serial < right.Serial
+	}
+	if left.Path != right.Path {
+		return left.Path < right.Path
+	}
+	if left.UsagePage != right.UsagePage {
+		return left.UsagePage < right.UsagePage
+	}
+	if left.Usage != right.Usage {
+		return left.Usage < right.Usage
+	}
+	return left.Interface < right.Interface
+}
+
+// deduplicateEnumeratedDevices collapses logical HID interfaces belonging to
+// one physical controller. A serial scoped by VID/PID is the preferred stable
+// identity; an exact non-empty path is the safe fallback. Interfaces with
+// neither are retained separately rather than risking two identical physical
+// controllers being merged. The vendor config interface is the representative
+// when present, independent of enumeration order.
+func deduplicateEnumeratedDevices(devices []protocol.EnumeratedDevice) []protocol.EnumeratedDevice {
+	byPhysicalDevice := make(map[string]protocol.EnumeratedDevice)
+	unkeyed := make([]protocol.EnumeratedDevice, 0)
+	for _, device := range devices {
+		key, ok := stablePhysicalDeviceKey(device)
+		if !ok {
+			unkeyed = append(unkeyed, device)
+			continue
+		}
+		current, exists := byPhysicalDevice[key]
+		if !exists || preferEnumeratedDevice(device, current) {
+			byPhysicalDevice[key] = device
+		}
+	}
+
+	result := make([]protocol.EnumeratedDevice, 0, len(byPhysicalDevice)+len(unkeyed))
+	for _, device := range byPhysicalDevice {
+		result = append(result, device)
+	}
+	result = append(result, unkeyed...)
+	sort.Slice(result, func(i, j int) bool {
+		leftKey, leftStable := stablePhysicalDeviceKey(result[i])
+		rightKey, rightStable := stablePhysicalDeviceKey(result[j])
+		if leftStable != rightStable {
+			return leftStable
+		}
+		if leftKey != rightKey {
+			return leftKey < rightKey
+		}
+		return preferEnumeratedDevice(result[i], result[j])
+	})
+	return result
+}
+
+// addressableEnumeratedDevices applies the v0.1 addressing limitation after
+// physical-interface deduplication: core operations target only VID/PID, so
+// two physical controllers with the same VID/PID cannot be selected honestly
+// as separate rows yet. Collapse them to the same deterministic representative
+// HidTransport.Open will choose rather than presenting a misleading choice.
+func addressableEnumeratedDevices(devices []protocol.EnumeratedDevice) []protocol.EnumeratedDevice {
+	physicalDevices := deduplicateEnumeratedDevices(devices)
+	byVidPid := make(map[protocol.VidPid]protocol.EnumeratedDevice)
+	physicalCounts := make(map[protocol.VidPid]int)
+	for _, device := range physicalDevices {
+		physicalCounts[device.VidPid]++
+		current, exists := byVidPid[device.VidPid]
+		if !exists || preferEnumeratedDevice(device, current) {
+			byVidPid[device.VidPid] = device
+		}
+	}
+	result := make([]protocol.EnumeratedDevice, 0, len(byVidPid))
+	for vidPid, device := range byVidPid {
+		if physicalCounts[vidPid] > 1 {
+			// The public operation target cannot honor a particular serial/path
+			// yet. Do not claim the deterministic representative's identity as
+			// though the user had selected that physical controller.
+			device.Serial = ""
+			device.Path = ""
+		}
+		result = append(result, device)
+	}
+	sort.Slice(result, func(i, j int) bool {
+		if result[i].VidPid.VID != result[j].VidPid.VID {
+			return result[i].VidPid.VID < result[j].VidPid.VID
+		}
+		return result[i].VidPid.PID < result[j].VidPid.PID
+	})
+	return result
 }
 
 // DiagProbe runs every applicable safe-read diagnostic check against target.
@@ -164,7 +298,7 @@ func (c *OpenBitdoCore) BeginnerDiagSummary(device AppDevice, diag protocol.Diag
 	if diag.TransportReady {
 		transportHint = "Transport ready: yes."
 	}
-	blockedHint := fmt.Sprintf("Blocked operations: %s.", blockedOperationSummary(device))
+	blockedHint := fmt.Sprintf("Blocked operations: %s.", c.blockedOperationSummary(device))
 
 	base := fmt.Sprintf("Checks: %d/%d passed. Confirmed checks: %d/%d passed. %s %s %s %s %s",
 		passed, total, confirmedOK, confirmedTotal, experimentalHint, statusHint, transportHint, blockedHint, familyHint)

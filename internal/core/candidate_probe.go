@@ -13,7 +13,7 @@ import (
 // place that ceremony is enforced end-to-end.
 func (c *OpenBitdoCore) CandidateWriteProbe(ctx context.Context, vidPid protocol.VidPid, policy RuntimeUnlockPolicy) (RuntimeUnlockReport, error) {
 	device := appDeviceFromProfile(vidPid, "", true)
-	scorecard := device.Scorecard()
+	scorecard := c.SupportScorecardForDevice(device)
 
 	if device.SupportTier != protocol.TierCandidateReadOnly {
 		return deniedUnlockReport(vidPid, scorecard, "Runtime unlock is only available for candidate-readonly devices."), nil

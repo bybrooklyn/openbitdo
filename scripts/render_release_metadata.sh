@@ -25,20 +25,41 @@ OUTPUT_DIR="$4"
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
+if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?$ ]]; then
+  echo "unsupported release tag: $TAG (expected vMAJOR.MINOR.PATCH or vMAJOR.MINOR.PATCH-rc.N)" >&2
+  exit 1
+fi
+
+if [[ ! "$REPOSITORY" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]]; then
+  echo "invalid repository name: $REPOSITORY (expected owner/repository)" >&2
+  exit 1
+fi
+
+if [[ ! -d "$INPUT_DIR" ]]; then
+  echo "release input directory not found: $INPUT_DIR" >&2
+  exit 1
+fi
+
+if command -v sha256sum >/dev/null 2>&1; then
+  SHA256_TOOL="sha256sum"
+elif command -v shasum >/dev/null 2>&1; then
+  SHA256_TOOL="shasum"
+else
+  echo "no SHA-256 checksum tool found (need sha256sum or shasum)" >&2
+  exit 1
+fi
+
 sha256() {
-  if command -v sha256sum >/dev/null 2>&1; then
-    sha256sum "$1" | awk '{print $1}'
-  else
-    shasum -a 256 "$1" | awk '{print $1}'
-  fi
+  case "$SHA256_TOOL" in
+    sha256sum) sha256sum "$1" | awk '{print $1}' ;;
+    shasum) shasum -a 256 "$1" | awk '{print $1}' ;;
+  esac
 }
 
 aur_pkgver_from_tag() {
   local version
   version="${1#v}"
   version="${version/-rc./rc}"
-  version="${version/-alpha./alpha}"
-  version="${version/-beta./beta}"
   echo "$version"
 }
 
@@ -53,8 +74,8 @@ for required in \
   "$LINUX_X86_ARCHIVE" \
   "$LINUX_AARCH64_ARCHIVE" \
   "$MACOS_ARM64_ARCHIVE"; do
-  if [[ ! -f "$required" ]]; then
-    echo "missing required release input: $required" >&2
+  if [[ ! -s "$required" ]]; then
+    echo "missing or empty required release input: $required" >&2
     exit 1
   fi
 done

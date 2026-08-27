@@ -10,12 +10,13 @@ bitdo_app_core,bitdo_tui,openbitdo}`, using ratatui — to Go (`cmd/openbitdo`,
 `internal/{protocol,core,tui,input}`, using Bubbletea). The user-facing CLI contract below is
 unchanged. What changed:
 
-- The TUI was redesigned, not ported line-for-line — new screen layout, real overlay-modal
-  confirmations (including a genuine brick-risk acknowledgement before unsafe/firmware actions,
-  which the Rust CLI had hardcoded as always-true with no actual confirmation dialog), and a new
-  visual theme.
+- The TUI was redesigned, not ported line-for-line - responsive compact and wide layouts,
+  scrollable bounded content, real overlay-modal confirmations, a settings screen reachable without
+  hardware, and beginner-facing dashboard language around status, works-now, blocked state, and
+  next step.
 - The app now navigates with a keyboard or an 8BitDo controller's own buttons, decoded from the
-  standard USB-HID gamepad usage page (see `docs/spec/gamepad_input.md`).
+  standard USB-HID gamepad usage page when the OS exposes that interface (see
+  `docs/spec/gamepad_input.md`). Mouse clicks and scrolling are also supported by the TUI.
 - The license changed from BSD-3-Clause to GPL-3.0-or-later.
 - The PID/command registries are generated directly from `docs/spec/pid_matrix.csv` and
   `docs/spec/command_matrix.csv` at build time (`go generate`), rather than hand-maintained Rust tables
@@ -23,6 +24,12 @@ unchanged. What changed:
 - Settings and support-report schemas are fresh (see below) — an existing Rust `config.toml` is
   not migrated; if present and unparseable against the new schema, OpenBitdo warns and falls back
   to defaults.
+- Firmware update is unavailable in `v0.1.0-rc.1`. The production manifest/feed/key path is
+  disabled; firmware code remains only for isolated tests with injected ephemeral keys and a local
+  HTTP server.
+- Ultimate 2 mapping on real hardware is unavailable in `v0.1.0-rc.1` because button-map framing
+  is not hardware-confirmed. The Ultimate 2 mapping screen remains a mock-only preview for UI
+  testing.
 
 The Rust implementation itself is preserved, unmaintained, on the
 [`legacy/rust-tui`](https://github.com/bybrooklyn/openbitdo/tree/legacy/rust-tui) branch — it's
@@ -33,14 +40,22 @@ buildable at that branch's tip if you need to compare behavior against the pre-r
 - `openbitdo` launches the interactive dashboard.
 - `openbitdo --mock` launches the dashboard without real hardware.
 - Historical subcommand-style entry points are no longer part of the supported CLI.
-- Diagnostics, support reports, firmware preflight, and mapping entry points are reached from the TUI, not from public subcommands.
+- Diagnostics, support reports, and mapping entry points are reached from the TUI, not from public
+  subcommands.
+- Firmware actions are rendered as disabled and deferred in `v0.1.0-rc.1`; keyboard or mouse
+  activation must not start a download, firmware preflight, or device session.
 
 ## Current Packaging Contract
 
-- GitHub prereleases are the canonical release source.
-- AUR publishes `openbitdo-bin`.
-- Homebrew publishes through the separate tap repo `bybrooklyn/homebrew-openbitdo`.
-- macOS artifacts remain unsigned and non-notarized until Apple credentials exist.
+- GitHub prereleases are the canonical release source. The `v0.1.0-rc.1` prerelease must contain
+  exactly 14 nonempty assets, including basename-only checksum sidecars.
+- AUR publishes `openbitdo-bin` as `0.1.0rc1`.
+- Homebrew publishes through the separate tap repo `bybrooklyn/homebrew-openbitdo` as
+  `0.1.0-rc.1`.
+- Linux artifacts support `x86_64` and `aarch64` on Ubuntu 22.04-era glibc or newer, and include
+  shell completions plus the udev rule.
+- macOS artifacts target Apple Silicon with `MACOSX_DEPLOYMENT_TARGET=13.0` and remain unsigned and
+  non-notarized until Apple credentials exist. Intel macOS is unsupported for this release.
 
 ## Current Settings Contract
 
@@ -65,6 +80,10 @@ terminal; it isn't exposed as a public package or a CLI flag.
 
 - If you used the historical CLI subcommands, switch to `openbitdo` or `openbitdo --mock`.
 - If you need automation, this isn't a supported public surface — OpenBitdo is an interactive TUI.
-- If you document install paths, prefer Homebrew tap, AUR, tarball, or source build rather than old ad hoc command forms.
+- If you document install paths, prefer Homebrew tap, AUR, tarball, or a Go 1.26.7 source build
+  rather than old ad hoc command forms.
 - If you have an old Rust-era `config.toml`, it will be replaced with fresh Go-schema defaults on
   first run rather than migrated.
+- If you need Ultimate 2 mapping on real hardware or firmware updates, stay on a later development
+  branch once that work is hardware-confirmed; those flows are intentionally deferred from
+  `v0.1.0-rc.1`.
