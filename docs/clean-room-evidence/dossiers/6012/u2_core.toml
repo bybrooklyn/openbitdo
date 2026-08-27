@@ -14,3 +14,22 @@ confidence = "inferred"
 requirement_ids = ["REQ-U2-001", "REQ-DR-001", "REQ-DR-002"]
 class_family = "Ultimate2_4Advance2 / Ultimate2_4Advance2UI dispatch"
 notes = "Advanced theme/sixaxis/deep macro controls remain intentionally hidden"
+
+[button_map_paddle_extension]
+# Added from a separate, more rigorous dirty-room pass (static analysis of
+# the official vendor software, cross-validated across two independent
+# builds) specifically targeting back-paddle remapping. Read this alongside
+# the vague, byte-offset-free description above -- this sub-table is more
+# specific than the parent dossier entry, not a replacement of it.
+evidence_source = "static"
+confidence = "confirmed_shape_inferred_bytes"
+description = "The button-map payload is 22 x uint32 little-endian values (88 bytes -- exceeds a single 64-byte report, needs chunked/paged transfer). Indices 0-17: the 18 core button/D-pad slots this dossier already covers. Indices 18-21 (byte offsets 72-75/76-79/80-83/84-87): the 4 back paddles -- the new finding. Each uint32 is a single-bit function bitmask selected from a ~30-value catalog (12 core buttons + 4 D-pad cardinals + 8 stick-as-dpad directions + Home/Menu/Screenshot/2 turbo modes/button-swap + 'act as paddle 1'/'act as paddle 2'), not a raw HID usage code and not a sequential index. D-pad diagonals are two cardinal bits OR'd into one slot value, not their own catalog entries."
+paddle_restriction = "Bitmask values for 'act as paddle 3'/'act as paddle 4' exist (paddles 3/4 can be assigned any function), but no other input can be remapped to emulate paddle 3 or 4 -- only 'act as paddle 1'/'act as paddle 2' are valid remap targets. Confirmed as a real device restriction, not an analysis gap."
+chunking = "Inferred, not confirmed against real hardware -- the 88-byte payload's exact paging/chunking mechanism was not directly observed."
+
+[button_map_paddle_extension.OPEN_QUESTION_encoding_mismatch]
+# Discovered while implementing the paddle extension above -- not itself
+# new dirty-room evidence, but a real conflict this project's own
+# clean-room team needs to resolve before any of this is trustworthy.
+severity = "blocks_wire_integration"
+description = "internal/protocol's ALREADY-IMPLEMENTED U2ReadButtonMap/U2WriteButtonMap use a materially different model than this pass's findings: 17 (not 18) core buttons, each a uint16 raw HID-usage-code (not a uint32 function bitmask), packed at offset 8 with no chunking (34 bytes total, fits one 64-byte report). That existing model traces back to this dossier's own vague parent entry ('map payload sections', no byte offsets specified) -- it was an implementation-time assumption, not something this dossier ever actually specified at byte level. The new paddle-extension evidence above is more rigorous (cross-validated across two independent decompiled builds) and is very likely the more accurate description of the real wire format for ALL 18-22 slots, not just the 4 new paddle ones. Recommendation: re-verify the existing 17-button encoding against this same evidence before trusting either model, rather than assuming the paddle-only extension is the sole gap. Internal/core's U2PaddleID/U2Function types (paddles.go) were implemented from this pass's findings, but deliberately NOT wired into internal/protocol's read/write calls or into any TUI 'apply to device' path, pending this reconciliation -- see paddles.go's package comment."
