@@ -8,68 +8,17 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-// jp108Presets and u2Presets are the exact remap-target cycles from the
-// prior Rust editor (reducer.rs JP108_PRESETS/U2_PRESETS) — JP108 targets are
-// raw HID keyboard-usage IDs, U2 targets are the device's own 17 logical
-// button-target IDs (0x0100.."A" .. 0x0110.."DPadRight"), a completely
-// different value space, so the two tables and their cycle/label functions
-// must stay separate rather than sharing one generic preset list.
+// jp108Presets is the exact remap-target cycle from the prior Rust editor
+// (reducer.rs JP108_PRESETS) — raw HID keyboard-usage IDs.
 var jp108Presets = []uint16{
 	0x0004, 0x0005, 0x0006, 0x0007, 0x0008, 0x0009, 0x000a, 0x000b, 0x0028, 0x0029, 0x002c, 0x003a,
 	0x003b, 0x003c, 0x00e0, 0x00e1,
-}
-
-var u2Presets = []uint16{
-	0x0100, 0x0101, 0x0102, 0x0103, 0x0104, 0x0105, 0x0106, 0x0107, 0x0108, 0x0109, 0x010a, 0x010b,
-	0x010c, 0x010d, 0x010e, 0x010f, 0x0110,
 }
 
 // jp108TargetLabel mirrors Rust's mapping_editor.rs, which shows JP108
 // targets as raw hex only (no friendly-name table exists for JP108).
 func jp108TargetLabel(usage uint16) string {
 	return fmt.Sprintf("0x%04x", usage)
-}
-
-// u2TargetLabel ports mapping_editor.rs's u2_target_label exactly.
-func u2TargetLabel(target uint16) string {
-	switch target {
-	case 0x0100:
-		return "A"
-	case 0x0101:
-		return "B"
-	case 0x0102:
-		return "X"
-	case 0x0103:
-		return "Y"
-	case 0x0104:
-		return "L1"
-	case 0x0105:
-		return "R1"
-	case 0x0106:
-		return "L2"
-	case 0x0107:
-		return "R2"
-	case 0x0108:
-		return "L3"
-	case 0x0109:
-		return "R3"
-	case 0x010a:
-		return "Select"
-	case 0x010b:
-		return "Start"
-	case 0x010c:
-		return "Home"
-	case 0x010d:
-		return "DPadUp"
-	case 0x010e:
-		return "DPadDown"
-	case 0x010f:
-		return "DPadLeft"
-	case 0x0110:
-		return "DPadRight"
-	default:
-		return "Unknown"
-	}
 }
 
 func cycleFromTable(table []uint16, current uint16, delta int) uint16 {
@@ -82,6 +31,68 @@ func cycleFromTable(table []uint16, current uint16, delta int) uint16 {
 	}
 	idx = ((idx+delta)%len(table) + len(table)) % len(table)
 	return table[idx]
+}
+
+// u2FunctionLabels names every catalog value core.U2Function defines — see
+// paddles.go. Ultimate2 targets are single-bit function-catalog bitmasks
+// (confirmed wire encoding), a completely different value space from
+// JP108's raw HID usage IDs, so this and jp108Presets/jp108TargetLabel stay
+// separate rather than sharing one generic table.
+var u2FunctionLabels = map[core.U2Function]string{
+	core.U2FuncNone: "(none)",
+	core.U2FuncA:    "A", core.U2FuncB: "B", core.U2FuncX: "X", core.U2FuncY: "Y",
+	core.U2FuncL1: "L1", core.U2FuncR1: "R1", core.U2FuncL2: "L2", core.U2FuncR2: "R2",
+	core.U2FuncL3: "L3", core.U2FuncR3: "R3", core.U2FuncSelect: "Select", core.U2FuncStart: "Start",
+	core.U2FuncDPadUp: "DPad Up", core.U2FuncDPadDown: "DPad Down",
+	core.U2FuncDPadLeft: "DPad Left", core.U2FuncDPadRight: "DPad Right",
+	core.U2FuncStickUp: "Stick Up", core.U2FuncStickDown: "Stick Down",
+	core.U2FuncStickLeft: "Stick Left", core.U2FuncStickRight: "Stick Right",
+	core.U2FuncStickUpLeft: "Stick Up-Left", core.U2FuncStickUpRight: "Stick Up-Right",
+	core.U2FuncStickDownLeft: "Stick Down-Left", core.U2FuncStickDownRight: "Stick Down-Right",
+	core.U2FuncHome: "Home", core.U2FuncMenu: "Menu", core.U2FuncScreenshot: "Screenshot",
+	core.U2FuncTurboA: "Turbo A", core.U2FuncTurboB: "Turbo B", core.U2FuncButtonSwap: "Button Swap",
+	core.U2FuncActAsPaddle1: "Act as Paddle 1", core.U2FuncActAsPaddle2: "Act as Paddle 2",
+}
+
+// u2FunctionCycle is every catalog value in declaration order, used to cycle
+// a button or paddle row's assigned function with left/right. It contains
+// only the values core.U2Function actually defines — there is no "act as
+// paddle 3/4" value to cycle into by construction, which is how this UI
+// respects U2Function.AssignableAsPaddleTarget's documented restriction
+// without needing to filter anything explicitly.
+var u2FunctionCycle = []core.U2Function{
+	core.U2FuncNone,
+	core.U2FuncA, core.U2FuncB, core.U2FuncX, core.U2FuncY,
+	core.U2FuncL1, core.U2FuncR1, core.U2FuncL2, core.U2FuncR2, core.U2FuncL3, core.U2FuncR3,
+	core.U2FuncSelect, core.U2FuncStart,
+	core.U2FuncDPadUp, core.U2FuncDPadDown, core.U2FuncDPadLeft, core.U2FuncDPadRight,
+	core.U2FuncStickUp, core.U2FuncStickDown, core.U2FuncStickLeft, core.U2FuncStickRight,
+	core.U2FuncStickUpLeft, core.U2FuncStickUpRight, core.U2FuncStickDownLeft, core.U2FuncStickDownRight,
+	core.U2FuncHome, core.U2FuncMenu, core.U2FuncScreenshot,
+	core.U2FuncTurboA, core.U2FuncTurboB, core.U2FuncButtonSwap,
+	core.U2FuncActAsPaddle1, core.U2FuncActAsPaddle2,
+}
+
+// u2FunctionLabel renders f's display name, falling back to raw hex for any
+// value outside the known catalog (defensive only — every value this UI can
+// ever set comes from u2FunctionCycle).
+func u2FunctionLabel(f core.U2Function) string {
+	if label, ok := u2FunctionLabels[f]; ok {
+		return label
+	}
+	return fmt.Sprintf("0x%08x", uint32(f))
+}
+
+func cycleU2Function(current core.U2Function, delta int) core.U2Function {
+	idx := 0
+	for i, f := range u2FunctionCycle {
+		if f == current {
+			idx = i
+			break
+		}
+	}
+	idx = ((idx+delta)%len(u2FunctionCycle) + len(u2FunctionCycle)) % len(u2FunctionCycle)
+	return u2FunctionCycle[idx]
 }
 
 type mappingState struct {
@@ -117,14 +128,16 @@ type mappingState struct {
 
 func newMappingState() mappingState { return mappingState{} }
 
-// rowCount is the number of button rows plus the three virtual action rows
-// (Apply, Undo, Reset) appended at the end for unified up/down navigation.
+// rowCount is the number of button rows (plus, for Ultimate2, 4 paddle
+// rows) plus the three virtual action rows (Apply, Undo, Reset) appended at
+// the end for unified up/down navigation. Naturally 3 (no button/paddle
+// rows at all) when u2Draft.MappingsUnavailable is set — see viewMapping.
 func (s mappingState) rowCount() int {
 	switch s.kind {
 	case core.KindJP108:
 		return len(s.jp108Draft) + 3
 	default:
-		return len(s.u2Draft.Mappings) + 3
+		return len(s.u2Draft.Mappings) + len(s.u2Draft.PaddleMappings) + 3
 	}
 }
 
@@ -142,7 +155,8 @@ func (s mappingState) dirty() bool {
 	if s.kind == core.KindJP108 {
 		return !equalJP108(s.jp108Loaded, s.jp108Draft)
 	}
-	return !equalU2(s.u2Loaded.Mappings, s.u2Draft.Mappings)
+	return !equalU2(s.u2Loaded.Mappings, s.u2Draft.Mappings) ||
+		!equalU2Paddles(s.u2Loaded.PaddleMappings, s.u2Draft.PaddleMappings)
 }
 
 func equalJP108(a, b []core.DedicatedButtonMapping) bool {
@@ -157,14 +171,27 @@ func equalJP108(a, b []core.DedicatedButtonMapping) bool {
 	return true
 }
 
-// cloneU2Profile makes a deep copy of a U2CoreProfile's Mappings slice so
-// undo snapshots aren't aliased to the live draft.
+// cloneU2Profile makes a deep copy of a U2CoreProfile's Mappings and
+// PaddleMappings slices so undo snapshots aren't aliased to the live draft.
 func cloneU2Profile(p core.U2CoreProfile) core.U2CoreProfile {
 	p.Mappings = append([]core.U2ButtonMapping(nil), p.Mappings...)
+	p.PaddleMappings = append([]core.U2PaddleMapping(nil), p.PaddleMappings...)
 	return p
 }
 
 func equalU2(a, b []core.U2ButtonMapping) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func equalU2Paddles(a, b []core.U2PaddleMapping) bool {
 	if len(a) != len(b) {
 		return false
 	}
@@ -191,6 +218,7 @@ func (m Model) updateMapping(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.mapping.u2Loaded = msg.profile
 		m.mapping.u2Draft = msg.profile
 		m.mapping.u2Draft.Mappings = append([]core.U2ButtonMapping(nil), msg.profile.Mappings...)
+		m.mapping.u2Draft.PaddleMappings = append([]core.U2PaddleMapping(nil), msg.profile.PaddleMappings...)
 		return m, nil
 
 	case jp108ApplyResultMsg:
@@ -273,6 +301,7 @@ func (m Model) loadPreviewedSlotIntoDraft() (tea.Model, tea.Cmd) {
 	m.mapping.u2Loaded = profile
 	m.mapping.u2Draft = profile
 	m.mapping.u2Draft.Mappings = append([]core.U2ButtonMapping(nil), profile.Mappings...)
+	m.mapping.u2Draft.PaddleMappings = append([]core.U2PaddleMapping(nil), profile.PaddleMappings...)
 	m.mapping.u2PreviewResult = nil
 	m.mapping.u2PreviewErr = nil
 	m.mapping.cursor = 0
@@ -280,8 +309,8 @@ func (m Model) loadPreviewedSlotIntoDraft() (tea.Model, tea.Cmd) {
 }
 
 func (m *Model) cycleMappingCursor(delta int) {
-	buttonRows := m.mapping.rowCount() - 3
-	if m.mapping.cursor >= buttonRows {
+	editableRows := m.mapping.rowCount() - 3
+	if m.mapping.cursor >= editableRows {
 		return
 	}
 	// Push a snapshot before mutating, mirroring Rust's adjust_mapping
@@ -293,8 +322,14 @@ func (m *Model) cycleMappingCursor(delta int) {
 		return
 	}
 	m.mapping.u2Undo = append(m.mapping.u2Undo, cloneU2Profile(m.mapping.u2Draft))
-	mapping := &m.mapping.u2Draft.Mappings[m.mapping.cursor]
-	mapping.TargetHIDUsage = cycleFromTable(u2Presets, mapping.TargetHIDUsage, delta)
+	buttonCount := len(m.mapping.u2Draft.Mappings)
+	if m.mapping.cursor < buttonCount {
+		mapping := &m.mapping.u2Draft.Mappings[m.mapping.cursor]
+		mapping.Target = cycleU2Function(mapping.Target, delta)
+		return
+	}
+	paddle := &m.mapping.u2Draft.PaddleMappings[m.mapping.cursor-buttonCount]
+	paddle.Target = cycleU2Function(paddle.Target, delta)
 }
 
 func (m *Model) undoMapping() {
@@ -318,9 +353,9 @@ func (m *Model) undoMapping() {
 }
 
 func (m Model) triggerMappingRow() (tea.Model, tea.Cmd) {
-	buttonRows := m.mapping.rowCount() - 3
+	editableRows := m.mapping.rowCount() - 3
 	switch m.mapping.cursor {
-	case buttonRows: // Apply
+	case editableRows: // Apply
 		if !m.mapping.dirty() || m.mapping.applying {
 			return m, nil
 		}
@@ -329,14 +364,23 @@ func (m Model) triggerMappingRow() (tea.Model, tea.Cmd) {
 			return m, cmdJP108Apply(m.ctx, m.core, m.mapping.device.VidPid, m.mapping.jp108Draft)
 		}
 		p := m.mapping.u2Draft
+		// cmdU2Apply only forwards p.Mappings (button targets), not
+		// p.PaddleMappings — internal/core's real (non-mock) button-map
+		// write is currently hard-blocked entirely regardless of content
+		// (see U2WriteButtonMap's doc comment), so this has no effect on
+		// real hardware today. In mock mode the apply always succeeds
+		// without inspecting content either way, and
+		// handleMappingApplyResult below sets u2Loaded from the full
+		// u2Draft (paddles included) on success, so mock-mode paddle
+		// drafting/apply works end to end despite this.
 		return m, cmdU2Apply(m.ctx, m.core, m.mapping.device.VidPid, p.Slot, p.Mode, p.Mappings, p.L2Analog, p.R2Analog)
-	case buttonRows + 1: // Undo
+	case editableRows + 1: // Undo
 		if !m.mapping.canUndo() {
 			return m, nil
 		}
 		m.undoMapping()
 		m.mapping.statusMsg = "Last edit undone."
-	case buttonRows + 2: // Reset
+	case editableRows + 2: // Reset
 		// Rust's mapping_reset pushes the current draft onto the undo stack
 		// before resetting, so a Reset is itself undoable — match that.
 		if m.mapping.kind == core.KindJP108 {
@@ -346,6 +390,7 @@ func (m Model) triggerMappingRow() (tea.Model, tea.Cmd) {
 			m.mapping.u2Undo = append(m.mapping.u2Undo, cloneU2Profile(m.mapping.u2Draft))
 			m.mapping.u2Draft = m.mapping.u2Loaded
 			m.mapping.u2Draft.Mappings = append([]core.U2ButtonMapping(nil), m.mapping.u2Loaded.Mappings...)
+			m.mapping.u2Draft.PaddleMappings = append([]core.U2PaddleMapping(nil), m.mapping.u2Loaded.PaddleMappings...)
 		}
 		m.mapping.statusMsg = "Draft reset."
 	}
@@ -411,8 +456,15 @@ func (m Model) viewMapping(height int) string {
 			b.WriteString(styleDanger.Render("Error: " + m.mapping.u2PreviewErr.Error()))
 		default:
 			for _, row := range m.mapping.u2PreviewResult.Mappings {
-				line := fmt.Sprintf("%-14s → %s (0x%04x)", fmt.Sprintf("%v", row.Button), u2TargetLabel(row.TargetHIDUsage), row.TargetHIDUsage)
+				line := fmt.Sprintf("%-14s → %s", fmt.Sprintf("%v", row.Button), u2FunctionLabel(row.Target))
 				b.WriteString(styleBody.Render(line) + "\n")
+			}
+			for _, row := range m.mapping.u2PreviewResult.PaddleMappings {
+				line := fmt.Sprintf("%-14s → %s", fmt.Sprintf("%v", row.Paddle), u2FunctionLabel(row.Target))
+				b.WriteString(styleBody.Render(line) + "\n")
+			}
+			if m.mapping.u2PreviewResult.MappingsUnavailable != "" {
+				b.WriteString(styleWarning.Render("Button/paddle map unavailable: " + m.mapping.u2PreviewResult.MappingsUnavailable))
 			}
 			b.WriteString("\n" + styleWarning.Render("This is a read-only preview — nothing has changed yet."))
 			b.WriteString("\n" + styleFaint.Render("enter to load this slot into the editor · esc to dismiss · p for the next slot"))
@@ -420,28 +472,40 @@ func (m Model) viewMapping(height int) string {
 		return stylePanel.Width(m.width - 2).Height(height - 2).Render(b.String())
 	}
 
-	buttonRows := m.mapping.rowCount() - 3
+	editableRows := m.mapping.rowCount() - 3
+	buttonCount := len(m.mapping.u2Draft.Mappings)
 
 	diagramSelectedIdx := -1
-	if m.mapping.cursor < buttonRows {
+	if m.mapping.cursor < editableRows {
 		if m.mapping.kind == core.KindJP108 {
 			diagramSelectedIdx = int(m.mapping.jp108Draft[m.mapping.cursor].Button.WireIndex())
-		} else {
+		} else if m.mapping.cursor < buttonCount {
+			// Paddle rows (cursor >= buttonCount) have no diagram position —
+			// leave nothing highlighted rather than guess one.
 			diagramSelectedIdx = int(m.mapping.u2Draft.Mappings[m.mapping.cursor].Button.WireIndex())
 		}
 	}
 	b.WriteString(renderControllerDiagram(m.mapping.kind, diagramSelectedIdx) + "\n\n")
 
-	for i := 0; i < buttonRows; i++ {
+	if m.mapping.kind == core.KindUltimate2 && m.mapping.u2Draft.MappingsUnavailable != "" {
+		b.WriteString(styleWarningBlock.Render(styleWarning.Render("Button/paddle remapping isn't available yet: ")+m.mapping.u2Draft.MappingsUnavailable) + "\n\n")
+	}
+
+	for i := 0; i < editableRows; i++ {
 		var label, value string
-		if m.mapping.kind == core.KindJP108 {
+		switch {
+		case m.mapping.kind == core.KindJP108:
 			row := m.mapping.jp108Draft[i]
 			label = fmt.Sprintf("%v", row.Button)
 			value = jp108TargetLabel(row.TargetHIDUsage)
-		} else {
+		case i < buttonCount:
 			row := m.mapping.u2Draft.Mappings[i]
 			label = fmt.Sprintf("%v", row.Button)
-			value = fmt.Sprintf("%s (0x%04x)", u2TargetLabel(row.TargetHIDUsage), row.TargetHIDUsage)
+			value = u2FunctionLabel(row.Target)
+		default:
+			row := m.mapping.u2Draft.PaddleMappings[i-buttonCount]
+			label = fmt.Sprintf("%v", row.Paddle)
+			value = u2FunctionLabel(row.Target)
 		}
 		line := fmt.Sprintf("%-14s → %s", label, value)
 		if i == m.mapping.cursor {
@@ -465,7 +529,7 @@ func (m Model) viewMapping(height int) string {
 		applyText = "Applying…"
 		applySuffix = ""
 	}
-	if m.mapping.cursor == buttonRows {
+	if m.mapping.cursor == editableRows {
 		b.WriteString(styleSelectedRow.Render("› "+applyText+applySuffix) + "\n")
 	} else {
 		line := styleBody.Render(applyText)
@@ -480,7 +544,7 @@ func (m Model) viewMapping(height int) string {
 	if !m.mapping.canUndo() {
 		undoSuffix = "  (nothing to undo)"
 	}
-	if m.mapping.cursor == buttonRows+1 {
+	if m.mapping.cursor == editableRows+1 {
 		b.WriteString(styleSelectedRow.Render("› "+undoText+undoSuffix) + "\n")
 	} else {
 		line := styleBody.Render(undoText)
@@ -491,7 +555,7 @@ func (m Model) viewMapping(height int) string {
 	}
 
 	resetText := "Reset Draft"
-	if m.mapping.cursor == buttonRows+2 {
+	if m.mapping.cursor == editableRows+2 {
 		b.WriteString(styleSelectedRow.Render("› "+resetText) + "\n")
 	} else {
 		b.WriteString("  " + styleBody.Render(resetText) + "\n")
