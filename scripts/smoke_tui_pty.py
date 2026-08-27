@@ -50,9 +50,11 @@ def main() -> int:
                     except OSError:
                         chunk = b""
                     output.extend(chunk)
-                    if chunk and not sent_quit:
-                        # Wait for at least one rendered frame, then exercise the
-                        # application's ordinary safe quit path.
+                    if b"OpenBitdo" in output and not sent_quit:
+                        # Initial PTY mode-setting escape sequences can arrive
+                        # before Bubble Tea starts its event loop. Wait for the
+                        # rendered application header so the ordinary safe quit
+                        # key cannot be sent early and silently dropped.
                         os.write(master, b"q")
                         sent_quit = True
 
@@ -66,6 +68,9 @@ def main() -> int:
         if status is None:
             os.kill(pid, signal.SIGINT)
             _, status = os.waitpid(pid, 0)
+            if not sent_quit:
+                print("mock TUI never rendered its OpenBitdo header", file=sys.stderr)
+                return 1
             print("mock TUI did not exit after q within 15 seconds", file=sys.stderr)
             return 1
         if not output:
