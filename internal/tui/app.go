@@ -277,33 +277,8 @@ func (m Model) viewHeader() string {
 	if m.mockMode {
 		title += "  " + styleWarning.Render("[mock]")
 	}
-	crumbs := screenLabel(m.screen)
-	right := styleFaint.Render(crumbs)
-	gap := m.width - lipgloss.Width(title) - lipgloss.Width(right) - 2
-	if gap < 1 {
-		gap = 1
-	}
-	line := title + lipgloss.NewStyle().Width(gap).Render("") + right
 	return lipgloss.NewStyle().Padding(0, 1).BorderStyle(lipgloss.NormalBorder()).
-		BorderBottom(true).BorderForeground(theme.BorderDim).Width(m.width - 2).Render(line)
-}
-
-func screenLabel(s screen) string {
-	switch s {
-	case screenDevices:
-		return "Devices"
-	case screenDiagnostics:
-		return "Diagnostics"
-	case screenMapping:
-		return "Mapping"
-	case screenFirmware:
-		return "Firmware"
-	case screenSettings:
-		return "Settings"
-	case screenRecovery:
-		return "Recovery"
-	}
-	return ""
+		BorderBottom(true).BorderForeground(theme.BorderDim).Width(m.width - 2).Render(title)
 }
 
 func (m Model) viewFooter() string {
