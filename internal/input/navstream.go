@@ -13,6 +13,13 @@ import (
 
 const bitdoVID = 0x2dc8
 
+// hotplugPollInterval is how often Start's background poller re-enumerates
+// vid==0x2dc8 devices to detect connects/disconnects after startup.
+// karalabe/hid has no cross-platform device-added/removed event, so this is
+// poll-based; 1.5s is frequent enough to feel responsive in a TUI without
+// meaningfully loading the system.
+const hotplugPollInterval = 1500 * time.Millisecond
+
 // linuxUdevHint mirrors internal/protocol's hint of the same name (not
 // shared across packages — these two packages are deliberately decoupled,
 // per navstream's own design, and this is a few lines, not worth a shared
@@ -40,26 +47,40 @@ func openHintSuffixForGOOS(goos string) string {
 	return linuxUdevHint
 }
 
-// NavEventKind distinguishes the three navigation-relevant transitions a
-// device stream reports.
+// NavEventKind distinguishes the navigation-relevant transitions a device
+// stream (or the hotplug poller) reports.
 type NavEventKind int
 
 const (
 	EventDPadChanged NavEventKind = iota
 	EventButtonDown
 	EventButtonUp
+	// EventDeviceConnected and EventDeviceDisconnected are emitted by
+	// Start's background hotplug poller (see pollHotplug) when a vid==0x2dc8
+	// device appears or disappears after startup. A newly-connected device
+	// also gets its nav stream started automatically, the same as one found
+	// during Start's initial enumeration.
+	EventDeviceConnected
+	EventDeviceDisconnected
 )
 
 // NavEvent is one menu-navigation-relevant input transition from a
-// connected 8BitDo device — a d-pad direction change, or a button
-// press/release. This is decoupled from internal/protocol's command
-// session: it is read-only and never competes with a diagnostic/mapping
-// session for the same device handle.
+// connected 8BitDo device — a d-pad direction change, a button
+// press/release, or a hotplug connect/disconnect. This is decoupled from
+// internal/protocol's command session: it is read-only and never competes
+// with a diagnostic/mapping session for the same device handle.
 type NavEvent struct {
 	Kind      NavEventKind
 	SourcePID uint16
+	Serial    string    // meaningful for EventDeviceConnected/EventDeviceDisconnected
 	DPad      Direction // meaningful for EventDPadChanged
 	Button    uint16    // meaningful for EventButtonDown/EventButtonUp
+	// Note is a human-readable outcome for EventDeviceConnected/
+	// EventDeviceDisconnected, in the same phrasing as StartResult.Notes
+	// (e.g. "pid=0x6012: gamepad nav active" or "...: open failed (...)"),
+	// so a consumer doesn't need to reimplement that formatting to show
+	// hotplug changes live.
+	Note      string
 	Timestamp time.Time
 }
 
@@ -83,34 +104,135 @@ type navDevice interface {
 
 // Start opens a read-only, nav-only input stream on every enumerated
 // vid==0x2dc8 HID device and returns a single merged event channel. Streams
-// stop when ctx is cancelled.
+// stop when ctx is cancelled. A background poller (see pollHotplug) keeps
+// watching for devices connected or disconnected after this call returns,
+// emitting EventDeviceConnected/EventDeviceDisconnected on the same channel
+// and starting nav streams for newly-connected devices automatically.
 func Start(ctx context.Context) StartResult {
 	events := make(chan NavEvent, 64)
 	infos := hid.Enumerate(bitdoVID, 0)
 	notes := make([]string, 0, len(infos))
+	known := make(map[deviceKey]struct{}, len(infos))
 
 	for _, info := range infos {
-		descriptor, err := fetchReportDescriptor(info)
-		if err != nil {
-			notes = append(notes, fmt.Sprintf("pid=%#04x: gamepad nav unavailable (%v)", info.ProductID, err))
-			continue
-		}
-		fields, err := ParseReportDescriptor(descriptor)
-		if err != nil {
-			notes = append(notes, fmt.Sprintf("pid=%#04x: gamepad nav unavailable (bad report descriptor: %v)", info.ProductID, err))
-			continue
-		}
-		device, err := openNavDevice(info)
-		if err != nil {
-			notes = append(notes, fmt.Sprintf("pid=%#04x: gamepad nav unavailable (open failed: %v)%s",
-				info.ProductID, err, linuxOpenHintSuffix()))
-			continue
-		}
-		notes = append(notes, fmt.Sprintf("pid=%#04x: gamepad nav active", info.ProductID))
-		go streamDevice(ctx, device, info.ProductID, fields, events)
+		notes = append(notes, startDeviceStream(ctx, info, events))
+		known[deviceKeyOf(info)] = struct{}{}
 	}
 
+	go pollHotplug(ctx, hotplugPollInterval, known, events)
+
 	return StartResult{Events: events, Notes: notes}
+}
+
+// startDeviceStream attempts to bring up a nav-only stream for one
+// enumerated device: fetch + parse its report descriptor, open it, and (on
+// success) start its streamDevice goroutine. Returns a human-readable note
+// describing the outcome either way. Shared by Start's initial enumeration
+// and pollHotplug's handling of newly-connected devices, so both paths
+// report identically-phrased outcomes.
+func startDeviceStream(ctx context.Context, info hid.DeviceInfo, out chan<- NavEvent) string {
+	descriptor, err := fetchReportDescriptor(info)
+	if err != nil {
+		return fmt.Sprintf("pid=%#04x: gamepad nav unavailable (%v)", info.ProductID, err)
+	}
+	fields, err := ParseReportDescriptor(descriptor)
+	if err != nil {
+		return fmt.Sprintf("pid=%#04x: gamepad nav unavailable (bad report descriptor: %v)", info.ProductID, err)
+	}
+	device, err := openNavDevice(info)
+	if err != nil {
+		return fmt.Sprintf("pid=%#04x: gamepad nav unavailable (open failed: %v)%s",
+			info.ProductID, err, linuxOpenHintSuffix())
+	}
+	go streamDevice(ctx, device, info.ProductID, fields, out)
+	return fmt.Sprintf("pid=%#04x: gamepad nav active", info.ProductID)
+}
+
+// deviceKey uniquely identifies a physical 8BitDo device for hotplug
+// diffing across poll cycles. PID alone isn't enough (multiple identical
+// controllers can be connected at once); Serial disambiguates them the same
+// way internal/core's AppDevice identity does.
+type deviceKey struct {
+	pid    uint16
+	serial string
+}
+
+func deviceKeyOf(info hid.DeviceInfo) deviceKey {
+	return deviceKey{pid: info.ProductID, serial: info.Serial}
+}
+
+// diffDeviceSets compares two enumeration snapshots (by deviceKey) and
+// reports which devices appeared and which disappeared between them. Pure
+// and side-effect-free so it's directly testable with synthetic device
+// sets, independent of real HID enumeration.
+func diffDeviceSets(prev, next map[deviceKey]struct{}) (added, removed []deviceKey) {
+	for k := range next {
+		if _, ok := prev[k]; !ok {
+			added = append(added, k)
+		}
+	}
+	for k := range prev {
+		if _, ok := next[k]; !ok {
+			removed = append(removed, k)
+		}
+	}
+	return added, removed
+}
+
+// hotplugTick runs one poll cycle given a freshly enumerated device list:
+// it diffs against known, starts nav streams for newly-connected devices,
+// emits EventDeviceConnected/EventDeviceDisconnected for every change, and
+// returns the updated known set for the next cycle. Split out from
+// pollHotplug so the diffing/event-emission behavior is testable with a
+// synthetic infos slice, without a real ticker or real HID hardware.
+func hotplugTick(ctx context.Context, infos []hid.DeviceInfo, known map[deviceKey]struct{}, out chan<- NavEvent) map[deviceKey]struct{} {
+	next := make(map[deviceKey]struct{}, len(infos))
+	byKey := make(map[deviceKey]hid.DeviceInfo, len(infos))
+	for _, info := range infos {
+		k := deviceKeyOf(info)
+		next[k] = struct{}{}
+		byKey[k] = info
+	}
+
+	added, removed := diffDeviceSets(known, next)
+	for _, k := range added {
+		note := startDeviceStream(ctx, byKey[k], out)
+		sendNavEvent(out, NavEvent{Kind: EventDeviceConnected, SourcePID: k.pid, Serial: k.serial, Note: note, Timestamp: time.Now()})
+	}
+	for _, k := range removed {
+		sendNavEvent(out, NavEvent{
+			Kind: EventDeviceDisconnected, SourcePID: k.pid, Serial: k.serial,
+			Note: fmt.Sprintf("pid=%#04x: disconnected", k.pid), Timestamp: time.Now(),
+		})
+	}
+	return next
+}
+
+// pollHotplug re-enumerates vid==0x2dc8 devices every interval, diffing
+// against known (seeded by Start from its initial enumeration) until ctx is
+// cancelled. Runs detached from Bubbletea's Cmd system, same as
+// streamDevice — see its panic-recovery comment for why that's safe here:
+// hotplugTick's own work (report-descriptor parsing via startDeviceStream)
+// is exactly the same not-yet-hardware-verified path streamDevice guards
+// against, so the same recover-and-keep-going stance applies.
+func pollHotplug(ctx context.Context, interval time.Duration, known map[deviceKey]struct{}, out chan<- NavEvent) {
+	defer func() {
+		if r := recover(); r != nil {
+			fmt.Fprintf(os.Stderr, "gamepad nav: recovered from panic in hotplug poll: %v\n%s\n", r, debug.Stack())
+		}
+	}()
+
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			known = hotplugTick(ctx, hid.Enumerate(bitdoVID, 0), known, out)
+		}
+	}
 }
 
 func streamDevice(ctx context.Context, device navDevice, pid uint16, fields []Field, out chan<- NavEvent) {
