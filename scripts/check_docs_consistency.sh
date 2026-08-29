@@ -10,7 +10,7 @@ command -v rg >/dev/null 2>&1 || {
 }
 
 EXPECTED_TAG="v0.1.0-rc.1"
-EXPECTED_GO="1.26.7"
+EXPECTED_GO="1.27.0"
 U2_BLOCK_REASON="button-map framing not hardware-confirmed"
 
 version="$(tr -d '\r\n' <VERSION)"
@@ -68,7 +68,7 @@ if rg -in \
 fi
 
 require_text README.md "GNU General Public License v3.0 or later"
-require_text README.md "| From source | \`just build\` with Go 1.26.7"
+require_text README.md "| From source | \`just build\` with Go 1.27.0"
 require_text docs/MIGRATION.md "GPL-3.0-or-later"
 require_text packaging/aur/openbitdo-bin/PKGBUILD.tmpl "license=('GPL-3.0-or-later')"
 require_text packaging/homebrew/Formula/openbitdo.rb.tmpl 'license "GPL-3.0-or-later"'

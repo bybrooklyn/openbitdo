@@ -46,7 +46,7 @@ Run these before opening or merging the RC PR:
 - docs consistency checks
 - TUI golden and teatest matrix for `60x18`, `80x24`, `96x24`, `100x30`, and `120x40`
 
-The release toolchain is Go `1.26.7` for development checks, CI, and artifacts.
+The release toolchain is Go `1.27.0` for development checks, CI, and artifacts.
 
 ## Scope Contract
 

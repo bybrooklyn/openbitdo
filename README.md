@@ -23,7 +23,7 @@ OpenBitdo is unofficial and not affiliated with 8BitDo. Device writes always car
 | Homebrew | `brew tap bybrooklyn/openbitdo && brew install openbitdo` | macOS or Linux users who want the standard tap flow |
 | AUR | `paru -S openbitdo-bin` | Arch Linux users who want a prebuilt package |
 | GitHub Releases | Download a release tarball and run `bin/openbitdo` | Users who want a standalone binary without a package manager |
-| From source | `just build` with Go 1.26.7 and `just` installed | Contributors and local development |
+| From source | `just build` with Go 1.27.0 and `just` installed | Contributors and local development |
 
 Contributors: [`justfile`](justfile) has common dev commands (`just build`, `just test`, `just run-mock`, `just check` before pushing) — install [`just`](https://github.com/casey/just) and run `just` with no arguments to list them.
 

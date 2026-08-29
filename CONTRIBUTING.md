@@ -6,7 +6,7 @@ of that, please read this whole file before opening a PR.
 
 ## Building and Testing
 
-Use Go `1.26.7` for local development, CI parity, and release artifacts.
+Use Go `1.27.0` for local development, CI parity, and release artifacts.
 
 This project uses [`just`](https://github.com/casey/just) as its command
 runner — see the `justfile` at the repo root, or run `just` with no arguments

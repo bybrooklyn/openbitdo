@@ -80,7 +80,7 @@ terminal; it isn't exposed as a public package or a CLI flag.
 
 - If you used the historical CLI subcommands, switch to `openbitdo` or `openbitdo --mock`.
 - If you need automation, this isn't a supported public surface — OpenBitdo is an interactive TUI.
-- If you document install paths, prefer Homebrew tap, AUR, tarball, or a Go 1.26.7 source build
+- If you document install paths, prefer Homebrew tap, AUR, tarball, or a Go 1.27.0 source build
   rather than old ad hoc command forms.
 - If you have an old Rust-era `config.toml`, it will be replaced with fresh Go-schema defaults on
   first run rather than migrated.

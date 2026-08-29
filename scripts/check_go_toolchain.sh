@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-EXPECTED_GO_VERSION="1.26.7"
+EXPECTED_GO_VERSION="1.27.0"
 
 declared_version="$(awk '$1 == "go" { print $2; exit }' "$ROOT/go.mod")"
 if [[ "$declared_version" != "$EXPECTED_GO_VERSION" ]]; then
