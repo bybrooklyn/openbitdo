@@ -1,0 +1,376 @@
+package core
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/bybrooklyn/openbitdo/internal/protocol"
+)
+
+const u2MappingDeferredReason = "button-map framing not hardware-confirmed"
+
+func u2MappingDeferredError() *Error {
+	return errPolicyDenied(ReasonNotHardwareConfirmed, u2MappingDeferredReason)
+}
+
+// JP108ReadDedicatedMapping reads the JP108 dedicated-button mapping table.
+func (c *OpenBitdoCore) JP108ReadDedicatedMapping(ctx context.Context, vidPid protocol.VidPid) ([]DedicatedButtonMapping, error) {
+	p := protocol.DeviceProfileFor(vidPid)
+	if !p.Capability.SupportsJP108DedicatedMap {
+		return nil, errPolicyDenied(ReasonUnsupportedPid, "JP108 dedicated mapping is not supported for %s", vidPid)
+	}
+	if c.config.MockMode {
+		return defaultJP108Mappings(), nil
+	}
+
+	session, err := c.openSessionForOps(ctx, vidPid)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = session.Close() }()
+	wire, err := session.JP108ReadDedicatedMappings(ctx)
+	if err != nil {
+		return nil, errProtocol(err)
+	}
+	out := make([]DedicatedButtonMapping, 0, len(wire))
+	for _, entry := range wire {
+		if button, ok := DedicatedButtonFromWireIndex(entry.Index); ok {
+			out = append(out, DedicatedButtonMapping{Button: button, TargetHIDUsage: entry.Usage})
+		}
+	}
+	return out, nil
+}
+
+// JP108ApplyDedicatedMapping applies changes and returns the backup ID (if
+// backup was requested), or an error describing whatever recovery already
+// did on failure.
+func (c *OpenBitdoCore) JP108ApplyDedicatedMapping(ctx context.Context, vidPid protocol.VidPid, changes []DedicatedButtonMapping, backup bool) (ConfigBackupID, bool, error) {
+	report, err := c.JP108ApplyDedicatedMappingWithRecovery(ctx, vidPid, changes, backup)
+	if err != nil {
+		return "", false, err
+	}
+	if report.WriteApplied {
+		return report.BackupID, report.HasBackupID, nil
+	}
+	if report.RollbackFailed() {
+		msg := report.RollbackError
+		if msg == "" {
+			msg = "write failed and rollback failed"
+		}
+		return "", false, errInvalidState("%s", msg)
+	}
+	msg := report.WriteError
+	if msg == "" {
+		msg = "write failed; rollback restored previous state"
+	}
+	return "", false, errInvalidState("%s", msg)
+}
+
+// JP108ApplyDedicatedMappingWithRecovery applies changes with a
+// backup-then-write-then-rollback-on-failure pattern.
+func (c *OpenBitdoCore) JP108ApplyDedicatedMappingWithRecovery(ctx context.Context, vidPid protocol.VidPid, changes []DedicatedButtonMapping, backup bool) (WriteRecoveryReport, error) {
+	p := protocol.DeviceProfileFor(vidPid)
+	if !p.Capability.SupportsJP108DedicatedMap {
+		return WriteRecoveryReport{}, errPolicyDenied(ReasonUnsupportedPid, "JP108 dedicated mapping is not supported for %s", vidPid)
+	}
+
+	if c.config.MockMode {
+		report := WriteRecoveryReport{WriteApplied: true}
+		if backup {
+			report.BackupID = c.storeBackup(vidPid, configBackupPayload{kind: backupJP108, jp108Mappings: defaultJP108Mappings()})
+			report.HasBackupID = true
+		}
+		return report, nil
+	}
+
+	var backupID ConfigBackupID
+	hasBackup := false
+	if backup {
+		existing, err := c.JP108ReadDedicatedMapping(ctx, vidPid)
+		if err != nil {
+			return WriteRecoveryReport{}, err
+		}
+		backupID = c.storeBackup(vidPid, configBackupPayload{kind: backupJP108, jp108Mappings: existing})
+		hasBackup = true
+	}
+
+	session, err := c.openSessionForOps(ctx, vidPid)
+	if err != nil {
+		return WriteRecoveryReport{}, err
+	}
+	var applyErr error
+	for _, change := range changes {
+		if applyErr = session.JP108WriteDedicatedMapping(ctx, change.Button.WireIndex(), change.TargetHIDUsage); applyErr != nil {
+			break
+		}
+	}
+	_ = session.Close()
+
+	if applyErr == nil {
+		return WriteRecoveryReport{BackupID: backupID, HasBackupID: hasBackup, WriteApplied: true}, nil
+	}
+	return c.rollbackAfterWriteFailure(ctx, backupID, hasBackup, applyErr)
+}
+
+func (c *OpenBitdoCore) rollbackAfterWriteFailure(ctx context.Context, backupID ConfigBackupID, hasBackup bool, writeErr error) (WriteRecoveryReport, error) {
+	writeErrText := writeErr.Error()
+	if !hasBackup {
+		return WriteRecoveryReport{WriteApplied: false, WriteError: writeErrText}, nil
+	}
+	if rollbackErr := c.RestoreBackup(ctx, backupID); rollbackErr != nil {
+		return WriteRecoveryReport{
+			BackupID: backupID, HasBackupID: true, WriteApplied: false,
+			RollbackAttempted: true, RollbackSucceeded: false,
+			WriteError: writeErrText, RollbackError: rollbackErr.Error(),
+		}, nil
+	}
+	return WriteRecoveryReport{
+		BackupID: backupID, HasBackupID: true, WriteApplied: false,
+		RollbackAttempted: true, RollbackSucceeded: true, WriteError: writeErrText,
+	}, nil
+}
+
+// U2ReadCoreProfile reads the Ultimate2 device's mode, firmware version,
+// button map, and L2/R2 analog config for its active slot.
+func (c *OpenBitdoCore) U2ReadCoreProfile(ctx context.Context, vidPid protocol.VidPid, slot U2SlotID) (U2CoreProfile, error) {
+	p := protocol.DeviceProfileFor(vidPid)
+	if !p.Capability.SupportsU2SlotConfig || !p.Capability.SupportsU2ButtonMap {
+		return U2CoreProfile{}, errPolicyDenied(ReasonUnsupportedPid, "Ultimate2 core profile is not supported for %s", vidPid)
+	}
+
+	if c.config.MockMode {
+		return U2CoreProfile{
+			Slot: slot, Mode: 0, FirmwareVersion: "mock-1.0.0", L2Analog: 0.5, R2Analog: 0.5,
+			SupportsTriggerWrite: true, Mappings: defaultU2Mappings(), PaddleMappings: defaultU2PaddleMappings(),
+		}, nil
+	}
+
+	session, err := c.openSessionForOps(ctx, vidPid)
+	if err != nil {
+		return U2CoreProfile{}, err
+	}
+	defer func() { _ = session.Close() }()
+
+	activeSlot := slot
+	if wireSlot, slotErr := session.U2GetCurrentSlot(ctx); slotErr == nil {
+		activeSlot = U2SlotFromWireValue(wireSlot)
+	}
+	mode, err := session.GetMode(ctx)
+	if err != nil {
+		return U2CoreProfile{}, errProtocol(err)
+	}
+	firmwareVersion := "unknown"
+	if resp, verErr := session.SendCommand(ctx, protocol.CommandGetControllerVersion, nil); verErr == nil {
+		if raw, ok := resp.ParsedFields["version_x100"]; ok {
+			firmwareVersion = formatFirmwareVersionDecimal(raw)
+		}
+	}
+	configBlob, err := session.U2ReadConfigSlot(ctx, activeSlot.WireValue())
+	if err != nil {
+		return U2CoreProfile{}, errProtocol(err)
+	}
+	mappings, paddleMappings, mappingsUnavailable, err := u2ReadButtonMapOrUnavailable(ctx, session, activeSlot)
+	if err != nil {
+		return U2CoreProfile{}, errProtocol(err)
+	}
+
+	var l2, r2 float32
+	if len(configBlob) > 6 {
+		l2 = float32(configBlob[6]) / 255.0
+	}
+	if len(configBlob) > 7 {
+		r2 = float32(configBlob[7]) / 255.0
+	}
+	return U2CoreProfile{
+		Slot: activeSlot, Mode: mode.Mode, FirmwareVersion: firmwareVersion, L2Analog: l2, R2Analog: r2,
+		SupportsTriggerWrite: false,
+		Mappings:             mappings, PaddleMappings: paddleMappings, MappingsUnavailable: mappingsUnavailable,
+	}, nil
+}
+
+// u2ReadButtonMapOrUnavailable reads and splits the button-map for slot,
+// tolerating the specific "chunking not yet confirmed" block (see
+// internal/protocol's U2ReadButtonMap) as a non-fatal, expected condition
+// for real hardware today: it returns empty mappings plus a human-readable
+// reason instead of failing the whole profile read, so mode/firmware/analog
+// data (which don't depend on the button map) still come through. Any
+// *other* error is treated as fatal, same as before this existed.
+func u2ReadButtonMapOrUnavailable(ctx context.Context, session *protocol.DeviceSession, slot U2SlotID) ([]U2ButtonMapping, []U2PaddleMapping, string, error) {
+	// U2ReadButtonMap always errors *today* because it's a deliberate hard
+	// block (see its doc comment) -- the err==nil branch below is correct,
+	// general-purpose handling for the day that block lifts, not dead code;
+	// staticcheck can't see that's temporary, hence the nolint.
+	wireMap, err := session.U2ReadButtonMap(ctx, slot.WireValue()) //nolint:staticcheck // SA4023
+	if err == nil {                                                //nolint:staticcheck // SA4023
+		mappings, paddleMappings := splitU2WireMap(wireMap)
+		return mappings, paddleMappings, "", nil
+	}
+	if pe, ok := err.(*protocol.Error); ok && pe.Code() == protocol.CodeU2ButtonMapUnavailable {
+		return nil, nil, pe.Error(), nil
+	}
+	return nil, nil, "", err
+}
+
+// splitU2WireMap converts the wire-level 22-slot table into the core
+// package's named button/paddle mapping types. Indices 0-16 resolve to a
+// named U2ButtonID (index 17, a confirmed-but-unidentified 18th core slot —
+// see U2ButtonID's doc comment — is preserved on the wire but has no named
+// Go identifier, so it's silently dropped here); indices 18-21 resolve to
+// U2PaddleID. Currently exercised only by tests, since U2ReadButtonMap is
+// hard-blocked against real hardware — kept correct and tested so it's
+// ready the moment that block lifts.
+func splitU2WireMap(wire []protocol.IndexedFunction) ([]U2ButtonMapping, []U2PaddleMapping) {
+	mappings := make([]U2ButtonMapping, 0, len(wire))
+	paddleMappings := make([]U2PaddleMapping, 0, len(wire))
+	for _, entry := range wire {
+		if button, ok := U2ButtonFromWireIndex(entry.Index); ok {
+			mappings = append(mappings, U2ButtonMapping{Button: button, Target: U2Function(entry.Function)})
+		} else if entry.Index >= 18 && entry.Index <= 21 {
+			paddleMappings = append(paddleMappings, U2PaddleMapping{Paddle: U2PaddleID(entry.Index - 18), Target: U2Function(entry.Function)})
+		}
+	}
+	return mappings, paddleMappings
+}
+
+// U2PreviewSlot reads exactly the requested slot's button map and config,
+// never substituting the device's currently-active slot the way
+// U2ReadCoreProfile deliberately does for its own use case (loading "my
+// current setup" into the editor). There is no protocol command to change
+// which slot is active on an Ultimate2 device -- switching happens on the
+// controller itself, not over the wire -- so this exists to let a user
+// browse what's actually stored in each of the 3 slots before deciding
+// which one to load into the mapping editor, rather than the editor only
+// ever being able to show whatever happens to be active right now.
+func (c *OpenBitdoCore) U2PreviewSlot(ctx context.Context, vidPid protocol.VidPid, slot U2SlotID) (U2CoreProfile, error) {
+	p := protocol.DeviceProfileFor(vidPid)
+	if !p.Capability.SupportsU2SlotConfig || !p.Capability.SupportsU2ButtonMap {
+		return U2CoreProfile{}, errPolicyDenied(ReasonUnsupportedPid, "Ultimate2 core profile is not supported for %s", vidPid)
+	}
+
+	if c.config.MockMode {
+		return U2CoreProfile{
+			Slot: slot, Mode: 0, FirmwareVersion: "mock-1.0.0", L2Analog: 0.5, R2Analog: 0.5,
+			SupportsTriggerWrite: true, Mappings: defaultU2Mappings(), PaddleMappings: defaultU2PaddleMappings(),
+		}, nil
+	}
+
+	session, err := c.openSessionForOps(ctx, vidPid)
+	if err != nil {
+		return U2CoreProfile{}, err
+	}
+	defer func() { _ = session.Close() }()
+
+	configBlob, err := session.U2ReadConfigSlot(ctx, slot.WireValue())
+	if err != nil {
+		return U2CoreProfile{}, errProtocol(err)
+	}
+	mappings, paddleMappings, mappingsUnavailable, err := u2ReadButtonMapOrUnavailable(ctx, session, slot)
+	if err != nil {
+		return U2CoreProfile{}, errProtocol(err)
+	}
+
+	var l2, r2 float32
+	if len(configBlob) > 6 {
+		l2 = float32(configBlob[6]) / 255.0
+	}
+	if len(configBlob) > 7 {
+		r2 = float32(configBlob[7]) / 255.0
+	}
+	return U2CoreProfile{
+		Slot: slot, FirmwareVersion: "unknown", L2Analog: l2, R2Analog: r2,
+		SupportsTriggerWrite: false,
+		Mappings:             mappings, PaddleMappings: paddleMappings, MappingsUnavailable: mappingsUnavailable,
+	}, nil
+}
+
+func formatFirmwareVersionDecimal(raw uint32) string {
+	return fmt.Sprintf("%d.%02d", raw/100, raw%100)
+}
+
+// U2ApplyCoreProfile applies mode/mapping/analog changes in mock mode and
+// rejects real devices until button-map framing is hardware-confirmed.
+func (c *OpenBitdoCore) U2ApplyCoreProfile(ctx context.Context, vidPid protocol.VidPid, slot U2SlotID, mode byte, mapChanges []U2ButtonMapping, l2Analog, r2Analog float32, backup bool) (ConfigBackupID, bool, error) {
+	report, err := c.U2ApplyCoreProfileWithRecovery(ctx, vidPid, slot, mode, mapChanges, l2Analog, r2Analog, backup)
+	if err != nil {
+		return "", false, err
+	}
+	if report.WriteApplied {
+		return report.BackupID, report.HasBackupID, nil
+	}
+	if report.RollbackFailed() {
+		msg := report.RollbackError
+		if msg == "" {
+			msg = "write failed and rollback failed"
+		}
+		return "", false, errInvalidState("%s", msg)
+	}
+	msg := report.WriteError
+	if msg == "" {
+		msg = "write failed; rollback restored previous state"
+	}
+	return "", false, errInvalidState("%s", msg)
+}
+
+// U2ApplyCoreProfileWithRecovery applies mode/mapping/analog changes with a
+// backup in mock mode. Real devices are rejected before any I/O or backup.
+func (c *OpenBitdoCore) U2ApplyCoreProfileWithRecovery(ctx context.Context, vidPid protocol.VidPid, slot U2SlotID, mode byte, mapChanges []U2ButtonMapping, l2Analog, r2Analog float32, backup bool) (WriteRecoveryReport, error) {
+	p := protocol.DeviceProfileFor(vidPid)
+	if !p.Capability.SupportsU2SlotConfig || !p.Capability.SupportsU2ButtonMap {
+		return WriteRecoveryReport{}, errPolicyDenied(ReasonUnsupportedPid, "Ultimate2 core profile is not supported for %s", vidPid)
+	}
+
+	// Real Ultimate2 writes are blocked at the core boundary before backup
+	// reads, session creation, mode changes, or any other transport activity.
+	// The 22-entry button-map payload needs a hardware-confirmed framing
+	// scheme before partial profile writes can be made safely.
+	if !c.config.MockMode {
+		return WriteRecoveryReport{}, u2MappingDeferredError()
+	}
+
+	report := WriteRecoveryReport{WriteApplied: true}
+	if backup {
+		report.BackupID = c.storeBackup(vidPid, configBackupPayload{
+			kind: backupU2,
+			u2Profile: U2CoreProfile{
+				Slot: slot, FirmwareVersion: "mock-1.0.0", L2Analog: 0.5, R2Analog: 0.5,
+				SupportsTriggerWrite: true, Mappings: defaultU2Mappings(), PaddleMappings: defaultU2PaddleMappings(),
+			},
+			u2ConfigBlob: make([]byte, 32),
+		})
+		report.HasBackupID = true
+	}
+	return report, nil
+}
+
+// RestoreBackup replays a stored backup's payload back onto its target device.
+func (c *OpenBitdoCore) RestoreBackup(ctx context.Context, backupID ConfigBackupID) error {
+	c.backupsMu.RLock()
+	backup, ok := c.backups[backupID]
+	c.backupsMu.RUnlock()
+	if !ok {
+		return errNotFound("unknown backup id: %s", backupID)
+	}
+
+	if c.config.MockMode {
+		return nil
+	}
+	if backup.payload.kind == backupU2 {
+		return u2MappingDeferredError()
+	}
+
+	session, err := c.openSessionForOps(ctx, backup.target)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = session.Close() }()
+
+	switch backup.payload.kind {
+	case backupJP108:
+		for _, entry := range backup.payload.jp108Mappings {
+			if err := session.JP108WriteDedicatedMapping(ctx, entry.Button.WireIndex(), entry.TargetHIDUsage); err != nil {
+				return errProtocol(err)
+			}
+		}
+	}
+	return nil
+}

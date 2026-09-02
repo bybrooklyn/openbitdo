@@ -4,35 +4,78 @@ on:
   workflow_call:
     inputs:
       tag:
-        description: "Release tag to publish (for example: v0.0.1-rc.4)"
-        required: true
-        type: string
-  workflow_dispatch:
-    inputs:
-      tag:
-        description: "Release tag to publish (for example: v0.0.1-rc.4)"
+        description: "Exact release tag to publish"
         required: true
         type: string
 
 permissions:
   contents: read
 
+defaults:
+  run:
+    shell: bash
+
 jobs:
   publish-homebrew:
-    if: vars.HOMEBREW_PUBLISH_ENABLED == '1'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       TAG: ${{ inputs.tag }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Wait for release assets
+      - name: Require exact release and enabled publication
+        env:
+          HOMEBREW_PUBLISH_ENABLED: ${{ vars.HOMEBREW_PUBLISH_ENABLED }}
+          ULTIMATE2_RC_GATE_SHA: ${{ vars.ULTIMATE2_RC_GATE_SHA }}
+        run: |
+          set -euo pipefail
+          ./scripts/check_release_tag.sh "$TAG"
+          [[ "$ULTIMATE2_RC_GATE_SHA" == "$GITHUB_SHA" ]] || {
+            echo "Ultimate 2 qualification does not cover publish commit ${GITHUB_SHA}" >&2
+            exit 1
+          }
+          [[ "$HOMEBREW_PUBLISH_ENABLED" == "1" ]] || {
+            echo "HOMEBREW_PUBLISH_ENABLED must be configured as 1" >&2
+            exit 1
+          }
+
+      - name: Verify Homebrew tap write access
+        env:
+          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          HOMEBREW_TAP_REPO: ${{ vars.HOMEBREW_TAP_REPO }}
+        run: |
+          set -euo pipefail
+          [[ -n "$GH_TOKEN" ]] || { echo "missing required secret: HOMEBREW_TAP_TOKEN" >&2; exit 1; }
+          [[ -n "$HOMEBREW_TAP_REPO" ]] || { echo "missing required variable: HOMEBREW_TAP_REPO" >&2; exit 1; }
+          permission="$(gh api "repos/${HOMEBREW_TAP_REPO}" \
+            --jq '.permissions.push or .permissions.maintain or .permissions.admin')"
+          [[ "$permission" == "true" ]] || {
+            echo "HOMEBREW_TAP_TOKEN does not report write access to ${HOMEBREW_TAP_REPO}" >&2
+            exit 1
+          }
+          access_root="$(mktemp -d)"
+          gh auth setup-git
+          gh repo clone "$HOMEBREW_TAP_REPO" "$access_root/tap"
+          tap_branch="$(git -C "$access_root/tap" symbolic-ref --short HEAD)"
+          git -C "$access_root/tap" \
+            -c user.name=openbitdo-access-check \
+            -c user.email=actions@users.noreply.github.com \
+            commit --allow-empty --no-gpg-sign -m access-check
+          git -C "$access_root/tap" push --dry-run origin "HEAD:${tap_branch}"
+
+      - name: Wait for exact release assets
         run: |
           set -euo pipefail
           for attempt in $(seq 1 30); do
+            echo "release asset check ${attempt}/30"
             if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-              echo "release ${TAG} is available"
+              mkdir -p /tmp/release-input
+              gh release download "$TAG" \
+                --repo "$GITHUB_REPOSITORY" \
+                --dir /tmp/release-input
+              ./scripts/verify_release_assets.sh "$TAG" /tmp/release-input all
               exit 0
             fi
             sleep 10
@@ -40,28 +83,25 @@ jobs:
           echo "release ${TAG} was not found after waiting" >&2
           exit 1
 
-      - name: Render Homebrew formula from released assets
+      - name: Render and validate Homebrew formula
         run: |
           set -euo pipefail
-          mkdir -p /tmp/release-input /tmp/release-metadata
-          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" \
-            --pattern "openbitdo-${TAG}-linux-x86_64.tar.gz" \
-            --pattern "openbitdo-${TAG}-linux-aarch64.tar.gz" \
-            --pattern "openbitdo-${TAG}-macos-arm64.tar.gz" \
-            --dir /tmp/release-input
-          bash packaging/scripts/render_release_metadata.sh \
+          mkdir -p /tmp/release-metadata
+          bash scripts/render_release_metadata.sh \
             "$TAG" \
             "$GITHUB_REPOSITORY" \
             /tmp/release-input \
             /tmp/release-metadata
+          grep -Fq 'version "0.1.0-rc.1"' /tmp/release-metadata/homebrew/Formula/openbitdo.rb
 
-      - name: Upload rendered Homebrew formula (audit)
-        uses: actions/upload-artifact@v4
+      - name: Upload rendered formula for audit
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: homebrew-rendered-formula-${{ inputs.tag }}
           path: |
             /tmp/release-metadata/homebrew/Formula/openbitdo.rb
             /tmp/release-metadata/checksums.env
+          if-no-files-found: error
 
       - name: Sync Homebrew tap
         env:
@@ -69,14 +109,30 @@ jobs:
           HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
           HOMEBREW_TAP_REPO: ${{ vars.HOMEBREW_TAP_REPO }}
           FORMULA_SOURCE: /tmp/release-metadata/homebrew/Formula/openbitdo.rb
+        run: bash packaging/homebrew/sync_tap.sh
+
+  canary-homebrew:
+    runs-on: macos-14
+    needs: publish-homebrew
+    timeout-minutes: 20
+    env:
+      GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+      HOMEBREW_NO_AUTO_UPDATE: "1"
+      HOMEBREW_TAP_REPO: ${{ vars.HOMEBREW_TAP_REPO }}
+      TAG: ${{ inputs.tag }}
+    steps:
+      - name: Clone and install published Homebrew formula
         run: |
           set -euo pipefail
-          if [[ -z "${HOMEBREW_TAP_TOKEN:-}" ]]; then
-            echo "missing required secret: HOMEBREW_TAP_TOKEN" >&2
-            exit 1
-          fi
-          if [[ -z "${HOMEBREW_TAP_REPO:-}" ]]; then
-            echo "missing required variable: HOMEBREW_TAP_REPO" >&2
-            exit 1
-          fi
-          bash packaging/homebrew/sync_tap.sh
+          [[ -n "$GH_TOKEN" ]] || { echo "missing required secret: HOMEBREW_TAP_TOKEN" >&2; exit 1; }
+          [[ -n "$HOMEBREW_TAP_REPO" ]] || { echo "missing required variable: HOMEBREW_TAP_REPO" >&2; exit 1; }
+          canary_root="$(mktemp -d)"
+          gh auth setup-git
+          gh repo clone "$HOMEBREW_TAP_REPO" "$canary_root/tap"
+          formula="$canary_root/tap/Formula/openbitdo.rb"
+          grep -Fq 'version "0.1.0-rc.1"' "$formula"
+          brew install --formula "$formula"
+          installed="$(brew --prefix openbitdo)/bin/openbitdo"
+          "$installed" --version | grep -F "openbitdo ${TAG}"
+          "$installed" --mock --diagnostics-dump >"$canary_root/diagnostics.toml"
+          test -s "$canary_root/diagnostics.toml"

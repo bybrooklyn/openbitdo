@@ -4,40 +4,81 @@ on:
   workflow_call:
     inputs:
       tag:
-        description: "Release tag to publish (for example: v0.0.1-rc.4)"
-        required: true
-        type: string
-  workflow_dispatch:
-    inputs:
-      tag:
-        description: "Release tag to publish (for example: v0.0.1-rc.4)"
+        description: "Exact release tag to publish"
         required: true
         type: string
 
 permissions:
   contents: read
 
+defaults:
+  run:
+    shell: bash
+
 jobs:
   publish-aur:
-    if: vars.AUR_PUBLISH_ENABLED == '1'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
     container: archlinux:base
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       TAG: ${{ inputs.tag }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install AUR packaging dependencies
-        run: |
-          pacman -Sy --noconfirm --needed base-devel git openssh curl github-cli
+        run: pacman -Sy --noconfirm --needed base-devel git openssh curl github-cli
 
-      - name: Wait for release assets
+      - name: Require exact release and enabled publication
+        env:
+          AUR_PUBLISH_ENABLED: ${{ vars.AUR_PUBLISH_ENABLED }}
+          ULTIMATE2_RC_GATE_SHA: ${{ vars.ULTIMATE2_RC_GATE_SHA }}
+        run: |
+          set -euo pipefail
+          ./scripts/check_release_tag.sh "$TAG"
+          [[ "$ULTIMATE2_RC_GATE_SHA" == "$GITHUB_SHA" ]] || {
+            echo "Ultimate 2 qualification does not cover publish commit ${GITHUB_SHA}" >&2
+            exit 1
+          }
+          [[ "$AUR_PUBLISH_ENABLED" == "1" ]] || {
+            echo "AUR_PUBLISH_ENABLED must be configured as 1" >&2
+            exit 1
+          }
+
+      - name: Configure SSH and verify AUR write access
+        env:
+          AUR_USERNAME: ${{ secrets.AUR_USERNAME }}
+          AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          [[ -n "$AUR_USERNAME" ]] || { echo "missing required secret: AUR_USERNAME" >&2; exit 1; }
+          [[ -n "$AUR_SSH_PRIVATE_KEY" ]] || { echo "missing required secret: AUR_SSH_PRIVATE_KEY" >&2; exit 1; }
+          mkdir -p "$HOME/.ssh"
+          chmod 700 "$HOME/.ssh"
+          printf '%s\n' "$AUR_SSH_PRIVATE_KEY" >"$HOME/.ssh/aur"
+          chmod 600 "$HOME/.ssh/aur"
+          ssh-keyscan -H aur.archlinux.org >"$HOME/.ssh/known_hosts"
+          chmod 644 "$HOME/.ssh/known_hosts"
+          export GIT_SSH_COMMAND="ssh -i $HOME/.ssh/aur -o IdentitiesOnly=yes -o UserKnownHostsFile=$HOME/.ssh/known_hosts -o StrictHostKeyChecking=yes"
+          access_root="$(mktemp -d)"
+          git clone aur@aur.archlinux.org:openbitdo-bin.git "$access_root/openbitdo-bin"
+          git -C "$access_root/openbitdo-bin" \
+            -c user.name=openbitdo-access-check \
+            -c user.email=actions@users.noreply.github.com \
+            commit --allow-empty --no-gpg-sign -m access-check
+          git -C "$access_root/openbitdo-bin" push --dry-run origin HEAD:master
+
+      - name: Wait for exact release assets
         run: |
           set -euo pipefail
           for attempt in $(seq 1 30); do
+            echo "release asset check ${attempt}/30"
             if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-              echo "release ${TAG} is available"
+              mkdir -p /tmp/release-input
+              gh release download "$TAG" \
+                --repo "$GITHUB_REPOSITORY" \
+                --dir /tmp/release-input
+              ./scripts/verify_release_assets.sh "$TAG" /tmp/release-input all
               exit 0
             fi
             sleep 10
@@ -45,16 +86,11 @@ jobs:
           echo "release ${TAG} was not found after waiting" >&2
           exit 1
 
-      - name: Render AUR metadata from released assets
+      - name: Render and validate AUR metadata
         run: |
           set -euo pipefail
-          mkdir -p /tmp/release-input /tmp/release-metadata
-          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" \
-            --pattern "openbitdo-${TAG}-linux-x86_64.tar.gz" \
-            --pattern "openbitdo-${TAG}-linux-aarch64.tar.gz" \
-            --pattern "openbitdo-${TAG}-macos-arm64.tar.gz" \
-            --dir /tmp/release-input
-          bash packaging/scripts/render_release_metadata.sh \
+          mkdir -p /tmp/release-metadata
+          bash scripts/render_release_metadata.sh \
             "$TAG" \
             "$GITHUB_REPOSITORY" \
             /tmp/release-input \
@@ -64,75 +100,56 @@ jobs:
           su builder -s /bin/bash -c "set -euo pipefail; \
             cd /tmp/release-metadata/aur/openbitdo-bin; \
             makepkg --printsrcinfo > .SRCINFO"
+          grep -Fqx 'pkgver=0.1.0rc1' /tmp/release-metadata/aur/openbitdo-bin/PKGBUILD
+          grep -Fqx '_upstream_tag=v0.1.0-rc.1' /tmp/release-metadata/aur/openbitdo-bin/PKGBUILD
 
-      - name: Upload rendered metadata (audit)
-        uses: actions/upload-artifact@v4
+      - name: Upload rendered metadata for audit
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: aur-rendered-metadata-${{ inputs.tag }}
           path: |
             /tmp/release-metadata/aur/openbitdo-bin/PKGBUILD
             /tmp/release-metadata/aur/openbitdo-bin/.SRCINFO
             /tmp/release-metadata/checksums.env
-
-      - name: Configure SSH for AUR
-        run: |
-          if [[ -z "${{ secrets.AUR_USERNAME }}" ]]; then
-            echo "missing required secret: AUR_USERNAME" >&2
-            exit 1
-          fi
-          if [[ -z "${{ secrets.AUR_SSH_PRIVATE_KEY }}" ]]; then
-            echo "missing required secret: AUR_SSH_PRIVATE_KEY" >&2
-            exit 1
-          fi
-          mkdir -p "$HOME/.ssh"
-          printf '%s\n' "${{ secrets.AUR_SSH_PRIVATE_KEY }}" > "$HOME/.ssh/aur"
-          chmod 600 "$HOME/.ssh/aur"
-          ssh-keyscan -H aur.archlinux.org >> "$HOME/.ssh/known_hosts"
-          chmod 644 "$HOME/.ssh/known_hosts"
+          if-no-files-found: error
+          include-hidden-files: true
 
       - name: Publish openbitdo-bin
         env:
-          GIT_SSH_COMMAND: ssh -i $HOME/.ssh/aur -o IdentitiesOnly=yes -o UserKnownHostsFile=$HOME/.ssh/known_hosts -o StrictHostKeyChecking=accept-new
+          GIT_SSH_COMMAND: ssh -i $HOME/.ssh/aur -o IdentitiesOnly=yes -o UserKnownHostsFile=$HOME/.ssh/known_hosts -o StrictHostKeyChecking=yes
         run: |
           set -euo pipefail
-          publish_pkg() {
-            local pkg="$1"
-            local remote="aur@aur.archlinux.org:${pkg}.git"
-            local tmp_root
-            local workdir
+          publish_root="$(mktemp -d)"
+          workdir="$publish_root/openbitdo-bin"
+          git clone aur@aur.archlinux.org:openbitdo-bin.git "$workdir"
+          cp /tmp/release-metadata/aur/openbitdo-bin/PKGBUILD "$workdir/PKGBUILD"
+          cp /tmp/release-metadata/aur/openbitdo-bin/.SRCINFO "$workdir/.SRCINFO"
+          git -C "$workdir" config user.name openbitdo-ci
+          git -C "$workdir" config user.email actions@users.noreply.github.com
+          git -C "$workdir" add PKGBUILD .SRCINFO
+          if git -C "$workdir" diff --cached --quiet; then
+            echo "openbitdo-bin already matches ${TAG}"
+          else
+            git -C "$workdir" commit -m "Update openbitdo-bin package for ${TAG}"
+            git -C "$workdir" push origin HEAD:master
+          fi
 
-            tmp_root="$(mktemp -d)"
-            workdir="${tmp_root}/${pkg}"
-
-            if git clone "$remote" "$workdir"; then
-              echo "${pkg}: updated-existing"
-            else
-              echo "${pkg}: bootstrap-created"
-              mkdir -p "$workdir"
-              cd "$workdir"
-              git init
-              git remote add origin "$remote"
-            fi
-
-            cp "/tmp/release-metadata/aur/${pkg}/PKGBUILD" "${workdir}/PKGBUILD"
-            cp "/tmp/release-metadata/aur/${pkg}/.SRCINFO" "${workdir}/.SRCINFO"
-
-            cd "$workdir"
-            git config user.name "openbitdo-ci"
-            git config user.email "actions@users.noreply.github.com"
-            git add PKGBUILD .SRCINFO
-
-            if git diff --cached --quiet; then
-              echo "${pkg}: no metadata changes"
-              return 0
-            fi
-
-            git commit -m "Update ${pkg} package for ${TAG}"
-            if git ls-remote --exit-code --heads origin >/dev/null 2>&1; then
-              git push
-            else
-              git push -u origin HEAD:master
-            fi
-          }
-
-          publish_pkg openbitdo-bin
+      - name: Clone, build, and install AUR canary
+        run: |
+          set -euo pipefail
+          canary_root="$(mktemp -d)"
+          git clone https://aur.archlinux.org/openbitdo-bin.git "$canary_root/openbitdo-bin"
+          grep -Fqx 'pkgver=0.1.0rc1' "$canary_root/openbitdo-bin/PKGBUILD"
+          chown -R builder:builder "$canary_root/openbitdo-bin"
+          su builder -s /bin/bash -c "set -euo pipefail; cd '$canary_root/openbitdo-bin'; makepkg --clean --noconfirm"
+          package="$(find "$canary_root/openbitdo-bin" -maxdepth 1 -type f -name 'openbitdo-bin-[0-9]*.pkg.tar.*' -print -quit)"
+          [[ -n "$package" ]] || { echo "AUR canary did not build a package" >&2; exit 1; }
+          pacman -U --noconfirm "$package"
+          /usr/bin/openbitdo --version | grep -F "openbitdo ${TAG}"
+          /usr/bin/openbitdo --mock --diagnostics-dump >/tmp/aur-canary-diagnostics.toml
+          test -s /tmp/aur-canary-diagnostics.toml
+          installed_files="$(pacman -Ql openbitdo-bin)"
+          grep -Fq 'usr/lib/udev/rules.d/99-openbitdo.rules' <<<"$installed_files"
+          grep -Fq 'usr/share/bash-completion/completions/openbitdo' <<<"$installed_files"
+          grep -Fq 'usr/share/fish/vendor_completions.d/openbitdo.fish' <<<"$installed_files"
+          grep -Fq 'usr/share/zsh/site-functions/_openbitdo' <<<"$installed_files"

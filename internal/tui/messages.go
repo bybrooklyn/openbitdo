@@ -1,0 +1,129 @@
+package tui
+
+import (
+	"time"
+
+	"github.com/bybrooklyn/openbitdo/internal/core"
+	"github.com/bybrooklyn/openbitdo/internal/input"
+	"github.com/bybrooklyn/openbitdo/internal/protocol"
+)
+
+type devicesLoadedMsg struct {
+	devices []core.AppDevice
+	err     error
+}
+
+type diagResultMsg struct {
+	result protocol.DiagProbeResult
+	ranAt  time.Time
+	err    error
+}
+
+// autoDiagResultMsg is the outcome of a diagnostic probe run automatically
+// in the background (see cmdAutoDiagnose) when a device is first loaded or
+// hotplug-connected, rather than one the user explicitly triggered. Carries
+// device so its handler can tell whether the result belongs to whatever the
+// Diagnostics screen is currently showing.
+type autoDiagResultMsg struct {
+	device core.AppDevice
+	result protocol.DiagProbeResult
+	ranAt  time.Time
+	err    error
+}
+
+type jp108MappingLoadedMsg struct {
+	mappings []core.DedicatedButtonMapping
+	err      error
+}
+
+type jp108ApplyResultMsg struct {
+	report core.WriteRecoveryReport
+	err    error
+}
+
+type u2ProfileLoadedMsg struct {
+	profile core.U2CoreProfile
+	err     error
+}
+
+type u2ApplyResultMsg struct {
+	report core.WriteRecoveryReport
+	err    error
+}
+
+type u2SlotPreviewMsg struct {
+	slot    core.U2SlotID
+	profile core.U2CoreProfile
+	err     error
+}
+
+type candidateProbeResultMsg struct {
+	device core.AppDevice
+	report core.RuntimeUnlockReport
+	err    error
+}
+
+// firmwareBeginMsg and candidateProbeBeginMsg are cross-screen transition
+// triggers: either dispatched directly (risk already acknowledged this
+// session) or as a modal's onConfirm (risk just acknowledged). Reaching
+// their handler in app.go always means the ack gate is satisfied.
+type firmwareBeginMsg struct {
+	device core.AppDevice
+}
+
+type candidateProbeBeginMsg struct {
+	device core.AppDevice
+}
+
+type restoreBackupResultMsg struct {
+	err error
+}
+
+type firmwareDownloadedMsg struct {
+	result core.FirmwareDownloadResult
+	err    error
+}
+
+type firmwarePreflightMsg struct {
+	result core.FirmwarePreflightResult
+	err    error
+}
+
+type firmwareStartedMsg struct {
+	plan core.FirmwareUpdatePlan
+	err  error
+}
+
+type firmwareConfirmedMsg struct {
+	plan core.FirmwareUpdatePlan
+	err  error
+}
+
+type firmwareProgressMsg struct {
+	event core.FirmwareProgressEvent
+}
+
+type firmwareEventsClosedMsg struct{}
+
+type firmwareReportMsg struct {
+	report core.FirmwareFinalReport
+}
+
+type navEventMsg struct {
+	event input.NavEvent
+}
+
+type navClosedMsg struct{}
+
+type reportSavedMsg struct {
+	path string
+	err  error
+}
+
+type settingsSavedMsg struct {
+	err error
+}
+
+type noticeExpiredMsg struct {
+	id int
+}

@@ -14,6 +14,11 @@ set -euo pipefail
 
 STATE_DIR="${MOCK_GH_STATE_DIR:?}"
 
+if [[ "${MOCK_GH_REJECT_TAP_TOKEN:-0}" == "1" && "${GH_TOKEN:-}" == "tap-token" ]]; then
+  echo "gh: HTTP 401: Bad credentials" >&2
+  exit 1
+fi
+
 if [[ "${1:-}" != "api" ]]; then
   echo "mock gh only supports api" >&2
   exit 1
@@ -74,6 +79,7 @@ EOF
 run_sync() {
   PATH="$MOCK_BIN:$PATH" \
     MOCK_GH_STATE_DIR="$TMP/mock-state" \
+    MOCK_GH_REJECT_TAP_TOKEN="${MOCK_GH_REJECT_TAP_TOKEN:-0}" \
     GH_TOKEN="job-token" \
     HOMEBREW_TAP_TOKEN="tap-token" \
     HOMEBREW_TAP_REPO="bybrooklyn/homebrew-openbitdo" \
@@ -96,3 +102,11 @@ EOF
 run_sync >"$TMP/update.out"
 grep -Fq "updated bybrooklyn/homebrew-openbitdo:Formula/openbitdo.rb" "$TMP/update.out"
 cmp -s "$FORMULA_SOURCE" "$TMP/mock-state/updated_formula.rb"
+
+rm -f "$TMP/mock-state/updated_formula.rb"
+if MOCK_GH_REJECT_TAP_TOKEN=1 run_sync >"$TMP/auth-failure.out" 2>"$TMP/auth-failure.err"; then
+  echo "tap sync masked a HOMEBREW_TAP_TOKEN authentication failure" >&2
+  exit 1
+fi
+grep -Fq 'HTTP 401' "$TMP/auth-failure.err"
+test ! -f "$TMP/mock-state/updated_formula.rb"

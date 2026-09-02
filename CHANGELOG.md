@@ -4,6 +4,53 @@ All notable changes to OpenBitdo are tracked here.
 
 ## Unreleased
 
+## v0.1.0-rc.1
+
+### Changed
+
+- Rewrote the implementation from Rust (ratatui) to Go (Bubbletea). Full functional parity with
+  v0.0.2, verified by porting the Rust behavioral test suites and adding end-to-end interactive
+  tests against the running program (`charmbracelet/x/exp/teatest`).
+- Redesigned the TUI from scratch rather than porting the screen layout 1:1: responsive compact
+  and wide layouts, bounded scrollable views, real overlay-modal confirmations, adaptive color
+  roles, and a dashboard organized around `Status`, `Works now`, `Blocked`, and `Next step`.
+- Relicensed from BSD-3-Clause to GPL-3.0-or-later.
+- PID and command registry tables are now generated directly from `spec/pid_matrix.csv` and
+  `spec/command_matrix.csv` at build time, making the spec files the literal single source of
+  truth instead of hand-maintained tables checked against the CSVs by separate tests.
+- Pinned release-facing metadata to `v0.1.0-rc.1`, with AUR rendering as `0.1.0rc1` and Homebrew
+  rendering as `0.1.0-rc.1`.
+
+### Added
+
+- Controller/gamepad navigation: the app can be driven end-to-end with an 8BitDo controller's own
+  d-pad and buttons when the OS exposes a standard USB-HID gamepad interface, live from the device
+  dashboard at startup, alongside keyboard and mouse navigation.
+- A real one-time "this may brick your device" confirmation before any unsafe/firmware action.
+  Previously this flag was hardcoded true with a comment claiming a UI surface that didn't
+  actually exist.
+- Clearer diagnostics messaging for candidate-readonly / inferred-evidence devices: instead of a
+  bare wall of "response signature mismatch" failures, the app now explains plainly that the
+  device isn't hardware-confirmed yet, what that means for the checks shown, and how to help
+  (improves the issue #15 user experience; the issue remains open until real hardware evidence
+  closes it).
+
+### Deferred in 0.1.0
+
+- Firmware update is unavailable in production. The manifest feed and signing-key path remain
+  test-only, and the TUI renders firmware as a disabled action labeled `Deferred in 0.1.0`.
+- Ultimate 2 mapping on real hardware is blocked with the explicit reason
+  `button-map framing not hardware-confirmed`. The Ultimate 2 editor remains available as a
+  mock-only preview for UI testing.
+- Fixture-backed hardware CI and firmware writes are not part of this release candidate.
+
+### Known limitations
+
+- Release candidate publication requires one successful, non-destructive Ultimate 2 hardware
+  qualification before the `v0.1.0-rc.1` prerelease is published.
+- Stable `v0.1.0` promotion requires a seven-day clean soak after `v0.1.0-rc.1`, package-manager
+  canaries, a repeat Ultimate 2 canary, and a real macOS 13 launch.
+
 ## v0.0.2
 
 ### Added

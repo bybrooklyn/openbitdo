@@ -1,0 +1,23 @@
+# udev rule granting the logged-in desktop user access to 8BitDo devices
+# without needing root or a specific group membership.
+#
+# Install:
+#   sudo cp packaging/linux/99-openbitdo.rules /etc/udev/rules.d/
+#   sudo udevadm control --reload-rules
+#   sudo udevadm trigger
+# Then unplug and reconnect the device (or reboot).
+#
+# openbitdo talks to 8BitDo devices via libusb (not hidraw), so the rule
+# matches on the "usb" subsystem, not "hidraw" -- advice for other HID tools
+# online is sometimes hidraw-specific and won't apply here.
+#
+# TAG+="uaccess" is the modern systemd-logind mechanism: it grants access to
+# whichever user is logged in at the physical seat, with no group membership
+# needed, and works the same way across systemd-based distros regardless of
+# whether they ship a "plugdev" group (some, e.g. Fedora, don't).
+SUBSYSTEM=="usb", ATTR{idVendor}=="2dc8", TAG+="uaccess"
+
+# Fallback for older/non-systemd setups where uaccess isn't available: opens
+# the device to any local user. Broader than uaccess, but simple and
+# universal. Uncomment if the rule above doesn't fix the permission error.
+# SUBSYSTEM=="usb", ATTR{idVendor}=="2dc8", MODE="0666"

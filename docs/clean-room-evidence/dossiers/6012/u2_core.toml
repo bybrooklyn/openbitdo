@@ -1,0 +1,50 @@
+# Sanitized static dirty-room dossier
+
+dossier_id = "DOS-6012-U2-Core"
+pid_hex = "0x6012"
+operation_group = "Ultimate2Core"
+command_id = ["U2GetCurrentSlot", "U2ReadConfigSlot", "U2WriteConfigSlot", "U2ReadButtonMap", "U2WriteButtonMap", "U2SetMode"]
+request_shape = "64-byte Ultimate2 command frames with slot/mode/map payload sections"
+response_shape = "status header plus slot/config/map payload bytes"
+validator_rules = ["byte0 == 0x02", "payload length meets command minimum", "slot readback value is bounded"]
+retry_behavior = "bounded retries for slot/map reads and write acknowledgements"
+failure_signatures = ["timeout", "malformed response", "unsupported for pid"]
+evidence_source = "static"
+confidence = "inferred"
+requirement_ids = ["REQ-U2-001", "REQ-DR-001", "REQ-DR-002"]
+class_family = "Ultimate2_4Advance2 / Ultimate2_4Advance2UI dispatch"
+notes = "Advanced theme/sixaxis/deep macro controls remain intentionally hidden"
+
+[button_map_paddle_extension]
+# Added from a separate, more rigorous dirty-room pass (static analysis of
+# the official vendor software, cross-validated across two independent
+# builds) specifically targeting back-paddle remapping. Read this alongside
+# the vague, byte-offset-free description above -- this sub-table is more
+# specific than the parent dossier entry, not a replacement of it.
+evidence_source = "static"
+confidence = "confirmed_shape_inferred_bytes"
+description = "The button-map payload is 22 x uint32 little-endian values (88 bytes -- exceeds a single 64-byte report, needs chunked/paged transfer). Indices 0-17: the 18 core button/D-pad slots this dossier already covers. Indices 18-21 (byte offsets 72-75/76-79/80-83/84-87): the 4 back paddles -- the new finding. Each uint32 is a single-bit function bitmask selected from a ~30-value catalog (12 core buttons + 4 D-pad cardinals + 8 stick-as-dpad directions + Home/Menu/Screenshot/2 turbo modes/button-swap + 'act as paddle 1'/'act as paddle 2'), not a raw HID usage code and not a sequential index. D-pad diagonals are two cardinal bits OR'd into one slot value, not their own catalog entries."
+paddle_restriction = "Bitmask values for 'act as paddle 3'/'act as paddle 4' exist (paddles 3/4 can be assigned any function), but no other input can be remapped to emulate paddle 3 or 4 -- only 'act as paddle 1'/'act as paddle 2' are valid remap targets. Confirmed as a real device restriction, not an analysis gap."
+chunking = "Inferred, not confirmed against real hardware -- the 88-byte payload's exact paging/chunking mechanism was not directly observed. See OPEN_QUESTION_chunking_mechanism below; this is now the sole remaining blocker."
+
+[button_map_paddle_extension.RESOLVED_encoding_mismatch]
+# A dedicated, fresh, zero-context reconciliation pass re-derived the wire
+# structure from primary evidence in both the older Windows build and the
+# current macOS build, specifically to settle the conflict flagged below.
+# Resolved 2026-08-26. Superseded by this entry; kept for its own record,
+# do not delete.
+severity_was = "blocks_wire_integration"
+verdict = "The 22 x uint32 / 88-byte / bitmask-catalog model above is CONFIRMED correct. The shipped 17 x uint16 implementation in internal/protocol is WRONG, not a legitimate alternate encoding for a different hardware revision -- it should be corrected, not preserved."
+evidence_for_element_width_and_count = "The older build's decompiled managed code declares this sub-structure as a fixed-size 22-element array of uint32, marshaled inline. Two sibling structures for other product tiers in the same codebase use 18 and 20 elements respectively, all three 4-byte-element -- no 2-byte-element variant of this structure exists anywhere in either decompiled build. The current macOS build (Swift, symbol-stripped, string/enum-layout analysis only) independently confirms the same field list plus a 22-case physical-slot enum in the exact same order as the older build's default array layout, with a 23rd sentinel/count case."
+evidence_for_bitmask_encoding = "Every traceable catalog constant in the older build is a literal power of two (single set bit); none are small sequential integers or fall in real USB HID usage-ID ranges. This rules out both 'raw HID usage code' and 'sequential index' theories and is the only model architecturally compatible with the already-observed D-pad-diagonal-as-OR'd-cardinals behavior."
+evidence_pid_hypothesis_ruled_out = "PID 0x6012 and the 0x6013 ('RR') variant route through identical protocol-handling code; RR only flips a runtime status flag, never selects a different structure. The Bluetooth-connected Ultimate2 variant (a distinct PID family) was confirmed to use the identical 22-element/uint32 structure. Every Ultimate2-family PID/connection variant found uses one uniform encoding -- this was never a hardware-revision difference."
+likely_root_cause_of_original_error = "Unconfirmed, but plausible: the same per-slot config record also contains genuinely 2-byte-element, ~18-length arrays belonging to recorded-macro-step data (key held + timing per step) -- a completely different sub-structure from the static button-function-remap table. The original implementation-time assumption likely read the wrong nested array."
+paddle_slot_note = "The current macOS build's localized UI strings contain no occurrence of the word 'paddle' anywhere, but the catalog enum's four paddle-target values are present in the compiled binary -- consistent with 8BitDo labeling these positions by function rather than the English word 'paddle'. Not independently confirmed whether this specific Ultimate2 SKU exposes 2 or all 4 paddle slots as user-editable in the vendor app's own UI; does not affect this dossier's wire-format verdict."
+
+[button_map_paddle_extension.OPEN_QUESTION_chunking_mechanism]
+# The sole remaining blocker after RESOLVED_encoding_mismatch above.
+severity = "blocks_write_wire_integration"
+risk_asymmetry = "A read using unconfirmed chunking assumptions is low-risk -- worst case it displays wrong/partial values in a read-only view. A WRITE using unconfirmed chunking assumptions is genuinely dangerous -- it could scramble a real device's persistent button-map configuration. Treat read and write as having different risk tolerance, not the same gate."
+description = "22 x 4 = 88 bytes cannot fit in a single 64-byte HID report alongside any framing bytes, so multi-report transfer is structurally necessary -- that much follows directly from the sizes involved. The exact paging mechanism (per-chunk offsets, per-chunk framing bytes, ack/sequencing scheme) could not be traced in this pass: the native report-building library wasn't available in decompiled form in the archived older workspace, and in the current build that logic sits inside symbol-stripped compiled code that string/enum extraction alone can't disassemble."
+implementer_hint = "The older build exposes a dedicated function for updating a single slot's button-map entry by index (separate from writing the whole record), consistent with a distinct per-slot write-button-map command rather than one big multi-chunk blob write. No equivalent dedicated read-only-the-button-map function was found -- only a full-record read. This may mean writes chunk more naturally (one slot per report) than reads do; not confirmed."
+recommendation = "Do not guess at the chunking/paging scheme. internal/protocol's U2WriteButtonMap must stay blocked against real (non-mock) hardware until this is confirmed via either a real hardware capture (USB/HID sniff of the vendor app performing a paddle remap) or working disassembly of the current build's compiled report-building code. internal/protocol's U2ReadButtonMap may proceed once corrected to the confirmed 22 x uint32 shape, clearly caveated as reading only what a single report can carry until chunking is confirmed."
