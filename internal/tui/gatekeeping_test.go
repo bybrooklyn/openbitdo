@@ -21,7 +21,7 @@ func TestFirmwareDisabledReason_BlockedWithoutAck(t *testing.T) {
 
 func TestFirmwareDisabledReason_DeferredByDefault(t *testing.T) {
 	full := core.AppDevice{SupportTier: protocol.TierFull, Capability: protocol.PidCapability{SupportsFirmware: true}}
-	if reason := firmwareDisabledReason(full, false, true, false); reason != "Deferred in 0.1.0" {
+	if reason := firmwareDisabledReason(full, false, true, false); reason != "Deferred in 0.0.3" {
 		t.Fatalf("expected deferred reason, got %q", reason)
 	}
 }

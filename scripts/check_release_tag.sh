@@ -7,7 +7,7 @@ if [[ $# -ne 1 ]]; then
 fi
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-EXPECTED_TAG="v0.1.0-rc.1"
+EXPECTED_TAG="v0.0.3"
 tag="$1"
 version="$(tr -d '\r\n' <"$ROOT/VERSION")"
 

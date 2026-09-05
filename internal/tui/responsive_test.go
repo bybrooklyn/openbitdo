@@ -210,9 +210,9 @@ func TestResponsiveEveryScreenCriticalContentAndFooter(t *testing.T) {
 			next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 			m = next.(Model)
 			if calculateLayout(m.width, m.height).mode == layoutCompact {
-				assertResponsiveFrame(t, m, "Actions:", "Firmware Update (Deferred in 0.1.0)")
+				assertResponsiveFrame(t, m, "Actions:", "Firmware Update (Deferred in 0.0.3)")
 			} else {
-				assertResponsiveFrame(t, m, "Firmware update: Deferred in 0.1.0")
+				assertResponsiveFrame(t, m, "Firmware update: Deferred in 0.0.3")
 			}
 			if m.screen != screenDevices {
 				t.Fatalf("deferred firmware action should not leave dashboard, got screen=%v", m.screen)
@@ -222,7 +222,7 @@ func TestResponsiveEveryScreenCriticalContentAndFooter(t *testing.T) {
 		t.Run(size.name+"/firmware-denied-screen", func(t *testing.T) {
 			m, _ := responsiveModel(t, size.width, size.height)
 			m.screen = screenFirmware
-			m.fw = firmwareState{device: core.AppDevice{Name: "JP108"}, stage: fwStageDenied, deniedMsg: "Firmware updates are deferred in 0.1.0."}
+			m.fw = firmwareState{device: core.AppDevice{Name: "JP108"}, stage: fwStageDenied, deniedMsg: "Firmware updates are deferred in 0.0.3."}
 			assertResponsiveFrame(t, m, "Firmware", "deferred")
 		})
 

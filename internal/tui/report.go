@@ -173,7 +173,7 @@ func blockedOperationsFor(d core.AppDevice) []string {
 	case protocol.TierDetectOnly:
 		return []string{"diagnostics beyond identification, firmware, mapping, and writes are unavailable"}
 	default:
-		out := []string{"firmware: deferred in 0.1.0"}
+		out := []string{"firmware: deferred in 0.0.3"}
 		if !d.Capability.SupportsJP108DedicatedMap && (!d.Capability.SupportsU2ButtonMap || !d.Capability.SupportsU2SlotConfig) {
 			out = append(out, "mapping: no confirmed editor for this PID")
 		}

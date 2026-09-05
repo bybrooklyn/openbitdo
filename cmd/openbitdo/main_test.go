@@ -143,8 +143,8 @@ func TestVersionFlagExitsCleanlyAndWritesToStdout(t *testing.T) {
 		t.Fatalf("expected empty stderr, got %q", stderr.String())
 	}
 	out := strings.TrimSpace(stdout.String())
-	if !strings.HasPrefix(out, "openbitdo v0.1.0-rc.1 (") {
-		t.Fatalf("expected the v0.1.0-rc.1 version contract on stdout, got %q", out)
+	if !strings.HasPrefix(out, "openbitdo v0.0.3 (") {
+		t.Fatalf("expected the v0.0.3 version contract on stdout, got %q", out)
 	}
 	for _, field := range []string{"commit ", "built ", runtimePlatform(), "dirty="} {
 		if !strings.Contains(out, field) {

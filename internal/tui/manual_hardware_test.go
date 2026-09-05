@@ -104,7 +104,7 @@ func TestManualRealHardwareDeviceListAndDiagnose(t *testing.T) {
 	tm.Send(tea.KeyMsg{Type: tea.KeyDown}) // Diagnose(0) -> Mapping Editor(1)
 	tm.Send(tea.KeyMsg{Type: tea.KeyEnter})
 
-	// Real Ultimate2 mapping is deliberately deferred for v0.1.0-rc.1.
+	// Real Ultimate2 mapping is deliberately deferred for v0.0.3.
 	// Activating the disabled row must stay on the dashboard and explain the
 	// hardware-evidence gap; it must not open a session or attempt any write.
 	var mapFrame []byte

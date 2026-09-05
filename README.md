@@ -3,7 +3,7 @@
 OpenBitdo is a clean-room, beginner-first 8BitDo utility built around a modern terminal UI.
 It focuses on safe diagnostics first, clear support status, and blocked-action messaging for device flows that are still under investigation.
 
-OpenBitdo is unofficial and not affiliated with 8BitDo. Device writes always carry risk. For `v0.1.0-rc.1`, firmware updates are unavailable and Ultimate 2 mapping on real hardware is intentionally blocked until the button-map framing is hardware-confirmed.
+OpenBitdo is unofficial and not affiliated with 8BitDo. Device writes always carry risk. For `v0.0.3`, firmware updates are unavailable and Ultimate 2 mapping on real hardware is intentionally blocked until the button-map framing is hardware-confirmed.
 
 ## What OpenBitdo Does Today
 
@@ -12,7 +12,7 @@ OpenBitdo is unofficial and not affiliated with 8BitDo. Device writes always car
 - Show beginner-facing status, works-now, blocked, and next-step guidance for every selected device.
 - Edit supported mappings for the currently confirmed JP108 flow.
 - Preview Ultimate 2 mapping in mock mode only; real Ultimate 2 mapping is blocked with the reason `button-map framing not hardware-confirmed`.
-- Show Firmware Update as disabled and deferred in `v0.1.0-rc.1`; activating it does not download firmware, preflight firmware, or open a device session.
+- Show Firmware Update as disabled and deferred in `v0.0.3`; activating it does not download firmware, preflight firmware, or open a device session.
 - Keep unconfirmed devices in safe read-only or detect-only paths.
 - Navigate with a keyboard, mouse, or an 8BitDo controller when the OS exposes that controller as a standard HID gamepad (`usagePage=0x0001`, `usage=0x0005`).
 
@@ -51,7 +51,7 @@ app-wide).
 
 | Tier | What it means |
 | --- | --- |
-| `supported` | Diagnostics and any confirmed mapping flows are available when safety gates are satisfied. Firmware remains unavailable in `v0.1.0-rc.1`. |
+| `supported` | Diagnostics and any confirmed mapping flows are available when safety gates are satisfied. Firmware remains unavailable in `v0.0.3`. |
 | `read-only candidate` | Diagnostics are available, but mapping and firmware stay blocked until runtime and hardware confirmation are complete. |
 | `detect-only` | OpenBitdo can identify the device, but deeper workflows are intentionally unavailable. |
 
@@ -64,7 +64,7 @@ If you do not have a controller connected, use `openbitdo --mock` plus the autom
 Real-device promotion still requires hardware smoke evidence; mock mode does not prove firmware or mapping safety.
 When a device is not fully supported, run diagnostics and share the generated TOML report instead of attempting writes.
 
-The `v0.1.0-rc.1` release candidate requires one successful, non-destructive Ultimate 2 qualification before publication. The gate only allows safe reads and navigation checks: try each physically available USB/controller mode, record the resulting `0x2dc8` PID and HID interfaces, confirm one mode exposes both the vendor configuration channel and a Generic Desktop Gamepad interface, run confirmed diagnostics with real response bytes, verify controller navigation, and confirm unplug/reconnect updates the dashboard within three seconds. Mapping writes, candidate probes, bootloader entry, and firmware writes are out of scope.
+A non-destructive Ultimate 2 qualification was run for `v0.0.3` and did not pass. On the unit tested (`0x2dc8:0x6013`) the controller exposes only its vendor configuration interface and no Generic Desktop Gamepad interface, so controller navigation has nothing to read from, and every safe-read diagnostic writes successfully but reads back no data. Both results were traced to device/protocol behavior rather than defects in this project. The measured results, the reasoning, and how to re-run the qualification are recorded in [docs/RC_CHECKLIST.md](docs/RC_CHECKLIST.md). Keyboard and mouse navigation are unaffected.
 
 ## Shell Completions
 
@@ -93,9 +93,9 @@ Intel macOS is unsupported for this release.
 
 ## Release And Package Map
 
-- `v0.1.0-rc.1` is published as a GitHub prerelease with exactly 14 nonempty assets: Linux `x86_64`, Linux `aarch64`, and macOS arm64 binaries, archives, the macOS `.pkg`, and basename-only `.sha256` sidecars for each.
-- AUR publishes `openbitdo-bin` as `0.1.0rc1` from the Linux tarballs and release-derived checksums.
-- Homebrew publishes version `0.1.0-rc.1` through the separate tap repo `bybrooklyn/homebrew-openbitdo`.
+- `v0.0.3` is published as a GitHub release with exactly 14 nonempty assets: Linux `x86_64`, Linux `aarch64`, and macOS arm64 binaries, archives, the macOS `.pkg`, and basename-only `.sha256` sidecars for each.
+- AUR publishes `openbitdo-bin` as `0.0.3` from the Linux tarballs and release-derived checksums.
+- Homebrew publishes version `0.0.3` through the separate tap repo `bybrooklyn/homebrew-openbitdo`.
 - Package-manager metadata is rendered from published assets so release checksums stay authoritative.
 
 Release support contract:
@@ -119,4 +119,4 @@ OpenBitdo is licensed under the [GNU General Public License v3.0 or later](LICEN
 - Protocol overview: [docs/spec/protocol_spec.md](docs/spec/protocol_spec.md)
 - Contributing (build/test, the clean-room rule, code style, PR process): [CONTRIBUTING.md](CONTRIBUTING.md)
 - Reporting a security issue: [SECURITY.md](SECURITY.md)
-- The prior Rust/ratatui implementation (superseded by this Go/Bubbletea rewrite as of `v0.1.0-rc.1`) is preserved, unmaintained, on the [`legacy/rust-tui`](https://github.com/bybrooklyn/openbitdo/tree/legacy/rust-tui) branch.
+- The prior Rust/ratatui implementation (superseded by this Go/Bubbletea rewrite as of `v0.0.3`) is preserved, unmaintained, on the [`legacy/rust-tui`](https://github.com/bybrooklyn/openbitdo/tree/legacy/rust-tui) branch.

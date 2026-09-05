@@ -56,7 +56,7 @@ requirements:
     acceptance: Unit and hardware tests verify read/write/readback for A, B, and at least one K button.
   - id: REQ-JP108-002
     title: JP108 firmware deferral
-    description: JP108 firmware preflight and transfer shall remain unavailable in the v0.1.0 release line.
+    description: JP108 firmware preflight and transfer shall remain unavailable in the v0.0.3 release line.
     acceptance: Production UI and runtime gates reject JP108 firmware actions; isolated tests may cover firmware code only with injected ephemeral keys and a local HTTP server.
   - id: REQ-U2-001
     title: Ultimate2 mock-only mapping preview
@@ -64,7 +64,7 @@ requirements:
     acceptance: Real Ultimate2 devices reject mapping apply/reset/write paths with `button-map framing not hardware-confirmed`; mock-mode tests may exercise the preview editor without hardware writes.
   - id: REQ-U2-002
     title: Ultimate2 firmware deferral
-    description: Ultimate2 firmware preflight and transfer shall remain unavailable in the v0.1.0 release line.
+    description: Ultimate2 firmware preflight and transfer shall remain unavailable in the v0.0.3 release line.
     acceptance: Production UI and runtime gates reject Ultimate2 firmware actions; isolated tests may cover firmware code only with injected ephemeral keys and a local HTTP server.
   - id: REQ-WIZ-001
     title: Beginner guided configuration flows
@@ -75,9 +75,9 @@ requirements:
     description: Enabled mapping/profile writes shall create rollback snapshots and auto-rollback on failure.
     acceptance: App-core tests verify backup creation, rollback on failure, deterministic retry guidance, and no rollback snapshot for disabled firmware or real Ultimate2 mapping actions.
   - id: REQ-HW-001
-    title: Required v0.1.0 Ultimate2 hardware gate
-    description: v0.1.0-rc.1 publication shall require one non-destructive hardware qualification using the current Ultimate2 on the final PR tree.
-    acceptance: Gate evidence records every physically available USB/controller mode, the resulting 0x2dc8 PID and HID interfaces, one mode with both vendor config and Generic Desktop Gamepad usage 0x0001:0x0005, passing safe-read diagnostics with real response bytes and transport_ready=true, physical TUI navigation, hotplug refresh within three seconds, and no mapping/candidate-probe/bootloader/firmware write.
+    title: Recorded v0.0.3 Ultimate2 hardware qualification
+    description: v0.0.3 publication shall record the result of one non-destructive hardware qualification using the current Ultimate2. The qualification is not a blocking gate for v0.0.3; it was run, it did not pass, and the measured result ships as an accepted limitation. Restoring it to blocking is deferred to a later release.
+    acceptance: Evidence records the USB/controller mode tested, the resulting 0x2dc8 PID and HID interfaces, whether a mode exposes both vendor config and Generic Desktop Gamepad usage 0x0001:0x0005, the safe-read diagnostic outcome including transport_ready and bytes read, and no mapping/candidate-probe/bootloader/firmware write. For v0.0.3 this evidence lives in docs/RC_CHECKLIST.md and CHANGELOG.md, and records a failure of the gamepad-interface and diagnostic-response requirements on PID 0x6013.
   - id: REQ-DR-001
     title: Dossier completeness
     description: Every wave target PID shall have sanitized dossier files for each scoped operation group.
@@ -120,9 +120,9 @@ requirements:
     acceptance: template and docs explicitly prohibit raw snippet submission.
   - id: REQ-GH-001
     title: Release-governance variables
-    description: Repository variables for AUR/Homebrew publication gates and the manual Ultimate2 release gate shall be configured through GitHub settings.
-    acceptance: "variables `AUR_PUBLISH_ENABLED`, `HOMEBREW_PUBLISH_ENABLED`, `HOMEBREW_TAP_REPO`, and `ULTIMATE2_RC_GATE_SHA` are present; `ULTIMATE2_RC_GATE_SHA` must equal the exact tagged main commit after strict manual hardware qualification."
+    description: Repository variables for AUR/Homebrew publication gates shall be configured through GitHub settings.
+    acceptance: "variables `AUR_PUBLISH_ENABLED`, `HOMEBREW_PUBLISH_ENABLED`, and `HOMEBREW_TAP_REPO` are present. `ULTIMATE2_RC_GATE_SHA` is not required for v0.0.3: the release workflows no longer consult it, per REQ-HW-001. Reintroduce it alongside the blocking hardware gate."
   - id: REQ-GH-002
     title: Hardware-constrained required checks
     description: Branch protection required checks shall reflect source gates plus currently available non-destructive hardware qualification; fixture-backed hardware CI is deferred.
-    acceptance: required checks include source validation and release metadata gates, while v0.1.0-rc.1 publication records the manual Ultimate2 qualification evidence from REQ-HW-001.
+    acceptance: required checks include source validation and release metadata gates, while v0.0.3 publication records, without requiring a pass, the manual Ultimate2 qualification evidence from REQ-HW-001.

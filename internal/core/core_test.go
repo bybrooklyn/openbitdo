@@ -115,7 +115,7 @@ func TestSupportScorecardReflectsRuntimeReleaseScope(t *testing.T) {
 			t.Fatalf("real U2 scorecard missing release blocker %q: %+v", blocker, realU2)
 		}
 	}
-	for _, missing := range []string{"firmware updates deferred in 0.1.0", u2MappingDeferredReason} {
+	for _, missing := range []string{"firmware updates deferred in 0.0.3", u2MappingDeferredReason} {
 		if !stringSliceContains(realU2.MissingEvidence, missing) {
 			t.Fatalf("real U2 scorecard missing machine-readable gap %q: %+v", missing, realU2)
 		}

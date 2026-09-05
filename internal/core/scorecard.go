@@ -106,7 +106,7 @@ func supportScorecardForDevice(device AppDevice, scope supportRuntimeScope) Supp
 	}
 	if firmwareStatus == EvidenceMissing {
 		if !scope.firmwareEnabled && device.Capability.SupportsFirmware {
-			missing = append(missing, "firmware updates deferred in 0.1.0")
+			missing = append(missing, "firmware updates deferred in 0.0.3")
 		} else {
 			missing = append(missing, "firmware preflight and hardware confirmation")
 		}

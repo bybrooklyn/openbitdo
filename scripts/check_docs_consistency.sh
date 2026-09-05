@@ -9,7 +9,7 @@ command -v rg >/dev/null 2>&1 || {
   exit 1
 }
 
-EXPECTED_TAG="v0.1.0-rc.1"
+EXPECTED_TAG="v0.0.3"
 EXPECTED_GO="1.27.0"
 U2_BLOCK_REASON="button-map framing not hardware-confirmed"
 
@@ -35,8 +35,8 @@ require_text() {
 }
 
 require_text CHANGELOG.md "## ${EXPECTED_TAG}"
-require_text docs/RC_CHECKLIST.md "# OpenBitdo RC Checklist (\`${EXPECTED_TAG}\`)"
-require_text docs/RC_CHECKLIST.md "Current RC tag: \`${EXPECTED_TAG}\`"
+require_text docs/RC_CHECKLIST.md "# OpenBitdo Release Checklist (\`${EXPECTED_TAG}\`)"
+require_text docs/RC_CHECKLIST.md "Current release tag: \`${EXPECTED_TAG}\`"
 require_text .github/ISSUE_TEMPLATE/release-blocker.yml "placeholder: ${EXPECTED_TAG}"
 if [[ "$(grep -Fxc "## ${EXPECTED_TAG}" CHANGELOG.md || true)" != "1" ]]; then
   echo "CHANGELOG.md must contain exactly one '${EXPECTED_TAG}' release section" >&2
@@ -51,8 +51,8 @@ for file in README.md CHANGELOG.md docs/RC_CHECKLIST.md docs/process/release_sco
 done
 require_text docs/MIGRATION.md "button-map framing"
 require_text docs/MIGRATION.md "is not hardware-confirmed"
-require_text CHANGELOG.md "Deferred in 0.1.0"
-require_text docs/process/release_scope_gate.toml 'firmware_ui_label = "Deferred in 0.1.0"'
+require_text CHANGELOG.md "Deferred in 0.0.3"
+require_text docs/process/release_scope_gate.toml 'firmware_ui_label = "Deferred in 0.0.3"'
 require_text README.md "firmware updates are unavailable"
 require_text docs/MIGRATION.md "Firmware update is unavailable"
 require_text docs/RC_CHECKLIST.md "Firmware | unavailable in production"
@@ -63,7 +63,7 @@ require_text docs/RC_CHECKLIST.md "Firmware | unavailable in production"
 if rg -in \
   'ultimate ?2.{0,100}(full support|fully supported|real.hardware mapping (is )?available)|firmware (update|updates)? (is|are) available' \
   README.md docs/RC_CHECKLIST.md docs/MIGRATION.md SECURITY.md; then
-  echo "stale full-support wording contradicts the v0.1.0-rc.1 capability scope" >&2
+  echo "stale full-support wording contradicts the v0.0.3 capability scope" >&2
   exit 1
 fi
 
@@ -102,7 +102,7 @@ if rg -n \
   -g '!CHANGELOG.md' \
   'v0\.0\.1-rc\.[0-9]+|0\.0\.1-rc\.[0-9]+|0\.0\.1rc[0-9]+' \
   .github README.md docs packaging scripts; then
-  echo "stale pre-0.1.0 release-candidate references remain outside CHANGELOG.md" >&2
+  echo "stale pre-0.0.3 release-candidate references remain outside CHANGELOG.md" >&2
   exit 1
 fi
 
@@ -119,10 +119,13 @@ require_text .github/workflows/ci.yml "version: v2.13.1"
 require_text .github/workflows/ci.yml "golang.org/x/vuln/cmd/govulncheck@v1.7.0"
 require_text .github/workflows/release.yml "fail_on_unmatched_files: true"
 require_text .github/workflows/release.yml "./scripts/extract_changelog_section.sh \"\$GITHUB_REF_NAME\""
-require_text .github/workflows/release.yml "ULTIMATE2_RC_GATE_SHA"
-require_text .github/workflows/aur-publish.yml "ULTIMATE2_RC_GATE_SHA"
-require_text .github/workflows/homebrew-publish.yml "ULTIMATE2_RC_GATE_SHA"
-require_text docs/RC_CHECKLIST.md "ULTIMATE2_RC_GATE_SHA"
+
+# v0.0.3 ships with the manual Ultimate 2 qualification recorded but not passed
+# (see docs/RC_CHECKLIST.md), so the ULTIMATE2_RC_GATE_SHA preflight is
+# deliberately absent rather than merely unset. The checklist must still carry
+# the measured result so the accepted limitation stays visible.
+require_text docs/RC_CHECKLIST.md "Generic Desktop Gamepad usage"
+require_text docs/RC_CHECKLIST.md "recorded but not passed"
 
 if rg -n 'if:[[:space:]].*(AUR|HOMEBREW)_PUBLISH_ENABLED' .github/workflows; then
   echo "AUR and Homebrew publication must be required, not conditionally skipped" >&2

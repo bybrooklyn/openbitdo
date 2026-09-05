@@ -19,7 +19,7 @@ defaults:
 env:
   GOTOOLCHAIN: local
   OPENBITDO_EXPECT_DIRTY: "false"
-  RELEASE_TAG: v0.1.0-rc.1
+  RELEASE_TAG: v0.0.3
 
 jobs:
   guard:

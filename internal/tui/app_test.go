@@ -148,7 +148,7 @@ func TestMouse_DisabledFirmwareShowsReasonWithoutTransition(t *testing.T) {
 	if m.screen != screenDevices {
 		t.Fatalf("disabled firmware click changed screens to %v", m.screen)
 	}
-	if !strings.Contains(m.statusLine, "Deferred in 0.1.0") {
+	if !strings.Contains(m.statusLine, "Deferred in 0.0.3") {
 		t.Fatalf("expected disabled reason in status line, got %q", m.statusLine)
 	}
 }
@@ -755,11 +755,11 @@ func TestTheme_AdaptiveAndNoColorReadableDistinctions(t *testing.T) {
 	}
 
 	lipgloss.SetColorProfile(termenv.Ascii)
-	row := styleSelectedRow.Render("› Firmware Update  (Deferred in 0.1.0)")
+	row := styleSelectedRow.Render("› Firmware Update  (Deferred in 0.0.3)")
 	if strings.Contains(row, "\x1b[") {
 		t.Fatalf("NO_COLOR/ascii rendering should not rely on SGR escapes, got %q", row)
 	}
-	if !strings.Contains(row, "›") || !strings.Contains(row, "Deferred in 0.1.0") {
+	if !strings.Contains(row, "›") || !strings.Contains(row, "Deferred in 0.0.3") {
 		t.Fatalf("NO_COLOR/ascii rendering must retain glyph/text distinctions, got %q", row)
 	}
 }

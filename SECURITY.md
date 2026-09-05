@@ -7,7 +7,7 @@ does not maintain long-term-support branches at this stage of the project.
 
 ## Scope
 
-OpenBitdo talks directly to USB/HID hardware. For `v0.1.0-rc.1`, firmware
+OpenBitdo talks directly to USB/HID hardware. For `v0.0.3`, firmware
 updates are unavailable in production and Ultimate 2 mapping on real hardware
 is intentionally blocked. The realistic risk surface is narrow but real:
 
@@ -59,7 +59,7 @@ an SLA. In good faith:
 
 ## Firmware Safety Note
 
-Firmware writes are unavailable in production for `v0.1.0-rc.1`. If you find a
+Firmware writes are unavailable in production for `v0.0.3`. If you find a
 way to reach a firmware download, preflight, device session, bootloader entry,
 or transfer path from a production build, that is exactly the kind of report
 this policy exists for.

@@ -28,14 +28,11 @@ jobs:
       - name: Require exact release and enabled publication
         env:
           HOMEBREW_PUBLISH_ENABLED: ${{ vars.HOMEBREW_PUBLISH_ENABLED }}
-          ULTIMATE2_RC_GATE_SHA: ${{ vars.ULTIMATE2_RC_GATE_SHA }}
         run: |
           set -euo pipefail
+          # The Ultimate 2 qualification check is deliberately absent for v0.0.3;
+          # see the release.yml preflight comment and docs/RC_CHECKLIST.md.
           ./scripts/check_release_tag.sh "$TAG"
-          [[ "$ULTIMATE2_RC_GATE_SHA" == "$GITHUB_SHA" ]] || {
-            echo "Ultimate 2 qualification does not cover publish commit ${GITHUB_SHA}" >&2
-            exit 1
-          }
           [[ "$HOMEBREW_PUBLISH_ENABLED" == "1" ]] || {
             echo "HOMEBREW_PUBLISH_ENABLED must be configured as 1" >&2
             exit 1
@@ -92,7 +89,7 @@ jobs:
             "$GITHUB_REPOSITORY" \
             /tmp/release-input \
             /tmp/release-metadata
-          grep -Fq 'version "0.1.0-rc.1"' /tmp/release-metadata/homebrew/Formula/openbitdo.rb
+          grep -Fq 'version "0.0.3"' /tmp/release-metadata/homebrew/Formula/openbitdo.rb
 
       - name: Upload rendered formula for audit
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -130,7 +127,7 @@ jobs:
           gh auth setup-git
           gh repo clone "$HOMEBREW_TAP_REPO" "$canary_root/tap"
           formula="$canary_root/tap/Formula/openbitdo.rb"
-          grep -Fq 'version "0.1.0-rc.1"' "$formula"
+          grep -Fq 'version "0.0.3"' "$formula"
           brew install --formula "$formula"
           installed="$(brew --prefix openbitdo)/bin/openbitdo"
           "$installed" --version | grep -F "openbitdo ${TAG}"

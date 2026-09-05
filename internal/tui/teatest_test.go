@@ -139,7 +139,7 @@ func TestTeatest_MappingEditorPresetCycling(t *testing.T) {
 }
 
 // TestTeatest_FirmwareActionIsDeferredIn010: firmware is a visible but
-// disabled action in v0.1.0. Selecting it must explain the deferral without
+// disabled action in v0.0.3. Selecting it must explain the deferral without
 // opening the unsafe acknowledgement modal or starting download/preflight.
 func TestTeatest_FirmwareActionIsDeferredIn010(t *testing.T) {
 	tm, _, _ := newTeatestModel(t, filepath.Join(t.TempDir(), "config.toml"), 100, 30)
@@ -149,9 +149,9 @@ func TestTeatest_FirmwareActionIsDeferredIn010(t *testing.T) {
 	waitForOutput(t, tm, "› Diagnose")
 	tm.Send(tea.KeyMsg{Type: tea.KeyDown}) // Diagnose(0) -> Mapping Editor(1)
 	tm.Send(tea.KeyMsg{Type: tea.KeyDown}) // Mapping Editor(1) -> Firmware Update(2)
-	waitForOutput(t, tm, "› Firmware Update  (Deferred in 0.1.0)")
+	waitForOutput(t, tm, "› Firmware Update  (Deferred in 0.0.3)")
 	tm.Send(tea.KeyMsg{Type: tea.KeyEnter})
-	waitForOutput(t, tm, "Firmware Update: Deferred in 0.1.0")
+	waitForOutput(t, tm, "Firmware Update: Deferred in 0.0.3")
 }
 
 // TestTeatest_SettingsTogglePersistsAcrossReload: toggling a setting writes

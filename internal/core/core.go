@@ -81,7 +81,7 @@ func New(config Config) *OpenBitdoCore {
 
 // FirmwareEnabled reports whether the dormant firmware implementation was
 // explicitly enabled for this core instance. It is false in production for
-// v0.1.0 and is exposed so callers can render capability state without
+// v0.0.3 and is exposed so callers can render capability state without
 // duplicating configuration policy.
 func (c *OpenBitdoCore) FirmwareEnabled() bool { return c.config.FirmwareUpdatesEnabled }
 

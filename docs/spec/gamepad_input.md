@@ -69,7 +69,7 @@ and does not touch the clean-room evidence boundary.
      report descriptors from whatever real HID devices exist on the machine
      running it. Real 8BitDo controller navigation still depends on a connected
      mode that exposes Generic Desktop Gamepad usage `0x0001:0x0005`; the
-     `v0.1.0-rc.1` gate in `docs/RC_CHECKLIST.md` records that requirement.
+     `v0.0.3` gate in `docs/RC_CHECKLIST.md` records that requirement.
      **If a future change ever "simplifies" this back to using `info.Path` on
      darwin, it will silently break** — this isn't a style preference, `Path`
      is broken at the dependency level.
