@@ -24,10 +24,10 @@ unchanged. What changed:
 - Settings and support-report schemas are fresh (see below) — an existing Rust `config.toml` is
   not migrated; if present and unparseable against the new schema, OpenBitdo warns and falls back
   to defaults.
-- Firmware update is unavailable in `v0.1.0-rc.1`. The production manifest/feed/key path is
+- Firmware update is unavailable in `v0.0.3`. The production manifest/feed/key path is
   disabled; firmware code remains only for isolated tests with injected ephemeral keys and a local
   HTTP server.
-- Ultimate 2 mapping on real hardware is unavailable in `v0.1.0-rc.1` because button-map framing
+- Ultimate 2 mapping on real hardware is unavailable in `v0.0.3` because button-map framing
   is not hardware-confirmed. The Ultimate 2 mapping screen remains a mock-only preview for UI
   testing.
 
@@ -42,16 +42,16 @@ buildable at that branch's tip if you need to compare behavior against the pre-r
 - Historical subcommand-style entry points are no longer part of the supported CLI.
 - Diagnostics, support reports, and mapping entry points are reached from the TUI, not from public
   subcommands.
-- Firmware actions are rendered as disabled and deferred in `v0.1.0-rc.1`; keyboard or mouse
+- Firmware actions are rendered as disabled and deferred in `v0.0.3`; keyboard or mouse
   activation must not start a download, firmware preflight, or device session.
 
 ## Current Packaging Contract
 
-- GitHub prereleases are the canonical release source. The `v0.1.0-rc.1` prerelease must contain
+- GitHub releases are the canonical release source. The `v0.0.3` release must contain
   exactly 14 nonempty assets, including basename-only checksum sidecars.
-- AUR publishes `openbitdo-bin` as `0.1.0rc1`.
+- AUR publishes `openbitdo-bin` as `0.0.3`.
 - Homebrew publishes through the separate tap repo `bybrooklyn/homebrew-openbitdo` as
-  `0.1.0-rc.1`.
+  `0.0.3`.
 - Linux artifacts support `x86_64` and `aarch64` on Ubuntu 22.04-era glibc or newer, and include
   shell completions plus the udev rule.
 - macOS artifacts target Apple Silicon with `MACOSX_DEPLOYMENT_TARGET=13.0` and remain unsigned and
@@ -86,4 +86,4 @@ terminal; it isn't exposed as a public package or a CLI flag.
   first run rather than migrated.
 - If you need Ultimate 2 mapping on real hardware or firmware updates, stay on a later development
   branch once that work is hardware-confirmed; those flows are intentionally deferred from
-  `v0.1.0-rc.1`.
+  `v0.0.3`.

@@ -25,7 +25,7 @@ import (
 // Set by scripts/build_metadata.sh via -ldflags. Keep the first three symbol
 // names stable: existing downstream packaging already sets them directly.
 var (
-	appVersion    = "v0.1.0-rc.1"
+	appVersion    = "v0.0.3"
 	gitCommit     = ""
 	buildDate     = ""
 	buildPlatform = ""

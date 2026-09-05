@@ -235,7 +235,7 @@ func TestBeginnerDiagSummaryReportsReleaseDeferrals(t *testing.T) {
 	diag := protocol.DiagProbeResult{}
 
 	realU2Summary := New(DefaultConfig()).BeginnerDiagSummary(u2, diag)
-	for _, want := range []string{"firmware updates (deferred in 0.1.0)", u2MappingDeferredReason} {
+	for _, want := range []string{"firmware updates (deferred in 0.0.3)", u2MappingDeferredReason} {
 		if !strings.Contains(realU2Summary, want) {
 			t.Fatalf("real U2 summary missing %q: %s", want, realU2Summary)
 		}
@@ -245,7 +245,7 @@ func TestBeginnerDiagSummaryReportsReleaseDeferrals(t *testing.T) {
 	}
 
 	jp108Summary := New(DefaultConfig()).BeginnerDiagSummary(jp108, diag)
-	if !strings.Contains(jp108Summary, "firmware updates (deferred in 0.1.0)") {
+	if !strings.Contains(jp108Summary, "firmware updates (deferred in 0.0.3)") {
 		t.Fatalf("JP108 summary omitted the firmware feature gate: %s", jp108Summary)
 	}
 	if strings.Contains(jp108Summary, u2MappingDeferredReason) {
@@ -256,12 +256,12 @@ func TestBeginnerDiagSummaryReportsReleaseDeferrals(t *testing.T) {
 	if strings.Contains(mockU2Summary, u2MappingDeferredReason) {
 		t.Fatalf("mock U2 summary should keep mapping preview available: %s", mockU2Summary)
 	}
-	if !strings.Contains(mockU2Summary, "firmware updates (deferred in 0.1.0)") {
+	if !strings.Contains(mockU2Summary, "firmware updates (deferred in 0.0.3)") {
 		t.Fatalf("mock U2 summary omitted the firmware feature gate: %s", mockU2Summary)
 	}
 
 	firmwareTestU2Summary := New(enableFirmwareForTest(Config{})).BeginnerDiagSummary(u2, diag)
-	if strings.Contains(firmwareTestU2Summary, "firmware updates (deferred in 0.1.0)") || !strings.Contains(firmwareTestU2Summary, u2MappingDeferredReason) {
+	if strings.Contains(firmwareTestU2Summary, "firmware updates (deferred in 0.0.3)") || !strings.Contains(firmwareTestU2Summary, u2MappingDeferredReason) {
 		t.Fatalf("test-enabled firmware summary did not isolate the U2 mapping block: %s", firmwareTestU2Summary)
 	}
 }

@@ -23,7 +23,7 @@ type Config struct {
 	ProgressIntervalMs uint64
 
 	// FirmwareUpdatesEnabled is an internal runtime feature gate. Production
-	// builds for v0.1.0 leave it false and expose no CLI override. Tests that
+	// builds for v0.0.3 leave it false and expose no CLI override. Tests that
 	// exercise downloads must opt in explicitly and inject a local feed plus
 	// ephemeral trusted keys below.
 	FirmwareUpdatesEnabled bool
@@ -37,7 +37,7 @@ type Config struct {
 	DebugLog *log.Logger
 }
 
-// DefaultConfig returns the safe production defaults for v0.1.0.
+// DefaultConfig returns the safe production defaults for v0.0.3.
 func DefaultConfig() Config {
 	return Config{
 		DefaultChunkSize:   56,

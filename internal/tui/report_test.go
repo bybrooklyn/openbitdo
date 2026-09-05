@@ -21,9 +21,9 @@ func TestReportWorksNowSuppressesFirmwareAndLabelsMappingScope(t *testing.T) {
 		t.Fatalf("JP108 report should advertise confirmed JP108 mapping, got %+v", jp108Report.WorksNow)
 	}
 	if strings.Contains(joinedJP108, "firmware update") {
-		t.Fatalf("firmware must not be advertised as working in v0.1.0, got %q", joinedJP108)
+		t.Fatalf("firmware must not be advertised as working in v0.0.3, got %q", joinedJP108)
 	}
-	if !strings.Contains(joinedJP108, "firmware: deferred in 0.1.0") {
+	if !strings.Contains(joinedJP108, "firmware: deferred in 0.0.3") {
 		t.Fatalf("firmware deferral should be explicit, got %q", joinedJP108)
 	}
 

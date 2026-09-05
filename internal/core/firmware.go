@@ -16,7 +16,7 @@ import (
 	"github.com/bybrooklyn/openbitdo/internal/protocol"
 )
 
-const firmwareDeferredMessage = "Firmware updates are deferred in 0.1.0."
+const firmwareDeferredMessage = "Firmware updates are deferred in 0.0.3."
 
 func firmwareDisabledError() *Error {
 	return errPolicyDenied(ReasonFeatureUnavailable, firmwareDeferredMessage)

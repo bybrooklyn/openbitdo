@@ -172,8 +172,8 @@ func (s EvidenceState) isPresent() bool { return s == EvidencePresent || s == Ev
 
 const (
 	// ReleaseBlockerFirmwareDisabled is emitted when static device support
-	// exists but the v0.1.0 runtime firmware feature gate is off.
-	ReleaseBlockerFirmwareDisabled = "firmware_disabled_v0_1_0"
+	// exists but the v0.0.3 runtime firmware feature gate is off.
+	ReleaseBlockerFirmwareDisabled = "firmware_disabled_v0_0_3"
 	// ReleaseBlockerU2ButtonMapFraming is emitted when Ultimate2 mapping is
 	// mock-preview-only because real button-map framing is not confirmed.
 	ReleaseBlockerU2ButtonMapFraming = "u2_button_map_framing_unconfirmed"
@@ -229,7 +229,7 @@ func deniedUnlockReport(vidPid protocol.VidPid, scorecard SupportScorecard, mess
 func (c *OpenBitdoCore) blockedOperationSummary(device AppDevice) string {
 	blocked := make([]string, 0, 3)
 	if !c.FirmwareEnabled() {
-		blocked = append(blocked, "firmware updates (deferred in 0.1.0)")
+		blocked = append(blocked, "firmware updates (deferred in 0.0.3)")
 	} else if device.SupportTier != protocol.TierFull || !device.Capability.SupportsFirmware {
 		blocked = append(blocked, "firmware updates without a verified path")
 	}

@@ -690,8 +690,8 @@ func (m Model) composeFooterLine(help string) string {
 }
 
 func (m Model) shortNoticeMessage() string {
-	if strings.Contains(m.notice.message, "Deferred in 0.1.0") {
-		return "Deferred in 0.1.0"
+	if strings.Contains(m.notice.message, "Deferred in 0.0.3") {
+		return "Deferred in 0.0.3"
 	}
 	if strings.Contains(m.notice.message, "button-map framing not hardware-confirmed") {
 		return "U2 mapping not hardware-confirmed"

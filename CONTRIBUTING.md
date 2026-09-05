@@ -56,7 +56,7 @@ into a PR against this repo. Follow the dirty-room evidence process instead
 generated from those (`go generate ./...` — see
 `internal/protocol/gen/main.go`), not hand-edited.
 
-For the `v0.1.0-rc.1` line, firmware updates and real-hardware Ultimate 2
+For the `v0.0.3` line, firmware updates and real-hardware Ultimate 2
 mapping are explicitly deferred. Do not describe either as working in a PR,
 README change, issue response, package note, or release note unless a later
 release gate has been updated with hardware-confirmed evidence.

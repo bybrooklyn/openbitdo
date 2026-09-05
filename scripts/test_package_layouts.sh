@@ -148,7 +148,7 @@ assert_no_appledouble() {
   fi
 }
 
-VERSION="v0.1.0-rc.1"
+VERSION="v0.0.3"
 
 LINUX_DIST="$TMP/linux-dist"
 LINUX_GO_LOG="$TMP/linux-go.log"
@@ -169,7 +169,7 @@ test -s "$LINUX_DIST/$LINUX_BASE.tar.gz"
 assert_checksum "$LINUX_DIST/$LINUX_BASE"
 assert_checksum "$LINUX_DIST/$LINUX_BASE.tar.gz"
 grep -Fq 'GOOS=linux GOARCH=amd64 CGO_ENABLED=1 MACOSX_DEPLOYMENT_TARGET=' "$LINUX_GO_LOG"
-grep -Fq -- '-X main.appVersion=v0.1.0-rc.1' "$LINUX_GO_LOG"
+grep -Fq -- '-X main.appVersion=v0.0.3' "$LINUX_GO_LOG"
 grep -Fq -- '-X main.buildPlatform=linux/amd64' "$LINUX_GO_LOG"
 grep -Fq -- '-X main.gitDirty=false' "$LINUX_GO_LOG"
 
@@ -211,7 +211,7 @@ assert_checksum "$MACOS_DIST/$MACOS_BASE"
 assert_checksum "$MACOS_DIST/$MACOS_BASE.tar.gz"
 assert_checksum "$MACOS_DIST/$MACOS_BASE.pkg"
 grep -Fq 'GOOS=darwin GOARCH=arm64 CGO_ENABLED=1 MACOSX_DEPLOYMENT_TARGET=13.0' "$MACOS_GO_LOG"
-grep -Fq -- '-X main.appVersion=v0.1.0-rc.1' "$MACOS_GO_LOG"
+grep -Fq -- '-X main.appVersion=v0.0.3' "$MACOS_GO_LOG"
 grep -Fq -- '-X main.buildPlatform=darwin/arm64' "$MACOS_GO_LOG"
 grep -Fq -- '-X main.gitDirty=false' "$MACOS_GO_LOG"
 
@@ -240,6 +240,6 @@ usr/local/share/zsh/site-functions/_openbitdo
 EOF
 diff -u "$TMP/pkgroot-expected.txt" "$PKGROOT_LIST"
 grep -Fq 'identifier=io.openbitdo.cli' "$PKGBUILD_LOG"
-grep -Fq 'version=0.1.0-rc.1' "$PKGBUILD_LOG"
+grep -Fq 'version=0.0.3' "$PKGBUILD_LOG"
 grep -Fq 'minimum_os=13.0' "$PKGBUILD_LOG"
 grep -Fq -- '-cr ' "$XATTR_LOG"

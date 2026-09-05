@@ -16,7 +16,7 @@ import (
 func firmwareDisabledReason(device core.AppDevice, firmwareAvailable, unsafeAcknowledged, writeLockUntilRestart bool) string {
 	switch {
 	case !firmwareAvailable:
-		return "Deferred in 0.1.0"
+		return "Deferred in 0.0.3"
 	case device.SupportTier != protocol.TierFull:
 		return "Blocked until runtime and hardware confirmation"
 	case !device.Capability.SupportsFirmware:

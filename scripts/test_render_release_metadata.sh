@@ -30,31 +30,31 @@ assert_no_placeholders() {
   fi
 }
 
-RC_TAG="v0.1.0-rc.1"
-RC_INPUT_DIR="$TMP/rc-input"
-RC_OUTPUT_DIR="$TMP/rc-output"
-create_inputs "$RC_TAG" "$RC_INPUT_DIR"
+RELEASE_TAG="v0.0.3"
+RELEASE_INPUT_DIR="$TMP/release-input"
+RELEASE_OUTPUT_DIR="$TMP/release-output"
+create_inputs "$RELEASE_TAG" "$RELEASE_INPUT_DIR"
 
 bash "$ROOT/scripts/render_release_metadata.sh" \
-  "$RC_TAG" \
+  "$RELEASE_TAG" \
   "bybrooklyn/openbitdo" \
-  "$RC_INPUT_DIR" \
-  "$RC_OUTPUT_DIR"
+  "$RELEASE_INPUT_DIR" \
+  "$RELEASE_OUTPUT_DIR"
 
-PKGBUILD="$RC_OUTPUT_DIR/aur/openbitdo-bin/PKGBUILD"
-FORMULA="$RC_OUTPUT_DIR/homebrew/Formula/openbitdo.rb"
-CHECKSUMS="$RC_OUTPUT_DIR/checksums.env"
+PKGBUILD="$RELEASE_OUTPUT_DIR/aur/openbitdo-bin/PKGBUILD"
+FORMULA="$RELEASE_OUTPUT_DIR/homebrew/Formula/openbitdo.rb"
+CHECKSUMS="$RELEASE_OUTPUT_DIR/checksums.env"
 
 test -f "$PKGBUILD"
 test -f "$FORMULA"
 test -f "$CHECKSUMS"
 
-expected_x86="$(sha256 "$RC_INPUT_DIR/openbitdo-${RC_TAG}-linux-x86_64.tar.gz")"
-expected_aarch64="$(sha256 "$RC_INPUT_DIR/openbitdo-${RC_TAG}-linux-aarch64.tar.gz")"
-expected_macos="$(sha256 "$RC_INPUT_DIR/openbitdo-${RC_TAG}-macos-arm64.tar.gz")"
+expected_x86="$(sha256 "$RELEASE_INPUT_DIR/openbitdo-${RELEASE_TAG}-linux-x86_64.tar.gz")"
+expected_aarch64="$(sha256 "$RELEASE_INPUT_DIR/openbitdo-${RELEASE_TAG}-linux-aarch64.tar.gz")"
+expected_macos="$(sha256 "$RELEASE_INPUT_DIR/openbitdo-${RELEASE_TAG}-macos-arm64.tar.gz")"
 
-grep -Fq "pkgver=0.1.0rc1" "$PKGBUILD"
-grep -Fq "_upstream_tag=${RC_TAG}" "$PKGBUILD"
+grep -Fq "pkgver=0.0.3" "$PKGBUILD"
+grep -Fq "_upstream_tag=${RELEASE_TAG}" "$PKGBUILD"
 grep -Fq "depends=('glibc' 'systemd-libs')" "$PKGBUILD"
 grep -Fq "sha256sums_x86_64=('${expected_x86}')" "$PKGBUILD"
 grep -Fq "sha256sums_aarch64=('${expected_aarch64}')" "$PKGBUILD"
@@ -64,11 +64,11 @@ grep -Fq 'usr/share/bash-completion/completions/openbitdo' "$PKGBUILD"
 grep -Fq 'usr/share/fish/vendor_completions.d/openbitdo.fish' "$PKGBUILD"
 grep -Fq 'usr/share/zsh/site-functions/_openbitdo' "$PKGBUILD"
 
-grep -Fq 'version "0.1.0-rc.1"' "$FORMULA"
+grep -Fq 'version "0.0.3"' "$FORMULA"
 grep -Fq "sha256 \"${expected_x86}\"" "$FORMULA"
 grep -Fq "sha256 \"${expected_aarch64}\"" "$FORMULA"
 grep -Fq "sha256 \"${expected_macos}\"" "$FORMULA"
-grep -Fq "https://github.com/bybrooklyn/openbitdo/releases/download/${RC_TAG}/openbitdo-${RC_TAG}-linux-x86_64.tar.gz" "$FORMULA"
+grep -Fq "https://github.com/bybrooklyn/openbitdo/releases/download/${RELEASE_TAG}/openbitdo-${RELEASE_TAG}-linux-x86_64.tar.gz" "$FORMULA"
 grep -Fq 'depends_on arch: :arm64' "$FORMULA"
 grep -Fq 'depends_on macos: :ventura' "$FORMULA"
 grep -Fq 'bash_completion.install "share/bash-completion/completions/openbitdo"' "$FORMULA"
@@ -84,41 +84,30 @@ if command -v brew >/dev/null 2>&1; then
   brew style "$FORMULA"
 fi
 
-grep -Fq "TAG=${RC_TAG}" "$CHECKSUMS"
-grep -Fq "VERSION=0.1.0-rc.1" "$CHECKSUMS"
-grep -Fq "AUR_PKGVER=0.1.0rc1" "$CHECKSUMS"
+grep -Fq "TAG=${RELEASE_TAG}" "$CHECKSUMS"
+grep -Fq "VERSION=0.0.3" "$CHECKSUMS"
+grep -Fq "AUR_PKGVER=0.0.3" "$CHECKSUMS"
 grep -Fq "LINUX_X86_64_SHA256=${expected_x86}" "$CHECKSUMS"
 grep -Fq "LINUX_AARCH64_SHA256=${expected_aarch64}" "$CHECKSUMS"
 grep -Fq "MACOS_ARM64_SHA256=${expected_macos}" "$CHECKSUMS"
 
-STABLE_TAG="v0.1.0"
-STABLE_INPUT_DIR="$TMP/stable-input"
-STABLE_OUTPUT_DIR="$TMP/stable-output"
-create_inputs "$STABLE_TAG" "$STABLE_INPUT_DIR"
-bash "$ROOT/scripts/render_release_metadata.sh" \
-  "$STABLE_TAG" \
-  "bybrooklyn/openbitdo" \
-  "$STABLE_INPUT_DIR" \
-  "$STABLE_OUTPUT_DIR"
-
-grep -Fq 'pkgver=0.1.0' "$STABLE_OUTPUT_DIR/aur/openbitdo-bin/PKGBUILD"
-grep -Fq 'version "0.1.0"' "$STABLE_OUTPUT_DIR/homebrew/Formula/openbitdo.rb"
-
-# Use each package manager's real comparator when it is available. Arch's
-# vercmp defines 0.1.0rc1 < 0.1.0, and Homebrew follows the same ordering.
+# v0.0.3 must upgrade cleanly from the previously published v0.0.2 in both
+# package managers. Use each one's real comparator when it is available.
+PUBLISHED_VERSION="0.0.2"
+RELEASE_VERSION="0.0.3"
 if command -v vercmp >/dev/null 2>&1; then
-  test "$(vercmp 0.1.0rc1 0.1.0)" -lt 0
+  test "$(vercmp "$PUBLISHED_VERSION" "$RELEASE_VERSION")" -lt 0
 fi
 if command -v brew >/dev/null 2>&1; then
-  brew ruby -e 'raise unless Version.new("0.1.0-rc.1") < Version.new("0.1.0")'
+  brew ruby -e "raise unless Version.new(\"${PUBLISHED_VERSION}\") < Version.new(\"${RELEASE_VERSION}\")"
 fi
 
 EMPTY_INPUT_DIR="$TMP/empty-input"
 EMPTY_OUTPUT_DIR="$TMP/empty-output"
-create_inputs "$RC_TAG" "$EMPTY_INPUT_DIR"
-: >"$EMPTY_INPUT_DIR/openbitdo-${RC_TAG}-linux-x86_64.tar.gz"
+create_inputs "$RELEASE_TAG" "$EMPTY_INPUT_DIR"
+: >"$EMPTY_INPUT_DIR/openbitdo-${RELEASE_TAG}-linux-x86_64.tar.gz"
 if bash "$ROOT/scripts/render_release_metadata.sh" \
-  "$RC_TAG" \
+  "$RELEASE_TAG" \
   "bybrooklyn/openbitdo" \
   "$EMPTY_INPUT_DIR" \
   "$EMPTY_OUTPUT_DIR" >"$TMP/empty.out" 2>&1; then

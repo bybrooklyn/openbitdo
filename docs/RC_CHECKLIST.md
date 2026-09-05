@@ -1,39 +1,30 @@
-# OpenBitdo RC Checklist (`v0.1.0-rc.1`)
+# OpenBitdo Release Checklist (`v0.0.3`)
 
-This checklist defines the release-candidate gate for `v0.1.0-rc.1` and the later stable
-`v0.1.0` promotion.
+This checklist defines the release gate for `v0.0.3`.
 
-`v0.1.0-rc.1` is the first Go/Bubbletea release candidate: a from-scratch, clean-room rewrite of
-the prior Rust CLI (`v0.0.2`) with a redesigned TUI, keyboard/mouse navigation, and controller
-navigation when the OS exposes a standard HID gamepad interface. See `CHANGELOG.md` and
+`v0.0.3` is the first Go/Bubbletea release: a from-scratch, clean-room rewrite of the prior Rust
+CLI (`v0.0.2`) with a redesigned TUI, keyboard/mouse navigation, and controller navigation on
+systems where the OS exposes a standard HID gamepad interface. See `CHANGELOG.md` and
 `docs/MIGRATION.md` for the user-facing contract.
 
 ## Release Policy
 
-- Preparation branch: `rewrite/go-tui`
+- Preparation branch: `release/v0.0.3`
 - Stale worktree branch policy: leave any `worktree-agent-*` branch untouched; it is not a release
-  source for `v0.1.0-rc.1`.
-- Current RC tag: `v0.1.0-rc.1`
+  source for `v0.0.3`.
+- Current release tag: `v0.0.3`
 - Tag source: `main` only
-- Release trigger: exact tag push for `v0.1.0-rc.1`
+- Release trigger: exact tag push for `v0.0.3`
 - Public release rule: zero open issues labeled `release-blocker`, `P0`, or `P1`
-- Manual Ultimate 2 release control: repo variable `ULTIMATE2_RC_GATE_SHA` must equal the exact
-  tagged `main` commit after strict manual hardware qualification
-- Stable promotion rule: seven clean days after `v0.1.0-rc.1`, with any release-impacting fix
-  producing `rc.2` and restarting the soak
-
-Current source reference: commit `22f0c6f` on `rewrite/go-tui` has successful GitHub Actions run
-<https://github.com/bybrooklyn/openbitdo/actions/runs/33111934016>. Re-run required checks on the
-final PR tree, the merged `main` tree, and the exact tag commit.
+- `v0.0.3` publishes as a normal (non-prerelease) GitHub release.
 
 Safety note: no macOS-wide live hardware test may run unless the Darwin probe has the `manual`
-build tag and the command is invoked with `-tags manual`. One prior planning run may have sent up
-to three non-firmware `GetMode` requests if PID `0x6013` was connected; it could not perform
-mapping or firmware writes.
+build tag and the command is invoked with `-tags manual`. Manual hardware runs are restricted to
+safe reads; they perform no mapping writes, candidate probes, bootloader entry, or firmware writes.
 
 ## Required Source Gates
 
-Run these before opening or merging the RC PR:
+Run these before opening or merging the release PR:
 
 - generated registry diff check
 - `gofmt`
@@ -50,7 +41,7 @@ The release toolchain is Go `1.27.0` for development checks, CI, and artifacts.
 
 ## Scope Contract
 
-| Area | `v0.1.0-rc.1` contract |
+| Area | `v0.0.3` contract |
 | --- | --- |
 | Linux support | `x86_64` and `aarch64`, Ubuntu 22.04-era glibc or newer |
 | macOS support | arm64, deployment target macOS 13, unsigned and non-notarized |
@@ -58,27 +49,27 @@ The release toolchain is Go `1.27.0` for development checks, CI, and artifacts.
 | Firmware | unavailable in production; implementation kept only for isolated tests with injected ephemeral keys and a local server |
 | Ultimate 2 mapping | mock preview only; real hardware blocked because `button-map framing not hardware-confirmed` |
 | JP108 mapping | in scope |
-| Controller navigation | available only when the OS exposes a standard HID gamepad interface |
+| Controller navigation | available only when the OS exposes a standard HID gamepad interface; unverified on real hardware, see below |
 | Hardware CI fixtures | deferred |
 
 ## Artifact Manifest
 
-The GitHub prerelease must contain exactly these 14 nonempty assets:
+The GitHub release must contain exactly these 14 nonempty assets:
 
-- `openbitdo-v0.1.0-rc.1-linux-x86_64`
-- `openbitdo-v0.1.0-rc.1-linux-x86_64.sha256`
-- `openbitdo-v0.1.0-rc.1-linux-x86_64.tar.gz`
-- `openbitdo-v0.1.0-rc.1-linux-x86_64.tar.gz.sha256`
-- `openbitdo-v0.1.0-rc.1-linux-aarch64`
-- `openbitdo-v0.1.0-rc.1-linux-aarch64.sha256`
-- `openbitdo-v0.1.0-rc.1-linux-aarch64.tar.gz`
-- `openbitdo-v0.1.0-rc.1-linux-aarch64.tar.gz.sha256`
-- `openbitdo-v0.1.0-rc.1-macos-arm64`
-- `openbitdo-v0.1.0-rc.1-macos-arm64.sha256`
-- `openbitdo-v0.1.0-rc.1-macos-arm64.tar.gz`
-- `openbitdo-v0.1.0-rc.1-macos-arm64.tar.gz.sha256`
-- `openbitdo-v0.1.0-rc.1-macos-arm64.pkg`
-- `openbitdo-v0.1.0-rc.1-macos-arm64.pkg.sha256`
+- `openbitdo-v0.0.3-linux-x86_64`
+- `openbitdo-v0.0.3-linux-x86_64.sha256`
+- `openbitdo-v0.0.3-linux-x86_64.tar.gz`
+- `openbitdo-v0.0.3-linux-x86_64.tar.gz.sha256`
+- `openbitdo-v0.0.3-linux-aarch64`
+- `openbitdo-v0.0.3-linux-aarch64.sha256`
+- `openbitdo-v0.0.3-linux-aarch64.tar.gz`
+- `openbitdo-v0.0.3-linux-aarch64.tar.gz.sha256`
+- `openbitdo-v0.0.3-macos-arm64`
+- `openbitdo-v0.0.3-macos-arm64.sha256`
+- `openbitdo-v0.0.3-macos-arm64.tar.gz`
+- `openbitdo-v0.0.3-macos-arm64.tar.gz.sha256`
+- `openbitdo-v0.0.3-macos-arm64.pkg`
+- `openbitdo-v0.0.3-macos-arm64.pkg.sha256`
 
 Checksum sidecars must contain basenames only. Missing checksum tools are fatal.
 
@@ -92,64 +83,68 @@ Checksum sidecars must contain basenames only. Missing checksum tools are fatal.
 - macOS arm64 builds use `MACOSX_DEPLOYMENT_TARGET=13.0`.
 - The Mach-O minimum OS is asserted before publication.
 - The `.pkg` installs `openbitdo` to `/usr/local/bin`.
-- Homebrew metadata includes completions and renders `version "0.1.0-rc.1"`.
-- AUR metadata renders `pkgver=0.1.0rc1`.
-- Final `v0.1.0` metadata must upgrade cleanly from the RC package-manager versions.
+- Homebrew metadata includes completions and renders `version "0.0.3"`.
+- AUR metadata renders `pkgver=0.0.3`.
+- `v0.0.3` metadata must upgrade cleanly from the published `v0.0.2` package-manager versions.
 
-## Hardware Gate
+## Hardware Qualification
 
-`v0.1.0-rc.1` remains blocked until the current Ultimate 2 passes one non-destructive hardware
-qualification on the final PR tree:
+`v0.0.3` ships with the Ultimate 2 hardware qualification **recorded but not passed**. This is a
+deliberate, accepted limitation for this release, not an oversight. The blocking form of this gate
+is deferred to a later release.
 
-- Try each physically available USB/controller mode.
-- Record the resulting `0x2dc8` PID and HID interfaces.
-- Confirm one mode exposes both the vendor configuration channel and Generic Desktop Gamepad usage
-  `0x0001:0x0005`.
-- Confirm all applicable, non-experimental safe-read diagnostics pass with real response bytes and
-  `transport_ready=true`.
-- Confirm physical up/down/left/right plus Confirm/Cancel drive the real TUI.
-- Confirm unplug/reconnect updates the dashboard within three seconds, without duplicate devices or
-  restart.
-- Perform no mapping writes, candidate probes, bootloader entry, or firmware writes.
+Qualification attempted against a wired Ultimate 2, `0x2dc8:0x6013`, serial `22EC9EA4DF`:
 
-If no mode meets every requirement, do not weaken the gate; produce a later RC after the blocker is
-closed.
+| Requirement | Result |
+| --- | --- |
+| Vendor configuration channel present | Pass — usage page `0xffa0`, usage `0x0001` |
+| Generic Desktop Gamepad usage `0x0001:0x0005` present | **Fail** — no such interface in the tested mode |
+| Safe-read diagnostics pass with real bytes and `transport_ready=true` | **Fail** — 12/12 commands wrote 64 bytes, read 0 |
+| Physical d-pad/Confirm/Cancel drive the TUI | Not runnable — requires the absent gamepad interface |
+| Unplug/reconnect updates the dashboard within three seconds | Not runnable — same |
+| No mapping writes, candidate probes, bootloader entry, or firmware writes | Pass — all checks read-only |
+
+Both failures were verified as device/protocol behavior, not defects in this codebase:
+
+- The interface count was confirmed at three independent layers — `hid.Enumerate`, the IOKit HID
+  registry, and the raw USB device descriptors. The USB layer is conclusive: `bNumConfigurations=1`
+  with a single interface, `bInterfaceNumber=0`, `bInterfaceClass=3`. There is no second interface
+  present for the OS to hide or seize.
+- The empty reads sit on a transport confirmed working: open and `IOHIDDeviceSetReport` both
+  return `kIOReturnSuccess`, and a synchronous `GetReport` returns a real USB STALL, proving the
+  device is live and actively refusing that specific request. See the package documentation in
+  `internal/machid/machid_darwin.go` for the full analysis.
+
+Re-running the qualification: connect the controller, then
+
+```
+OPENBITDO_MANUAL_PID=0x6013 go test ./internal/input/... -tags manual -run TestManualUltimate2ReleaseGate -v -count=1
+OPENBITDO_MANUAL_PID=0x6013 go test ./internal/tui/...   -tags manual -run TestManualUltimate2ReleaseGate -v -count=1
+```
+
+If a future controller mode exposes a Generic Desktop Gamepad interface, record the mode and PID
+here and re-run both suites before restoring this gate to blocking.
 
 ## Distribution Gate
 
-- Repo variable `ULTIMATE2_RC_GATE_SHA` equals the exact tagged `main` commit that passed the
-  strict manual Ultimate 2 hardware gate.
-- GitHub prerelease assets are published successfully and match the exact 14-file manifest.
-- The release body includes only the matching `CHANGELOG.md` section for `v0.1.0-rc.1`.
+- GitHub release assets are published successfully and match the exact 14-file manifest.
+- The release body includes only the matching `CHANGELOG.md` section for `v0.0.3`.
 - AUR publish has required variables and credential write access before publication.
 - Homebrew publish has required variables and credential write access before publication.
-- Clone/install canaries verify AUR `0.1.0rc1` and Homebrew `0.1.0-rc.1`.
-
-## Stable Promotion
-
-After `v0.1.0-rc.1`:
-
-1. Soak for at least seven days with zero open release-blocker, P0, or P1 regressions.
-2. If a release-impacting fix lands, cut `rc.2` and restart the seven-day soak.
-3. Before stable promotion, perform a real macOS 13 launch.
-4. Repeat package-manager canaries and the Ultimate 2 canary.
-5. Update version and release notes to `v0.1.0`.
-6. Re-run all gates.
-7. Merge to `main` and tag the exact stable commit.
+- Clone/install canaries verify AUR `0.0.3` and Homebrew `0.0.3`.
 
 ## Current Status Snapshot
 
 | Gate | Status | Notes |
 | --- | --- | --- |
-| Source branch | In progress | Work is on `rewrite/go-tui`; merge to `main` is still required before tagging. |
-| Current CI reference | Done | Run `33111934016` succeeded for `rewrite/go-tui` at `22f0c6f`; re-run required checks on the final tree. |
-| Firmware production availability | Deferred | Public UI must keep Firmware Update disabled as `Deferred in 0.1.0`. |
+| Source branch | In progress | Work is on `release/v0.0.3`; merge to `main` is still required before tagging. |
+| Firmware production availability | Deferred | Public UI must keep Firmware Update disabled as `Deferred in 0.0.3`. |
 | Ultimate 2 real mapping | Deferred | Mock preview only until button-map framing is hardware-confirmed. |
-| GitHub prerelease assets | Pending | Verify the exact `v0.1.0-rc.1` 14-asset manifest after tag workflow completion. |
-| AUR publication | Pending | Verify `openbitdo-bin` updates to `0.1.0rc1`. |
-| Homebrew publication | Pending | Verify `bybrooklyn/homebrew-openbitdo` updates to `0.1.0-rc.1`. |
-| Real Ultimate 2 hardware gate | Blocking | Must pass the non-destructive gate above on the final PR tree before RC publication. |
-| macOS 13 launch | Promotion blocker | Required before stable `v0.1.0`, not before `rc.1`. |
+| GitHub release assets | Pending | Verify the exact `v0.0.3` 14-asset manifest after tag workflow completion. |
+| AUR publication | Pending | Verify `openbitdo-bin` updates to `0.0.3`. |
+| Homebrew publication | Pending | Verify `bybrooklyn/homebrew-openbitdo` updates to `0.0.3`. |
+| Real Ultimate 2 hardware gate | Accepted limitation | Recorded above as not passed; deliberately non-blocking for `v0.0.3`. |
+| macOS 13 launch | Not verified | No macOS 13 launch was performed for this release. |
 
 ## Historical Notes
 

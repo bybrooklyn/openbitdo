@@ -4,7 +4,7 @@ All notable changes to OpenBitdo are tracked here.
 
 ## Unreleased
 
-## v0.1.0-rc.1
+## v0.0.3
 
 ### Changed
 
@@ -18,14 +18,15 @@ All notable changes to OpenBitdo are tracked here.
 - PID and command registry tables are now generated directly from `spec/pid_matrix.csv` and
   `spec/command_matrix.csv` at build time, making the spec files the literal single source of
   truth instead of hand-maintained tables checked against the CSVs by separate tests.
-- Pinned release-facing metadata to `v0.1.0-rc.1`, with AUR rendering as `0.1.0rc1` and Homebrew
-  rendering as `0.1.0-rc.1`.
+- Pinned release-facing metadata to `v0.0.3` across AUR and Homebrew.
 
 ### Added
 
-- Controller/gamepad navigation: the app can be driven end-to-end with an 8BitDo controller's own
-  d-pad and buttons when the OS exposes a standard USB-HID gamepad interface, live from the device
-  dashboard at startup, alongside keyboard and mouse navigation.
+- Controller/gamepad navigation: the app can be driven with an 8BitDo controller's own d-pad and
+  buttons, alongside keyboard and mouse navigation, live from the device dashboard at startup.
+  This requires the OS to expose the controller as a standard USB-HID Generic Desktop Gamepad
+  (usage `0x0001:0x0005`). The feature is implemented and covered by tests, but it is **not
+  verified on real hardware** — see "Known limitations" below.
 - A real one-time "this may brick your device" confirmation before any unsafe/firmware action.
   Previously this flag was hardcoded true with a comment claiming a UI surface that didn't
   actually exist.
@@ -35,21 +36,35 @@ All notable changes to OpenBitdo are tracked here.
   (improves the issue #15 user experience; the issue remains open until real hardware evidence
   closes it).
 
-### Deferred in 0.1.0
+### Deferred in 0.0.3
 
 - Firmware update is unavailable in production. The manifest feed and signing-key path remain
-  test-only, and the TUI renders firmware as a disabled action labeled `Deferred in 0.1.0`.
+  test-only, and the TUI renders firmware as a disabled action labeled `Deferred in 0.0.3`.
 - Ultimate 2 mapping on real hardware is blocked with the explicit reason
   `button-map framing not hardware-confirmed`. The Ultimate 2 editor remains available as a
   mock-only preview for UI testing.
-- Fixture-backed hardware CI and firmware writes are not part of this release candidate.
+- Fixture-backed hardware CI and firmware writes are not part of this release.
 
 ### Known limitations
 
-- Release candidate publication requires one successful, non-destructive Ultimate 2 hardware
-  qualification before the `v0.1.0-rc.1` prerelease is published.
-- Stable `v0.1.0` promotion requires a seven-day clean soak after `v0.1.0-rc.1`, package-manager
-  canaries, a repeat Ultimate 2 canary, and a real macOS 13 launch.
+These were measured against a wired 8BitDo Ultimate 2 (`0x2dc8:0x6013`) and are shipped known:
+
+- Controller navigation is unverified on real hardware. In its tested mode this Ultimate 2
+  publishes exactly one USB HID interface (`bNumConfigurations=1`, one interface, class 3) on the
+  vendor page `0xffa0`, and no Generic Desktop Gamepad interface. Navigation has nothing to read
+  from on that unit, so d-pad/button input does not drive the TUI there. Keyboard and mouse
+  navigation are unaffected.
+- Safe-read diagnostics return no data on this PID. All 12 applicable commands write 64 bytes
+  successfully and read back 0. The transport itself is confirmed working — open and
+  `IOHIDDeviceSetReport` both return `kIOReturnSuccess`, and a synchronous `GetReport` draws a
+  real USB STALL, which shows the device is live and actively refusing that request. The command
+  registry marks these commands `Confidence: "confirmed"`, meaning confirmed present in the
+  vendor binary by static analysis, not confirmed to answer on real hardware; no evidence dossier
+  exists for `0x6013`. Resolving this needs protocol reverse-engineering in the separate
+  dirty-room evidence process, not transport changes.
+- As a consequence, the dashboard can present a device as `Supported` with `works now: safe
+  diagnostics` while every diagnostic on it fails. The support tier is derived from static
+  evidence, not from a live probe result.
 
 ## v0.0.2
 
