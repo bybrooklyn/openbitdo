@@ -61,8 +61,11 @@ type Model struct {
 	navNotes  []string
 
 	width, height int
-	screen        screen
-	prevScreen    screen // where Recovery returns focus once it can
+	// paned is set on the copy of the model a screen works on, whose width
+	// and height are the pane's rather than the terminal's (see inPane).
+	paned      bool
+	screen     screen
+	prevScreen screen // the tab to go back to from Settings or Recovery
 
 	build        BuildInfo
 	settings     Settings
@@ -176,6 +179,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.mapping = newMappingState()
 			m.screen = screenDevices
 			return m, nil
+		case discardActionNavigate:
+			m.mapping = newMappingState()
+			return m.navigateNow(msg.screen, msg.deviceIdx)
 		case discardActionQuit:
 			m.cancel()
 			return m, tea.Quit
@@ -205,7 +211,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if msg.String() == "q" {
 			if m.screen == screenMapping && m.mapping.dirty() {
-				m.modal = discardMappingModal(discardActionQuit)
+				m.modal = discardMappingModal(discardMappingMsg{action: discardActionQuit})
 				return m, nil
 			}
 			m.cancel()
@@ -214,6 +220,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.String() == "?" {
 			m.modal = helpModal(m.screenTitle(), m.helpLines())
 			return m, nil
+		}
+		if !m.writeLockUntilRestart {
+			if next, cmd, handled := m.shellKey(msg); handled {
+				return next, cmd
+			}
 		}
 
 	case navEventMsg:
@@ -230,7 +241,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, cmd
 		}
 		if navMsg := navToKeyMsg(msg.event); navMsg != nil {
-			updated, screenCmd := m.route(*navMsg)
+			// The same path a key press takes, so the controller reaches
+			// the shell's keys (section, device) as well as the screen's.
+			updated, screenCmd := m.Update(*navMsg)
 			return updated, tea.Batch(cmd, screenCmd)
 		}
 		return m, cmd
@@ -314,7 +327,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m.route(msg)
 }
 
+// routeMouse sends a click or wheel turn to whichever region of the shell
+// it landed in. A click in the pane is handed to the screen in the pane's
+// own coordinates, which is what its click code is written against.
 func (m Model) routeMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
+	g := m.shellGeom()
 	switch msg.Button {
 	case tea.MouseButtonWheelUp:
 		return m.routeMouseWheel(-3)
@@ -324,64 +341,77 @@ func (m Model) routeMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		if msg.Action != tea.MouseActionPress {
 			return m, nil
 		}
+		if g.sidebar.contains(msg.X, msg.Y) && !m.inSubView() {
+			if i, ok := m.deviceAt(msg.Y); ok {
+				target := m.screen
+				if !isTab(target) {
+					target = screenDevices
+				}
+				m.devices.filtering = false
+				return m.navigate(target, i)
+			}
+			return m, nil
+		}
+		if msg.Y == g.tabRow && isTab(m.screen) && !m.inSubView() {
+			if target, ok := m.tabAt(msg.X); ok {
+				return m.navigate(target, m.devices.cursor)
+			}
+			return m, nil
+		}
+		if !g.pane.contains(msg.X, msg.Y) {
+			return m, nil
+		}
+		// Screens lay their panel out below a two-row header.
+		local := msg
+		local.X = msg.X - g.pane.x
+		local.Y = msg.Y - g.pane.y + calculateLayout(m.width, m.height).headerHeight
+		inner := m.inPane()
+		var next tea.Model
+		var cmd tea.Cmd
 		switch m.screen {
 		case screenDevices:
-			return m.clickDevices(msg)
+			next, cmd = inner.clickDevices(local)
 		case screenDiagnostics:
-			return m.clickDiagnostics(msg)
+			next, cmd = inner.clickDiagnostics(local)
 		case screenMapping:
-			return m.clickMapping(msg)
+			next, cmd = inner.clickMapping(local)
 		case screenSettings:
-			return m.clickSettings(msg)
+			next, cmd = inner.clickSettings(local)
+		default:
+			return m, nil
 		}
+		return m.outOfPane(next.(Model)), cmd
 	}
 	return m, nil
 }
 
 func (m Model) routeMouseWheel(delta int) (tea.Model, tea.Cmd) {
-	switch m.screen {
+	inner := m.inPane()
+	switch inner.screen {
 	case screenDevices:
-		if m.devices.pane == paneActions {
-			items := m.actionsForSelectedDevice()
-			m.devices.actionIdx = clampInt(m.devices.actionIdx+delta, 0, len(items)-1)
-		} else {
-			m.devices.cursor = clampInt(m.devices.cursor+delta, 0, len(m.devices.filtered)-1)
-			m.ensureDeviceCursorVisible()
-		}
+		inner.devices.actionIdx = clampInt(inner.devices.actionIdx+delta, 0, len(inner.availableActions())-1)
 	case screenDiagnostics:
-		if m.diag.showSupportRequest {
-			body := m.diagnosticsReportLines(supportRequestBody(m.diag.device, m.diag.result))
-			m.diag.supportOffset = clampInt(m.diag.supportOffset+delta, 0, max(0, len(body)-m.diagnosticsReportRows()))
+		if inner.diag.showSupportRequest {
+			body := inner.diagnosticsReportLines(supportRequestBody(inner.diag.device, inner.diag.result))
+			inner.diag.supportOffset = clampInt(inner.diag.supportOffset+delta, 0, max(0, len(body)-inner.diagnosticsReportRows()))
 		} else {
-			m.diag.cursor = clampInt(m.diag.cursor+delta, 0, len(m.diag.visibleChecks())-1)
-			m.ensureDiagnosticsCursorVisible()
+			inner.diag.cursor = clampInt(inner.diag.cursor+delta, 0, len(inner.diag.visibleChecks())-1)
+			inner.ensureDiagnosticsCursorVisible()
 		}
 	case screenMapping:
-		m.mapping.cursor = clampInt(m.mapping.cursor+delta, 0, m.mapping.rowCount()-1)
-		m.ensureMappingCursorVisible()
+		inner.mapping.cursor = clampInt(inner.mapping.cursor+delta, 0, inner.mapping.rowCount()-1)
+		inner.ensureMappingCursorVisible()
 	case screenSettings:
-		m.settingsInfoOffset = clampInt(
-			m.settingsInfoOffset+delta,
-			0,
-			m.settingsInfoMaxOffset(),
-		)
+		inner.settingsInfoOffset = clampInt(inner.settingsInfoOffset+delta, 0, inner.settingsInfoMaxOffset())
 	}
-	return m, nil
+	return m.outOfPane(inner), nil
 }
 
+// clickDevices handles a click in the Overview tab: on a "You can" row it
+// selects that row and runs it.
 func (m Model) clickDevices(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
-	layout := calculateLayout(m.width, m.height)
-	x, y := msg.X, msg.Y-layout.headerHeight
-	list, detail := m.devicePanels(layout.bodyHeight)
-	if i, ok := list.ownerAt(x, y); ok {
-		m.devices.cursor = i
-		m.ensureDeviceCursorVisible()
-		m.devices.pane = paneDeviceList
-		m.devices.filtering = false
-		return m, nil
-	}
-	if i, ok := detail.ownerAt(x, y); ok {
-		m.devices.pane = paneActions
+	panel := m.overviewPanel(m.height - 3)
+	if i, ok := panel.ownerAt(msg.X, msg.Y); ok {
 		m.devices.actionIdx = i
 		return m.triggerDevicesEnter()
 	}
@@ -521,21 +551,24 @@ func (m Model) route(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.prevScreen = m.screen
 		m.screen = screenRecovery
 	}
+	inner := m.inPane()
+	var next tea.Model = inner
+	var cmd tea.Cmd
 	switch m.screen {
 	case screenDevices:
-		return m.updateDevices(msg)
+		next, cmd = inner.updateDevices(msg)
 	case screenDiagnostics:
-		return m.updateDiagnostics(msg)
+		next, cmd = inner.updateDiagnostics(msg)
 	case screenMapping:
-		return m.updateMapping(msg)
+		next, cmd = inner.updateMapping(msg)
 	case screenFirmware:
-		return m.updateFirmware(msg)
+		next, cmd = inner.updateFirmware(msg)
 	case screenSettings:
-		return m.updateSettings(msg)
+		next, cmd = inner.updateSettings(msg)
 	case screenRecovery:
-		return m.updateRecovery(msg)
+		next, cmd = inner.updateRecovery(msg)
 	}
-	return m, nil
+	return m.outOfPane(next.(Model)), cmd
 }
 
 func (m Model) updateModalKey(msg tea.KeyMsg) (Model, tea.Cmd) {
@@ -568,36 +601,10 @@ func (m Model) View() string {
 	if m.width == 0 {
 		return "starting…"
 	}
-	layout := calculateLayout(m.width, m.height)
-	if layout.mode == layoutTooSmall {
+	if calculateLayout(m.width, m.height).mode == layoutTooSmall {
 		return clampRendered(m.viewTooSmall(), m.width, m.height)
 	}
-
-	header := clampRendered(m.viewHeader(), m.width, layout.headerHeight)
-	footer := clampRendered(m.viewFooter(), m.width, layout.footerHeight)
-	bodyHeight := m.height - layout.headerHeight - layout.footerHeight
-	if bodyHeight < 1 {
-		bodyHeight = 1
-	}
-
-	var body string
-	switch m.screen {
-	case screenDevices:
-		body = m.viewDevices(bodyHeight)
-	case screenDiagnostics:
-		body = m.viewDiagnostics(bodyHeight)
-	case screenMapping:
-		body = m.viewMapping(bodyHeight)
-	case screenFirmware:
-		body = m.viewFirmware(bodyHeight)
-	case screenSettings:
-		body = m.viewSettings(bodyHeight)
-	case screenRecovery:
-		body = m.viewRecovery(bodyHeight)
-	}
-	body = clampRendered(body, m.width, bodyHeight)
-
-	page := header + "\n" + body + "\n" + footer
+	page := m.viewShell()
 	if m.modal.active {
 		return clampRendered(m.modal.viewOverlaid(page, m.width, m.height), m.width, m.height)
 	}
@@ -611,15 +618,6 @@ func (m Model) viewTooSmall() string {
 		styleFaint.Render("Required: at least 60x18"),
 		styleHelp.Render("q / ctrl+c quit"),
 	}, "\n")
-}
-
-func (m Model) viewHeader() string {
-	title := styleTitle.Render("OpenBitdo")
-	if m.mockMode {
-		title += "  " + styleWarning.Render("[mock]")
-	}
-	return lipgloss.NewStyle().Padding(0, 1).BorderStyle(lipgloss.NormalBorder()).
-		BorderBottom(true).BorderForeground(theme.BorderDim).Width(m.width - 2).Render(title)
 }
 
 // viewFooter is one line: a notice (if any) on the left, then the keys that
@@ -705,8 +703,15 @@ func (m Model) handleDevicesLoaded(msg devicesLoadedMsg) (tea.Model, tea.Cmd) {
 	selected, hadSelection := m.devices.selected()
 	m.devices.devices = sortDevicesByTier(msg.devices)
 	m.devices.applyFilter()
-	m.devices.reselect(selected, hadSelection)
-	m.ensureDeviceCursorVisible()
+	if !hadSelection {
+		m.devices.cursor = 0 // the list is sorted with reachable devices first
+	}
+	if !m.devices.reselect(selected, hadSelection) && isTab(m.screen) && m.screen != screenDevices {
+		// The device a tab was showing is gone. Its checks or its mapping
+		// draft now describe nothing on screen, so fall back to Overview.
+		m.screen = screenDevices
+		m.mapping = newMappingState()
+	}
 
 	switch {
 	case msg.err != nil:
@@ -836,6 +841,10 @@ func navToKeyMsg(e input.NavEvent) *tea.KeyMsg {
 			return keyMsg("enter")
 		case 2:
 			return keyMsg("esc")
+		case 3:
+			// With no keyboard to hand, a controller still needs a way to
+			// reach the other devices.
+			return keyMsg("d")
 		}
 		return nil
 	}

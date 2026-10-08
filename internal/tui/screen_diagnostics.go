@@ -91,7 +91,7 @@ func (m Model) updateDiagnostics(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		switch msg.String() {
-		case "v", "s":
+		case "v":
 			m.diag.showSupportRequest = true
 			m.diag.supportOffset = 0
 		case "up", "k":
@@ -104,7 +104,7 @@ func (m Model) updateDiagnostics(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.diag.cursor++
 				m.ensureDiagnosticsCursorVisible()
 			}
-		case "f", "tab":
+		case "f":
 			if m.diag.filter == diagFilterAll {
 				m.diag.filter = diagFilterIssues
 			} else {
@@ -112,7 +112,7 @@ func (m Model) updateDiagnostics(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.diag.cursor = 0
 			m.diag.rowOffset = 0
-		case "d":
+		case "enter":
 			m.diag.showDetail = !m.diag.showDetail
 			m.ensureDiagnosticsCursorVisible()
 		}
@@ -158,14 +158,14 @@ func (m *Model) ensureDiagnosticsCursorVisible() {
 }
 
 // diagnosticsVisibleRows is how many check rows fit: the panel, less the
-// lines above the list (title, identity, blank, summary, blank, list
-// header) and the detail block below it.
+// lines above the list (summary, what it means, blank, list header) and the
+// detail block below it.
 func (m Model) diagnosticsVisibleRows() int {
 	panel := max(1, calculateLayout(m.width, m.height).bodyHeight-2)
 	return max(1, panel-diagHeaderLines-m.diagnosticsDetailLines())
 }
 
-const diagHeaderLines = 6
+const diagHeaderLines = 4
 
 // diagnosticsDetailLines is the height of the block under the check list: a
 // blank line, then what the selected check found, and with details on, the
@@ -179,7 +179,7 @@ func (m Model) diagnosticsDetailLines() int {
 
 func (m Model) diagnosticsReportRows() int {
 	panel := max(1, calculateLayout(m.width, m.height).bodyHeight-2)
-	return max(1, panel-5)
+	return max(1, panel-4)
 }
 
 func (m Model) diagnosticsReportLines(body string) []string {
@@ -197,7 +197,7 @@ func checkLabel(command protocol.CommandID) string {
 	case protocol.CommandGetMode:
 		return "Current mode"
 	case protocol.CommandGetModeAlt:
-		return "Current mode (alternate read)"
+		return "Current mode (alt. read)"
 	case protocol.CommandGetControllerVersion:
 		return "Controller version"
 	case protocol.CommandVersion:
@@ -230,7 +230,7 @@ func checkOutcome(c protocol.DiagCommandStatus) string {
 		// The mode read has two forms; say which one answered without the
 		// internal error text of the one that did not.
 		if strings.HasPrefix(c.Detail, "ok via GetModeAlt fallback") {
-			return "answered by the alternate read only"
+			return "answered (alt. read)"
 		}
 		if c.Detail == "ok" {
 			return "answered"
@@ -255,11 +255,7 @@ func (m Model) viewDiagnostics(height int) string {
 	panelHeight := max(1, height-2)
 	text := max(1, m.width-4)
 	device := m.diag.device
-	lines := []string{
-		stylePanelTitle.Render(truncate("Diagnostics: "+device.DisplayName, text)),
-		styleFaint.Render(pidLabel(device.VidPid)),
-		"",
-	}
+	var lines []string
 	render := func() string {
 		return renderBoundedPanel(m.width-2, panelHeight, strings.Join(lines, "\n"))
 	}
@@ -268,7 +264,7 @@ func (m Model) viewDiagnostics(height int) string {
 	}
 
 	if m.diag.loading {
-		addWrapped(styleBody, "Running diagnostics…")
+		addWrapped(styleBody, "Checking the connection…")
 		addWrapped(styleFaint, "Each check the device does not answer waits for its timeout, so this can take a few seconds.")
 		return render()
 	}
@@ -284,7 +280,7 @@ func (m Model) viewDiagnostics(height int) string {
 	}
 
 	if m.diag.showSupportRequest {
-		lines[0] = stylePanelTitle.Render(truncate("Diagnostics report: "+device.DisplayName, text))
+		lines = append(lines, stylePanelTitle.Render(truncate("Report: "+device.DisplayName, text)), "")
 		body := m.diagnosticsReportLines(supportRequestBody(device, m.diag.result))
 		rows := m.diagnosticsReportRows()
 		start := clampInt(m.diag.supportOffset, 0, max(0, len(body)-rows))
@@ -303,27 +299,39 @@ func (m Model) viewDiagnostics(height int) string {
 			passed++
 		}
 	}
-	summary := fmt.Sprintf("%d of %d checks answered.", passed, total)
+	summary := fmt.Sprintf("%d of %d checks answered", passed, total)
 	summaryStyle := stylePositive
+	meaning := "The device answered everything OpenBitdo asked."
 	switch {
 	case total == 0:
-		summary, summaryStyle = "No checks apply to this device.", styleWarning
+		summary, summaryStyle = "No checks apply to this device", styleWarning
+		meaning = ""
 	case passed == 0:
-		summary, summaryStyle = fmt.Sprintf("The device answered none of the %d checks.", total), styleWarning
+		summary, summaryStyle = fmt.Sprintf("The device answered none of the %d checks", total), styleWarning
+		meaning = "Connected but silent. Press v for a report to share."
 	case passed < total:
 		summaryStyle = styleWarning
+		meaning = "It's talking. No answer means unsupported, not broken."
 	}
 	if !m.diag.ranAt.IsZero() {
-		summary += "  " + fmt.Sprintf("Last run: %s.", formatAge(time.Since(m.diag.ranAt)))
+		summary += "  ·  " + fmt.Sprintf("Last run: %s", formatAge(time.Since(m.diag.ranAt)))
 	}
-	lines = append(lines, summaryStyle.Render(truncate(summary, text)))
+	// The pane's own tab names the screen and the sidebar names the device,
+	// so the panel opens straight on the result.
+	if lipgloss.Width(meaning) > text && passed > 0 && passed < total {
+		meaning = "No answer = unsupported, not broken."
+	}
+	lines = []string{
+		summaryStyle.Render(truncate(summary, text)),
+		styleFaint.Render(truncate(meaning, text)),
+	}
 
 	checks := m.diag.visibleChecks()
 	header := "All checks"
 	if m.diag.filter == diagFilterIssues {
 		header = fmt.Sprintf("Unanswered checks only (%d)", len(checks))
 	}
-	lines = append(lines, "", stylePanelTitle.Render(header))
+	lines = append(lines, "", styleSection.Render(header))
 
 	if len(checks) == 0 {
 		lines = append(lines, stylePositive.Render("Every check was answered."))
@@ -357,10 +365,17 @@ func (m Model) viewDiagnostics(height int) string {
 	if m.diag.cursor < len(checks) {
 		c := checks[m.diag.cursor]
 		lines = append(lines, "")
-		if c.OK {
-			addWrapped(styleBody, checkLabel(c.Command)+": "+checkOutcome(c)+".")
-		} else {
-			addWrapped(styleBody, checkLabel(c.Command)+": "+checkOutcome(c)+". "+unansweredNote(c, device))
+		about := checkLabel(c.Command) + ": " + checkOutcome(c) + "."
+		if !c.OK {
+			about += " " + unansweredNote(c, device)
+		}
+		// Two lines at most, which is what diagnosticsDetailLines reserves.
+		wrapped := wrapText(about, text)
+		if len(wrapped) > 2 {
+			wrapped = append(wrapped[:1], truncate(strings.Join(wrapped[1:], " "), text))
+		}
+		for _, line := range wrapped {
+			lines = append(lines, styleBody.Render(line))
 		}
 		if m.diag.showDetail {
 			lines = append(lines,
@@ -378,13 +393,13 @@ func (m Model) viewDiagnostics(height int) string {
 func unansweredNote(c protocol.DiagCommandStatus, device core.AppDevice) string {
 	switch {
 	case c.Severity == protocol.SeverityNeedsAttention:
-		return "This contradicts what is known about the device; please save the report (v) and share it."
+		return "That contradicts what's known. Please share the report (v)."
 	case c.IsExperimental:
-		return "This command is a guess that has not been confirmed on real hardware, so no answer is expected for many devices."
+		return "This question is a guess, so silence is expected."
 	case device.SupportTier != protocol.TierFull:
-		return "This model has not been confirmed on real hardware, so some unanswered checks are normal."
+		return "Normal for a model not yet confirmed on hardware."
 	}
-	return "This device does not answer this command. It does not mean the device is faulty."
+	return "This model ignores this question. It isn't a fault."
 }
 
 type diagErrorLine struct {
@@ -401,7 +416,7 @@ func diagnosticsErrorLines(err error) []diagErrorLine {
 		case core.KindDeviceDisconnected:
 			return []diagErrorLine{
 				{text: "The device was disconnected.", strong: true},
-				{text: "Reconnect it, then press r to run diagnostics again."},
+				{text: "Reconnect it, then press r to check again."},
 			}
 		case core.KindPermissionDenied:
 			lines := []diagErrorLine{{text: "Your user account is not allowed to open this device.", strong: true}}
@@ -411,13 +426,13 @@ func diagnosticsErrorLines(err error) []diagErrorLine {
 			return append(lines, diagErrorLine{text: "Then press r to try again."})
 		case core.KindNoConfigChannel:
 			return []diagErrorLine{
-				{text: "This device has no configuration interface.", strong: true},
-				{text: "It is connected, but it does not expose the interface OpenBitdo sends commands through, so there is nothing to run diagnostics over. If it has another connection mode (a wireless adapter, Bluetooth), try that."},
+				{text: "OpenBitdo can't talk to this device in its current mode.", strong: true},
+				{text: "It is plugged in, but it does not offer the configuration interface OpenBitdo sends commands through, so there is nothing to check. If it has another connection (a wireless adapter, Bluetooth), try that one."},
 			}
 		}
 	}
 	return []diagErrorLine{
-		{text: "Diagnostics could not run.", strong: true},
+		{text: "The checks could not run.", strong: true},
 		{text: err.Error()},
 		{text: "Press r to try again."},
 	}
@@ -450,8 +465,10 @@ func diagCheckLine(c protocol.DiagCommandStatus, width int) string {
 			mark = styleWarning.Render(IconWarn)
 		}
 	}
-	const labelWidth = 30
+	labelWidth := clampInt(width/2, 16, 26)
 	label := checkLabel(c.Command)
-	outcome := truncate(checkOutcome(c), max(0, width-labelWidth-6))
+	// The row carries the gist; the line under the list has it in full.
+	gist, _, _ := strings.Cut(checkOutcome(c), ";")
+	outcome := truncate(gist, max(0, width-labelWidth-6))
 	return fmt.Sprintf("%s %s", mark, styleBody.Render(fmt.Sprintf("%-*s", labelWidth, truncate(label, labelWidth)))) + styleFaint.Render(outcome)
 }

@@ -68,10 +68,10 @@ func TestDiagnosticsSupportRequestKeyTogglesView(t *testing.T) {
 		},
 	}
 
-	next, _ := m.updateDiagnostics(tea.KeyMsg{Runes: []rune("s"), Type: tea.KeyRunes})
+	next, _ := m.updateDiagnostics(tea.KeyMsg{Runes: []rune("v"), Type: tea.KeyRunes})
 	m = next.(Model)
 	if !m.diag.showSupportRequest {
-		t.Fatal("expected s to show the support request view for a candidate-readonly device")
+		t.Fatal("expected v to show the report for a candidate-readonly device")
 	}
 
 	next, _ = m.updateDiagnostics(tea.KeyMsg{Type: tea.KeyEsc})

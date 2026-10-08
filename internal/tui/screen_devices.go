@@ -9,30 +9,27 @@ import (
 	"github.com/bybrooklyn/openbitdo/internal/protocol"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/charmbracelet/x/ansi"
 	"github.com/sahilm/fuzzy"
-)
-
-type devicePane int
-
-const (
-	paneDeviceList devicePane = iota
-	paneActions
 )
 
 type actionKind int
 
 const (
 	actionDiagnose actionKind = iota
+	actionSaveReport
 	actionMapping
 	actionFirmware
 	actionGuardedProbe
 )
 
+// actionItem is one thing that can be done with the selected device. An item
+// with a reason cannot be done right now; the reason says why, in a few
+// words that fit beside the label.
 type actionItem struct {
 	label  string
 	kind   actionKind
-	reason string // "" means enabled
+	note   string // shown beside an available action (e.g. "5 of 12 answered")
+	reason string // "" means available
 }
 
 type devicesState struct {
@@ -42,8 +39,8 @@ type devicesState struct {
 	listOffset int
 	filterText string
 	filtering  bool
-	pane       devicePane
-	actionIdx  int
+	// actionIdx is the cursor in the Overview tab's "You can" list.
+	actionIdx int
 
 	// loading is true while a scan is in flight; scanned once any scan has
 	// finished, so "no devices" is only claimed after actually looking.
@@ -55,7 +52,7 @@ type devicesState struct {
 }
 
 func newDevicesState() devicesState {
-	return devicesState{pane: paneDeviceList, loading: true}
+	return devicesState{loading: true}
 }
 
 // sameDevice reports whether a and b are the same physical device.
@@ -64,20 +61,20 @@ func sameDevice(a, b core.AppDevice) bool {
 }
 
 // reselect moves the cursor back onto want after the list changed, so a
-// reload never silently retargets the selection (and any open action) to a
-// different device.
-func (d *devicesState) reselect(want core.AppDevice, had bool) {
+// reload never silently retargets the selection to a different device. It
+// reports whether the selected device is still the one that was selected.
+func (d *devicesState) reselect(want core.AppDevice, had bool) bool {
 	if had {
 		for i, dev := range d.filtered {
 			if sameDevice(dev, want) {
 				d.cursor = i
-				return
+				return true
 			}
 		}
-		// The selected device is gone; its actions pane has no subject.
-		d.pane = paneDeviceList
 	}
 	d.cursor = clampInt(d.cursor, 0, len(d.filtered)-1)
+	d.actionIdx = 0
+	return !had
 }
 
 // applyFilter fuzzy-matches devices by name (via sahilm/fuzzy, the same
@@ -103,13 +100,16 @@ func (d *devicesState) applyFilter() {
 	d.filtered = filtered
 }
 
-// sortDevicesByTier groups the "grouped dashboard: supported, read-only
-// candidate, or detect-only" browsing order the README documents as current
-// behavior — a stable sort so devices within the same tier keep their
-// enumeration order.
+// sortDevicesByTier groups the list by support tier — a stable sort so
+// devices within the same tier keep their enumeration order.
 func sortDevicesByTier(devices []core.AppDevice) []core.AppDevice {
 	out := append([]core.AppDevice(nil), devices...)
 	sort.SliceStable(out, func(i, j int) bool {
+		// A device OpenBitdo cannot talk to goes below the ones it can,
+		// whatever its tier: the top of the list is what is selected first.
+		if a, b := out[i].ConfigChannel == core.ChannelAbsent, out[j].ConfigChannel == core.ChannelAbsent; a != b {
+			return b
+		}
 		return tierRank(out[i].SupportTier) < tierRank(out[j].SupportTier)
 	})
 	return out
@@ -133,31 +133,54 @@ func (d devicesState) selected() (core.AppDevice, bool) {
 	return d.filtered[d.cursor], true
 }
 
-// healthText describes a device's live state: a glyph, a few words for the
-// list row, and a sentence for the detail panel.
-func healthText(h core.DeviceHealth) (glyph string, style lipgloss.Style, short, long string) {
+// verdict is the one-glance answer to "is this device OK?": a word, a
+// sentence, and a glyph and colour that agree with them.
+type verdict struct {
+	glyph    string
+	style    lipgloss.Style
+	word     string // "Working", "Limited", "Can't connect", ...
+	sentence string
+}
+
+// verdictFor turns what is known about a device into a verdict. canChange
+// says whether any setting on it can be changed right now; a device that
+// answers but can only be read is "Limited", not "Working".
+func verdictFor(h core.DeviceHealth, canChange bool) verdict {
 	switch h.State {
 	case core.HealthResponding:
-		return IconTierFull, styleBadgeFull, "responding",
-			fmt.Sprintf("Responding. It answered %d of %d diagnostic checks.", h.Answered, h.Total)
+		if canChange {
+			return verdict{IconTierFull, styleBadgeFull, "Working", "Connected and ready."}
+		}
+		return verdict{IconTierCandidate, styleBadgeCandidate, "Limited",
+			"Connected. OpenBitdo can read from it, but can't change its settings yet."}
 	case core.HealthSilent:
-		return IconTierDetect, styleBadgeDetect, "not answering",
-			fmt.Sprintf("Not answering. It opened, but none of the %d diagnostic checks got a reply.", h.Total)
+		return verdict{IconTierDetect, styleBadgeDetect, "Not answering",
+			"Connected, but it isn't replying to OpenBitdo."}
 	case core.HealthNoChannel:
-		return IconTierDetect, styleBadgeDetect, "unreachable",
-			"Connected, but it does not expose the interface OpenBitdo sends commands through. " +
-				"OpenBitdo can identify it and nothing more in its current mode."
+		return verdict{IconTierDetect, styleBadgeDetect, "Can't connect",
+			"Plugged in, but not in a mode OpenBitdo can talk to."}
 	case core.HealthNoPermission:
-		return IconFail, styleDanger, "no permission",
-			"Your user account is not allowed to open this device."
+		return verdict{IconFail, styleDanger, "No access",
+			"Your user account isn't allowed to open this device."}
 	case core.HealthDisconnected:
-		return IconTierDetect, styleBadgeDetect, "unplugged",
-			"Disconnected. Plug it back in and press r."
+		return verdict{IconTierDetect, styleBadgeDetect, "Unplugged", "It was disconnected."}
 	case core.HealthError:
-		return IconWarn, styleWarning, "check failed", "The last check could not run."
+		return verdict{IconWarn, styleWarning, "Check failed", "The last check could not run."}
 	default:
-		return IconTierCandidate, styleBadgeCandidate, "checking…", "Checking what this device answers…"
+		return verdict{IconTierCandidate, styleBadgeCandidate, "Checking", "Checking what this device answers…"}
 	}
+}
+
+// deviceVerdict is the verdict for one listed device.
+func (m Model) deviceVerdict(device core.AppDevice) verdict {
+	health := m.core.Health(device)
+	canChange := false
+	for _, item := range m.actionsFor(device) {
+		if item.reason == "" && (item.kind == actionMapping || item.kind == actionFirmware) {
+			canChange = true
+		}
+	}
+	return verdictFor(health, canChange)
 }
 
 // permissionFixLines is the fix for HealthNoPermission, kept as separate
@@ -171,55 +194,86 @@ func permissionFixLines() []string {
 	}
 }
 
+// unreachableReason says, for a device OpenBitdo cannot talk to, why nothing
+// can be done with it; "" when it can be reached (or nothing rules that out).
+func unreachableReason(health core.DeviceHealth) string {
+	switch health.State {
+	case core.HealthNoChannel:
+		return "it isn't in a mode OpenBitdo can talk to"
+	case core.HealthNoPermission:
+		return "your account can't open the device"
+	case core.HealthSilent:
+		return "the device isn't answering"
+	case core.HealthDisconnected:
+		return "the device is unplugged"
+	}
+	return ""
+}
+
+// friendlyReason shortens a gating reason for the Overview list. The full
+// reason is shown on the tab the action belongs to.
+func friendlyReason(reason string) string {
+	switch reason {
+	case "button-map framing not hardware-confirmed":
+		return "waiting on hardware testing"
+	case "Deferred in 0.0.3":
+		return "Deferred in 0.0.3: not part of this release"
+	case "Write locked until restart":
+		return "writes are locked until you restart"
+	}
+	return reason
+}
+
 func (m Model) actionsForSelectedDevice() []actionItem {
 	device, ok := m.devices.selected()
 	if !ok {
 		return nil
 	}
+	return m.actionsFor(device)
+}
+
+// actionsFor lists everything that could be done with device, available or
+// not. The Overview tab splits it into "You can" and "Not yet".
+func (m Model) actionsFor(device core.AppDevice) []actionItem {
 	health := m.core.Health(device)
-	unreachable := ""
+	unreachable := unreachableReason(health)
+
+	check := actionItem{label: "Check the connection", kind: actionDiagnose}
 	switch health.State {
 	case core.HealthNoChannel:
-		unreachable = "this device has no configuration interface"
-	case core.HealthNoPermission:
-		unreachable = "your user cannot open this device"
-	case core.HealthSilent:
-		unreachable = "the device is not answering"
-	case core.HealthDisconnected:
-		unreachable = "the device is disconnected"
+		// Nothing to send a check through.
+		check.reason = unreachable
+	case core.HealthResponding, core.HealthSilent:
+		check.note = fmt.Sprintf("%d of %d answered", health.Answered, health.Total)
 	}
+	items := []actionItem{check}
 
-	diagnose := actionItem{label: "Run diagnostics", kind: actionDiagnose}
-	if health.State == core.HealthNoChannel {
-		// Nothing to send diagnostics through. Opening the screen would only
-		// repeat what the status line above already says.
-		diagnose.reason = unreachable
+	if health.State == core.HealthResponding || health.State == core.HealthSilent {
+		items = append(items, actionItem{label: "Save a report", kind: actionSaveReport, note: "for a bug report"})
 	}
-	items := []actionItem{diagnose}
 
 	mapping := actionItem{
-		label: "Mapping editor", kind: actionMapping,
+		label: "Remap buttons", kind: actionMapping,
 		reason: mappingDisabledReason(device, m.mockMode, m.writeLockUntilRestart),
 	}
+	if device.Capability.SupportsJP108DedicatedMap {
+		mapping.label = "Remap keys"
+	}
 	if device.Capability.SupportsU2ButtonMap && m.mockMode {
-		mapping.label = "Mapping preview (mock only)"
+		mapping.note = "mock preview only"
 	}
 	if mapping.reason == "" && unreachable != "" {
 		mapping.reason = unreachable
 	}
 	items = append(items, mapping)
 
-	// Firmware is listed as an action only in builds where it can run. In a
-	// release it is unavailable for every device, which the detail panel
-	// says once rather than offering a row that can never work.
-	if m.core.FirmwareEnabled() {
-		items = append(items, actionItem{
-			label: "Firmware update", kind: actionFirmware,
-			// Risk acknowledgement is collected interactively via modal on
-			// trigger, not treated as a static precondition here.
-			reason: firmwareDisabledReason(device, true, true, m.writeLockUntilRestart),
-		})
-	}
+	// Risk acknowledgement is collected interactively via modal on trigger,
+	// not treated as a static precondition here.
+	items = append(items, actionItem{
+		label: "Update firmware", kind: actionFirmware,
+		reason: firmwareDisabledReason(device, m.core.FirmwareEnabled(), true, m.writeLockUntilRestart),
+	})
+
 	if device.SupportTier == protocol.TierCandidateReadOnly {
 		// The risk acknowledgement is collected by a dialog when the action
 		// is triggered, so it is not a precondition here.
@@ -231,69 +285,49 @@ func (m Model) actionsForSelectedDevice() []actionItem {
 			reason = "needs an unlock file: " + candidateUnlockFilePath(m.settingsPath, device.VidPid) +
 				" containing pid = \"" + fmt.Sprintf("%#04x", device.VidPid.PID) + "\" and candidate_write_unlock = true"
 		}
-		items = append(items, actionItem{label: "Guarded write probe", kind: actionGuardedProbe, reason: reason})
+		items = append(items, actionItem{label: "Test a write", kind: actionGuardedProbe, note: "guarded probe", reason: reason})
 	}
 	return items
 }
 
+// availableActions is the "You can" list: what the Overview cursor moves over.
+func (m Model) availableActions() []actionItem {
+	var out []actionItem
+	for _, item := range m.actionsForSelectedDevice() {
+		if item.reason == "" {
+			out = append(out, item)
+		}
+	}
+	return out
+}
+
 func (m Model) updateDevices(msg tea.Msg) (tea.Model, tea.Cmd) {
-	switch msg := msg.(type) {
-	case tea.KeyMsg:
-		if m.devices.filtering {
-			return m.updateDeviceFilterInput(msg)
+	key, ok := msg.(tea.KeyMsg)
+	if !ok {
+		return m, nil
+	}
+	if m.devices.filtering {
+		return m.updateDeviceFilterInput(key)
+	}
+	switch key.String() {
+	case "r":
+		return m.rescanDevices()
+	case "up", "k":
+		if m.devices.actionIdx > 0 {
+			m.devices.actionIdx--
 		}
-		switch msg.String() {
-		case "/":
-			m.devices.filtering = true
-			m.devices.pane = paneDeviceList
-			return m, nil
-		case "r":
-			return m.rescanDevices()
-		case "s":
-			m.screen = screenSettings
-			m.settingsCursor = 0
-			return m, nil
-		case "up", "k":
-			if m.devices.pane == paneDeviceList {
-				if m.devices.cursor > 0 {
-					m.devices.cursor--
-					m.ensureDeviceCursorVisible()
-				}
-			} else if m.devices.actionIdx > 0 {
-				m.devices.actionIdx--
-			}
-			return m, nil
-		case "down", "j":
-			if m.devices.pane == paneDeviceList {
-				if m.devices.cursor < len(m.devices.filtered)-1 {
-					m.devices.cursor++
-					m.ensureDeviceCursorVisible()
-				}
-			} else if items := m.actionsForSelectedDevice(); m.devices.actionIdx < len(items)-1 {
-				m.devices.actionIdx++
-			}
-			return m, nil
-		case "left":
-			m.devices.pane = paneDeviceList
-			return m, nil
-		case "right", "tab":
-			if _, ok := m.devices.selected(); ok {
-				m.devices.pane = paneActions
-				m.devices.actionIdx = 0
-			}
-			return m, nil
-		case "esc":
-			if m.devices.pane == paneDeviceList && m.devices.filterText != "" {
-				m.devices.filterText = ""
-				m.devices.applyFilter()
-				m.devices.cursor = clampInt(m.devices.cursor, 0, len(m.devices.filtered)-1)
-				return m, nil
-			}
-			m.devices.pane = paneDeviceList
-			return m, nil
-		case "enter":
-			return m.triggerDevicesEnter()
+	case "down", "j":
+		if m.devices.actionIdx < len(m.availableActions())-1 {
+			m.devices.actionIdx++
 		}
+	case "esc":
+		if m.devices.filterText != "" {
+			m.devices.filterText = ""
+			m.devices.applyFilter()
+			m.devices.cursor = clampInt(m.devices.cursor, 0, len(m.devices.filtered)-1)
+		}
+	case "enter":
+		return m.triggerDevicesEnter()
 	}
 	return m, nil
 }
@@ -333,81 +367,32 @@ func (m Model) updateDeviceFilterInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.devices.cursor = 0
 	}
 	m.devices.listOffset = 0
+	m.devices.actionIdx = 0
 	return m, nil
 }
 
-func (m *Model) ensureDeviceCursorVisible() {
-	start, _, _ := viewportWindow(len(m.devices.filtered), m.devices.cursor, m.devices.listOffset, m.deviceVisibleRows())
-	m.devices.listOffset = start
-}
-
-// deviceVisibleRows is how many device rows the list panel shows. The wide
-// layout gives the list the full body height; the compact one stacks the
-// list above the detail panel and keeps it short.
-func (m Model) deviceVisibleRows() int {
-	layout := calculateLayout(m.width, m.height)
-	if layout.mode == layoutCompact {
-		return compactListRows(len(m.devices.filtered))
-	}
-	return max(1, layout.bodyHeight-4)
-}
-
-// compactListRows caps the stacked list so the detail panel below it keeps
-// most of the screen.
-func compactListRows(devices int) int {
-	return clampInt(devices, 1, 4)
-}
-
+// triggerDevicesEnter runs the Overview action under the cursor.
 func (m Model) triggerDevicesEnter() (tea.Model, tea.Cmd) {
-	if m.devices.pane == paneDeviceList {
-		if _, ok := m.devices.selected(); ok {
-			m.devices.pane = paneActions
-			m.devices.actionIdx = 0
-		}
-		return m, nil
-	}
-
-	items := m.actionsForSelectedDevice()
+	items := m.availableActions()
 	if m.devices.actionIdx >= len(items) {
 		return m, nil
 	}
-	item := items[m.devices.actionIdx]
-	if item.reason != "" {
-		// The reason is already written beside the row; this only confirms
-		// the keypress registered, and clears itself.
-		return m.setNotice(noticeWarning, item.label+" is not available: "+item.reason, true)
-	}
 	device, _ := m.devices.selected()
 
-	switch item.kind {
+	switch items[m.devices.actionIdx].kind {
 	case actionDiagnose:
-		m.screen = screenDiagnostics
-		m.diag = newDiagnosticsState()
-		m.diag.device = device
-		// A cache hit renders instantly with no loading flash — a plain
-		// mutex-protected map read, not I/O, safe to do synchronously here
-		// rather than round-tripping through a tea.Cmd just to look up what
-		// core.HasDiagnosed would immediately confirm is already there.
-		if entry, ok := m.core.CachedDiag(device); ok {
-			m.diag.result = entry.Result
-			m.diag.ranAt = entry.RanAt
-			m.diag.err = entry.Err
+		return m.navigate(screenDiagnostics, m.devices.cursor)
+
+	case actionSaveReport:
+		entry, ok := m.core.CachedDiag(device)
+		if !ok {
 			return m, nil
 		}
-		m.diag.loading = true
-		return m, cmdDiagProbeCached(m.ctx, m.core, device)
+		message := m.core.BeginnerDiagSummary(device, entry.Result)
+		return m, cmdSaveReport(ReportSaveAlways, m.settingsPath, "diag-probe", &device, "saved-on-request", message, &entry.Result, nil, nil)
 
 	case actionMapping:
-		m.screen = screenMapping
-		m.mapping = newMappingState()
-		m.mapping.device = device
-		m.mapping.loading = true
-		if device.Capability.SupportsJP108DedicatedMap {
-			m.mapping.kind = core.KindJP108
-			return m, cmdJP108ReadMapping(m.ctx, m.core, device.VidPid)
-		}
-		m.mapping.kind = core.KindUltimate2
-		return m, cmdU2ReadProfile(m.ctx, m.core, device.VidPid, core.U2Slot1)
+		return m.navigate(screenMapping, m.devices.cursor)
 
 	case actionFirmware:
 		startFirmware := firmwareBeginMsg{device: device}
@@ -424,27 +409,16 @@ func (m Model) triggerDevicesEnter() (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		return m.Update(probe)
-
 	}
 	return m, nil
 }
 
-func (m Model) viewDevices(height int) string {
-	list, detail := m.devicePanels(height)
-	if calculateLayout(m.width, m.height).mode == layoutCompact {
-		return list.render() + "\n" + detail.render()
-	}
-	return lipgloss.JoinHorizontal(lipgloss.Top, list.render(), " ", detail.render())
-}
-
-// devicePanel is one of the two Devices panels, laid out but not yet
-// rendered: its lines, and for each line which row (device or action) a
+// devicePanel is laid-out content: its lines, and for each line which row a
 // click on it means, or -1. Rendering and mouse hit-testing both read this,
 // so a click can never land on a different row than the one drawn there.
 type devicePanel struct {
-	area   rect // where the panel's first content line sits, in body coordinates
+	area   rect // where the panel's first content line sits
 	width  int
-	active bool
 	lines  []string
 	owners []int
 	// keep is the row that must stay on screen when the panel is too short
@@ -457,6 +431,10 @@ func (p *devicePanel) add(owner int, lines ...string) {
 		p.lines = append(p.lines, line)
 		p.owners = append(p.owners, owner)
 	}
+}
+
+func (p *devicePanel) addWrapped(owner int, style lipgloss.Style, text string, width int) {
+	p.add(owner, strings.Split(wrapStyled(style, text, width), "\n")...)
 }
 
 // window returns the slice of lines shown and the index of the first one.
@@ -488,15 +466,11 @@ func (p devicePanel) window() (lines []string, first int) {
 }
 
 func (p devicePanel) render() string {
-	style := stylePanel
-	if p.active {
-		style = stylePanelActive
-	}
 	lines, _ := p.window()
-	return renderBoundedPanelWithStyle(style, p.width, max(1, p.area.h), strings.Join(lines, "\n"))
+	return renderBoundedPanel(p.width, max(1, p.area.h), strings.Join(lines, "\n"))
 }
 
-// ownerAt maps a click at body coordinates to the row drawn there.
+// ownerAt maps a click to the row drawn there.
 func (p devicePanel) ownerAt(x, y int) (int, bool) {
 	if !p.area.contains(x, y) {
 		return 0, false
@@ -516,203 +490,129 @@ func (p devicePanel) ownerAt(x, y int) (int, bool) {
 	return 0, false
 }
 
-// devicePanels lays out the device list and the selected device's detail:
-// side by side when there is room, stacked (list on top, kept short) when
-// there is not. The same two panels in both layouts, so nothing a wide
-// terminal shows is missing from a narrow one.
-func (m Model) devicePanels(height int) (list, detail devicePanel) {
-	panelHeight := max(1, height-2)
-	if calculateLayout(m.width, m.height).mode == layoutCompact {
-		width := max(1, m.width-2)
-		// Title, the rows, and a blank line separating it from the detail.
-		listHeight := min(panelHeight-4, compactListRows(len(m.devices.filtered))+2)
-		if len(m.devices.filtered) == 0 {
-			listHeight = min(panelHeight-4, 5)
-		}
-		listHeight = max(1, listHeight)
-		list = m.deviceListPanel(width, listHeight)
-		list.area = rect{x: 0, y: 0, w: m.width, h: listHeight}
-		detailHeight := max(1, panelHeight-listHeight)
-		detail = m.deviceDetailPanel(width, detailHeight)
-		detail.area = rect{x: 0, y: listHeight, w: m.width, h: detailHeight}
-		return list, detail
-	}
-
-	listWidth := max(24, m.width*2/5)
-	detailWidth := m.width - listWidth - 5
-	list = m.deviceListPanel(listWidth, panelHeight)
-	list.area = rect{x: 0, y: 0, w: listWidth + 1, h: panelHeight}
-	detail = m.deviceDetailPanel(detailWidth, panelHeight)
-	detail.area = rect{x: listWidth + 2, y: 0, w: detailWidth + 1, h: panelHeight}
-	return list, detail
+// viewDevices is the Overview tab: the selected device's verdict, what can
+// be done with it now, and what cannot be done yet.
+func (m Model) viewDevices(height int) string {
+	return m.overviewPanel(height).render()
 }
 
-func (m Model) deviceListPanel(width, height int) devicePanel {
-	panel := devicePanel{width: width, active: m.devices.pane == paneDeviceList, keep: -1, area: rect{h: height}}
-	text := max(1, width-2)
+func (m Model) overviewPanel(height int) devicePanel {
+	panel := devicePanel{width: m.width - 2, keep: -1}
+	panel.area = rect{x: 0, y: calculateLayout(m.width, m.height).headerHeight, w: m.width, h: max(1, height-2)}
+	text := max(1, m.width-4)
 
-	title := stylePanelTitle.Render("Devices")
-	switch {
-	case m.devices.filtering:
-		title += "  " + styleAccent.Render("/"+m.devices.filterText+"▏")
-	case m.devices.filterText != "":
-		title += "  " + styleFaint.Render("/"+m.devices.filterText)
-	case m.devices.loading && m.devices.scanned:
-		title += "  " + styleFaint.Render("scanning…")
-	}
-	panel.add(-1, title)
-	if height > compactListRows(len(m.devices.filtered))+2 {
-		panel.add(-1, "") // room to breathe when the panel is tall
-	}
-
-	if len(m.devices.filtered) == 0 {
-		switch {
-		case !m.devices.scanned:
-			panel.add(-1, styleFaint.Render("Looking for devices…"))
-		case m.devices.filterText != "":
-			panel.add(-1, wrapStyled(styleFaint, fmt.Sprintf("No device matches %q. Press esc to clear the filter.", m.devices.filterText), text))
-		default:
-			panel.add(-1, styleBody.Render("No 8BitDo device found."))
-			panel.add(-1, strings.Split(wrapStyled(styleFaint,
-				"Plug one in over USB and it appears here by itself, or press r to look again. "+
-					"No hardware? Run openbitdo --mock to look around.", text), "\n")...)
-		}
-		return panel
-	}
-
-	start, end, _ := viewportWindow(len(m.devices.filtered), m.devices.cursor, m.devices.listOffset, m.deviceVisibleRows())
-	for i := start; i < end; i++ {
-		device := m.devices.filtered[i]
-		glyph, style, short, _ := healthText(m.core.Health(device))
-		// Scroll markers share the first and last visible rows' line rather
-		// than taking a row each, so a short list loses nothing to them.
-		marker := ""
-		if i == start && start > 0 {
-			marker = " ↑"
-		}
-		if i == end-1 && end < len(m.devices.filtered) {
-			marker = " ↓"
-		}
-		if m.core.Health(device).State == core.HealthResponding {
-			short = "" // the glyph says it; the row's room goes to the name
-		}
-		name := truncate(device.DisplayName, max(4, text-ansi.StringWidth(short)-6-len([]rune(marker))))
-		if i == m.devices.cursor {
-			// One Render call over plain text: a nested style's reset would
-			// cut the highlight short. The › keeps the row findable when
-			// colour is off.
-			panel.add(i, styleSelectedRow.Render(truncate("› "+glyph+" "+name+"  "+short+marker, text)))
-		} else {
-			panel.add(i, "  "+style.Render(glyph)+" "+styleBody.Render(name)+"  "+styleFaint.Render(short+marker))
-		}
-	}
-	return panel
-}
-
-func (m Model) deviceDetailPanel(width, height int) devicePanel {
-	panel := devicePanel{width: width, active: m.devices.pane == paneActions, keep: -1, area: rect{h: height}}
-	if panel.active {
-		panel.keep = m.devices.actionIdx
-	}
-	text := max(1, width-2)
 	device, ok := m.devices.selected()
 	if !ok {
-		if m.devices.scanned && len(m.devices.devices) == 0 {
-			panel.add(-1, strings.Split(wrapStyled(styleFaint,
-				"Once a device is connected, this panel shows what it answers and what you can do with it.", text), "\n")...)
+		switch {
+		case !m.devices.scanned:
+			panel.add(-1, styleBody.Render("Looking for devices…"))
+		case m.devices.filterText != "":
+			panel.addWrapped(-1, styleBody, fmt.Sprintf("No device matches %q.", m.devices.filterText), text)
+			panel.addWrapped(-1, styleFaint, "Press esc to clear the filter.", text)
+		default:
+			panel.add(-1, stylePanelTitle.Render("No 8BitDo device found"), "")
+			panel.addWrapped(-1, styleBody, "Plug one in over USB and it shows up here by itself.", text)
+			panel.add(-1, "")
+			panel.addWrapped(-1, styleFaint, "Already plugged in? Press r to look again.", text)
+			panel.addWrapped(-1, styleFaint, "No hardware? Run openbitdo --mock to look around.", text)
 		}
 		return panel
 	}
 
 	health := m.core.Health(device)
-	glyph, glyphStyle, _, long := healthText(health)
+	v := m.deviceVerdict(device)
 
-	panel.add(-1, stylePanelTitle.Render(truncate(device.DisplayName, text)))
-	identity := pidLabel(device.VidPid)
-	if catalog := protocol.DeviceProfileFor(device.VidPid).DisplayName; catalog != "" && !strings.EqualFold(catalog, device.DisplayName) {
-		identity = catalog + " · " + identity
-	}
-	panel.add(-1, styleFaint.Render(truncate(identity, text)), "")
+	// Name on the left, verdict on the right of the same line.
+	badge := v.glyph + " " + strings.ToUpper(v.word)
+	name := truncate(device.DisplayName, max(4, text-lipgloss.Width(badge)-2))
+	gap := strings.Repeat(" ", max(2, text-lipgloss.Width(name)-lipgloss.Width(badge)))
+	panel.add(-1, stylePanelTitle.Render(name)+gap+v.style.Render(badge))
+	panel.addWrapped(-1, styleBody, v.sentence, text)
 
-	statusLines := wrapText(glyph+" "+long, text)
-	for i, line := range statusLines {
-		if i == 0 {
-			// Colour the glyph only; the sentence stays body text.
-			line = glyphStyle.Render(glyph) + styleBody.Render(strings.TrimPrefix(line, glyph))
-		} else {
-			line = styleBody.Render(line)
-		}
-		panel.add(-1, line)
-	}
 	switch health.State {
 	case core.HealthNoPermission:
+		panel.add(-1, "")
 		for _, line := range permissionFixLines() {
-			panel.add(-1, strings.Split(wrapStyled(styleFaint, line, text), "\n")...)
+			panel.addWrapped(-1, styleFaint, line, text)
 		}
+	case core.HealthNoChannel:
+		panel.add(-1, "")
+		panel.addWrapped(-1, styleFaint, "If it has another connection (a wireless adapter, Bluetooth), try that one.", text)
 	case core.HealthError:
 		if health.Err != nil {
-			panel.add(-1, strings.Split(wrapStyled(styleFaint, health.Err.Error(), text), "\n")...)
+			panel.addWrapped(-1, styleFaint, health.Err.Error(), text)
 		}
 	}
 
-	panel.add(-1, "", stylePanelTitle.Render("Actions"))
-	for i, item := range m.actionsForSelectedDevice() {
-		selected := m.devices.pane == paneActions && i == m.devices.actionIdx
-		switch {
-		case selected:
-			panel.add(i, styleSelectedRow.Render(truncate("› "+item.label, text)))
-		case item.reason != "":
-			panel.add(i, "  "+styleFaint.Render(truncate(item.label, text-2)))
-		default:
-			panel.add(i, "  "+styleBody.Render(truncate(item.label, text-2)))
+	var can, notYet []actionItem
+	for _, item := range m.actionsFor(device) {
+		if item.reason == "" {
+			can = append(can, item)
+		} else {
+			notYet = append(notYet, item)
 		}
-		if item.reason != "" {
-			// The reason gets its own wrapped, indented lines under the row
-			// instead of being cut off at the panel edge beside it.
-			for _, line := range wrapText("not available: "+item.reason, max(1, text-4)) {
-				panel.add(i, "    "+styleFaint.Render(line))
+	}
+
+	// Labels share one column so the notes beside them line up. A note is
+	// only an aside: where the pane is too narrow for it, it is left out
+	// rather than squeezing the label.
+	labelWidth := 0
+	for _, item := range can {
+		labelWidth = max(labelWidth, lipgloss.Width(item.label))
+	}
+	labelWidth = min(labelWidth, max(8, text-2))
+	noteFits := func(note string) bool {
+		return note != "" && 2+labelWidth+3+lipgloss.Width(note) <= text
+	}
+
+	if len(can) > 0 {
+		panel.keep = m.devices.actionIdx
+		panel.add(-1, "", styleSection.Render("You can"))
+		for i, item := range can {
+			label := fmt.Sprintf("%-*s", labelWidth, truncate(item.label, labelWidth))
+			if i == m.devices.actionIdx {
+				// One Render call over plain text: a nested style's reset
+				// would cut the highlight short.
+				line := "› " + label
+				if noteFits(item.note) {
+					line += "   " + item.note
+				}
+				panel.add(i, styleSelectedRow.Render(line+" "))
+				continue
+			}
+			line := "  " + styleBody.Render(label)
+			if noteFits(item.note) {
+				line += "   " + styleFaint.Render(item.note)
+			}
+			panel.add(i, line)
+		}
+	}
+
+	if unreachableReason(health) != "" {
+		// Every action is out for the same reason, already given above.
+		// Listing each one again would only bury it.
+		if len(can) == 0 {
+			panel.add(-1, "")
+			panel.addWrapped(-1, styleFaint, "Until then there is nothing OpenBitdo can do with it.", text)
+		}
+		notYet = nil
+	}
+
+	if len(notYet) > 0 {
+		panel.add(-1, "", styleSection.Render("Not yet"))
+		for _, item := range notYet {
+			panel.add(-1, "  "+styleFaint.Render(truncate(item.label, text-2)))
+			for _, line := range wrapText(friendlyReason(item.reason), max(1, text-6)) {
+				panel.add(-1, "      "+styleFaint.Render(line))
 			}
 		}
 	}
 
-	panel.add(-1, "")
-	panel.add(-1, strings.Split(wrapStyled(styleFaint, "Next: "+m.nextStepFor(device, health), text), "\n")...)
-	if !m.core.FirmwareEnabled() {
-		// Said once, with the release's own label, instead of a disabled
-		// action row on every device.
-		note := "Firmware update: " + firmwareDisabledReason(device, false, true, m.writeLockUntilRestart) + ". Not available in this release."
-		panel.add(-1, strings.Split(wrapStyled(styleFaint, note, text), "\n")...)
-	}
 	if note := tierNote(device); note != "" && health.Reachable() {
 		panel.add(-1, "")
-		panel.add(-1, strings.Split(wrapStyled(styleFaint, note, text), "\n")...)
+		panel.addWrapped(-1, styleFaint, note, text)
 	}
 	return panel
-}
-
-// nextStepFor is the one thing worth doing next for device, in a sentence.
-func (m Model) nextStepFor(device core.AppDevice, health core.DeviceHealth) string {
-	switch health.State {
-	case core.HealthNoChannel:
-		return "nothing to do here. If this device has another connection mode (a wireless adapter, Bluetooth), try that."
-	case core.HealthNoPermission:
-		return "fix the permission as shown above, replug the device, then press r."
-	case core.HealthDisconnected:
-		return "reconnect the device and press r."
-	case core.HealthSilent:
-		return "open diagnostics and save the report; it shows exactly what was sent."
-	case core.HealthError:
-		return "press r to try again."
-	case core.HealthUnknown:
-		return "wait for the first check to finish."
-	}
-	if m.devices.pane == paneDeviceList {
-		return "press enter to choose an action."
-	}
-	if device.SupportTier != protocol.TierFull {
-		return "run diagnostics and save the report. That report is what moves this device toward full support."
-	}
-	return "run diagnostics to see which checks it answers."
 }
 
 // tierNote explains, for a device that is not fully supported, why most
@@ -720,7 +620,7 @@ func (m Model) nextStepFor(device core.AppDevice, health core.DeviceHealth) stri
 func tierNote(device core.AppDevice) string {
 	switch device.SupportTier {
 	case protocol.TierCandidateReadOnly:
-		return "This model is recognised but has not been confirmed on real hardware yet, so OpenBitdo only reads from it. " +
+		return "This model is recognised but hasn't been confirmed on real hardware yet, so OpenBitdo only reads from it. " +
 			"Some checks may fail for that reason alone; it is not a fault in the device."
 	case protocol.TierDetectOnly:
 		return "This model can be identified, but nothing is known yet about how to talk to it."

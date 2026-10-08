@@ -224,7 +224,6 @@ func TestActionDiagnose_CacheHitRendersInstantlyWithoutLoading(t *testing.T) {
 	if !ok {
 		t.Fatal("expected a selected device")
 	}
-	m.devices.pane = paneActions
 	m.devices.actionIdx = 0 // Diagnose
 
 	// First trigger: cache miss, must return a real probe command.
@@ -248,7 +247,6 @@ func TestActionDiagnose_CacheHitRendersInstantlyWithoutLoading(t *testing.T) {
 	// Re-enter Diagnose for the same device: must now be a cache hit --
 	// instant, no loading flash, nil cmd.
 	m.screen = screenDevices
-	m.devices.pane = paneActions
 	m.devices.actionIdx = 0
 	next, cmd = m.triggerDevicesEnter()
 	m = next.(Model)
@@ -268,7 +266,6 @@ func TestScreenDiagnostics_RerunKeyForcesFreshBypassingCache(t *testing.T) {
 	m, c := newTestModel(t, filepath.Join(t.TempDir(), "config.toml"))
 	m = loadDevices(t, m, c)
 	device, _ := m.devices.selected()
-	m.devices.pane = paneActions
 	m.devices.actionIdx = 0
 
 	next, cmd := m.triggerDevicesEnter()

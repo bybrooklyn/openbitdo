@@ -75,21 +75,15 @@ func TestManualRealHardwareDeviceListAndDiagnose(t *testing.T) {
 	t.Log("real device enumerated and rendered on the Devices screen")
 
 	// More than one 8BitDo device may be attached, and one that cannot be
-	// reached offers no diagnostics. Filter down to the controller.
+	// reached has no checks to run. Filter down to the controller.
 	for _, r := range "/ultimate" {
 		tm.Send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
 	}
 	tm.Send(tea.KeyMsg{Type: tea.KeyEnter}) // keep the filter
-	tm.Send(tea.KeyMsg{Type: tea.KeyRight}) // into actions pane, Run diagnostics(0)
-	teatest.WaitFor(t, tm.Output(), func(bts []byte) bool {
-		return bytes.Contains(bts, []byte("› Run diagnostics"))
-	}, teatest.WithCheckInterval(50*time.Millisecond), teatest.WithDuration(5*time.Second))
 
-	tm.Send(tea.KeyMsg{Type: tea.KeyEnter}) // run diagnostics
-	// "Last run:" (the staleness indicator) only renders once m.diag.ranAt
-	// is set, i.e. strictly after the real probe completes -- unlike
-	// "Diagnostics"/"passed"/"failed", which can appear in the header or
-	// mid-loading frame too early. Real command round-trips (3 retries
+	tm.Send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("2")}) // the Checks tab
+	// "Last run:" only renders once m.diag.ranAt is set, i.e. strictly
+	// after the real probe completes. Real command round-trips (3 retries
 	// each, per command) take real wall time -- generous timeout, this is
 	// the whole point of a manual/hardware-gated test not run in CI.
 	var diagFrame []byte
@@ -100,30 +94,22 @@ func TestManualRealHardwareDeviceListAndDiagnose(t *testing.T) {
 		}
 		return false
 	}, teatest.WithCheckInterval(200*time.Millisecond), teatest.WithDuration(60*time.Second))
-	t.Logf("Diagnostics screen rendered against real hardware:\n%s", diagFrame)
+	t.Logf("Checks tab rendered against real hardware:\n%s", diagFrame)
 
-	// Back to devices. The actions pane kept its focus, so this one frame
-	// already shows the selected action; a further key that changes nothing
-	// would produce no new frame to wait on.
-	tm.Send(tea.KeyMsg{Type: tea.KeyEsc})
-	teatest.WaitFor(t, tm.Output(), func(bts []byte) bool {
-		return bytes.Contains(bts, []byte("› Run diagnostics"))
-	}, teatest.WithCheckInterval(50*time.Millisecond), teatest.WithDuration(5*time.Second))
-	tm.Send(tea.KeyMsg{Type: tea.KeyDown}) // Run diagnostics(0) -> Mapping editor(1)
-	tm.Send(tea.KeyMsg{Type: tea.KeyEnter})
+	tm.Send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("3")}) // the Mapping tab
 
-	// Real Ultimate2 mapping is deliberately deferred for v0.0.3.
-	// Activating the disabled row must stay on the dashboard and explain the
-	// hardware-evidence gap; it must not open a session or attempt any write.
+	// Real Ultimate2 mapping is deliberately deferred for v0.0.3. The tab
+	// must explain the hardware-evidence gap; it must not open a session or
+	// attempt any read or write.
 	var mapFrame []byte
 	teatest.WaitFor(t, tm.Output(), func(bts []byte) bool {
-		if bytes.Contains(bts, []byte("Mapping editor is not available: button-map framing")) {
+		if bytes.Contains(bts, []byte("button-map framing not hardware-confirmed")) {
 			mapFrame = bts
 			return true
 		}
 		return false
 	}, teatest.WithCheckInterval(50*time.Millisecond), teatest.WithDuration(5*time.Second))
-	t.Logf("Deferred real-mapping reason rendered without leaving the dashboard:\n%s", mapFrame)
+	t.Logf("Deferred real-mapping reason rendered on the Mapping tab:\n%s", mapFrame)
 }
 
 func TestManualUltimate2ReleaseGateDiagnostics(t *testing.T) {

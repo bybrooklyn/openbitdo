@@ -83,38 +83,42 @@ func TestFilterTitleRendersWithoutLeakedEscapes(t *testing.T) {
 	}
 }
 
-// At 80x24 the compact layout used to show one device and tell the user to
-// "choose a controller" from a list that was not on screen.
-func TestCompactLayoutKeepsTheDeviceList(t *testing.T) {
-	for _, size := range [][2]int{{60, 18}, {80, 24}} {
+// The device list used to disappear at 80x24. It is part of the frame now,
+// at every size.
+func TestDeviceListIsAlwaysOnScreen(t *testing.T) {
+	for _, size := range [][2]int{{60, 18}, {80, 24}, {120, 40}} {
 		m, _ := loadedModel(t, size[0], size[1])
-		plain := ansi.Strip(m.View())
-		for _, name := range []string{"Retro 108 Mechanical Keyboard", "Ultimate 2 Wireless Controller", "Xcloud"} {
-			if !strings.Contains(plain, name) {
-				t.Fatalf("%dx%d: expected %q in the device list:\n%s", size[0], size[1], name, plain)
+		for _, target := range []screen{screenDevices, screenDiagnostics, screenMapping, screenSettings} {
+			m, _ = m.navigate(target, 0)
+			plain := ansi.Strip(m.View())
+			for _, name := range []string{"Retro 108", "Ultimate 2", "Xcloud"} {
+				if !strings.Contains(plain, name) {
+					t.Fatalf("%dx%d screen %v: expected %q in the device list:\n%s", size[0], size[1], target, name, plain)
+				}
 			}
 		}
-		if !strings.Contains(plain, "Actions") {
-			t.Fatalf("%dx%d: expected the selected device's actions too:\n%s", size[0], size[1], plain)
-		}
 	}
 }
 
-// Without colour, the selected device row was indistinguishable.
-func TestSelectedRowsCarryAMarkerNotJustColour(t *testing.T) {
+// The selected device and the pane's cursor are marked with glyphs, not
+// only colour, and with different ones so they are not mistaken.
+func TestSelectionsCarryMarkersNotJustColour(t *testing.T) {
 	m, _ := loadedModel(t, 100, 30)
-	m.devices.cursor = 1
-	if plain := ansi.Strip(m.View()); !strings.Contains(plain, "› ● Ultimate 2 Wireless Controller") {
-		t.Fatalf("expected a › marker on the selected device row:\n%s", plain)
+	m, _ = m.navigate(screenDevices, 1)
+	plain := ansi.Strip(m.View())
+	if !strings.Contains(plain, "┃ Ultimate 2 Wireless") {
+		t.Fatalf("expected a bar beside the selected device:\n%s", plain)
+	}
+	if !strings.Contains(plain, "› Check the connection") {
+		t.Fatalf("expected a cursor on the selected action:\n%s", plain)
 	}
 }
 
-// A reload used to keep the cursor's index, so the selection (and an open
-// actions pane) could jump to whichever device now sat at that index.
+// A reload used to keep the cursor's index, so the selection could jump to
+// whichever device now sat at that index.
 func TestReloadKeepsTheSameDeviceSelected(t *testing.T) {
 	m, _ := loadedModel(t, 100, 30)
-	m.devices.cursor = 2
-	m.devices.pane = paneActions
+	m, _ = m.navigate(screenDiagnostics, 2)
 	selected, _ := m.devices.selected()
 
 	reordered := []core.AppDevice{m.devices.devices[2], m.devices.devices[0], m.devices.devices[1]}
@@ -123,12 +127,15 @@ func TestReloadKeepsTheSameDeviceSelected(t *testing.T) {
 	if got, _ := m.devices.selected(); !sameDevice(got, selected) {
 		t.Fatalf("selection moved from %s to %s", selected.DisplayName, got.DisplayName)
 	}
+	if m.screen != screenDiagnostics {
+		t.Fatal("a reload that keeps the device must keep its tab")
+	}
 
-	// When the selected device is gone, its actions pane goes with it.
+	// When the selected device is gone, the tab showing its checks goes too.
 	next, _ = m.Update(devicesLoadedMsg{devices: []core.AppDevice{m.devices.devices[0]}})
 	m = next.(Model)
-	if m.devices.pane != paneDeviceList {
-		t.Fatal("the actions pane must not stay open on a device that was unplugged")
+	if m.screen != screenDevices {
+		t.Fatal("a tab must not stay open on a device that was unplugged")
 	}
 }
 
@@ -175,22 +182,28 @@ func TestUnreachableDeviceIsShownAsSuchAndOffersNothing(t *testing.T) {
 	}
 
 	plain := ansi.Strip(m.View())
-	for _, want := range []string{"unreachable", "does not expose the interface", "connection mode"} {
+	for _, want := range []string{"CAN'T CONNECT", "not in a mode OpenBitdo can talk to", "another connection", "nothing OpenBitdo can do"} {
 		if !strings.Contains(plain, want) {
 			t.Fatalf("expected %q:\n%s", want, plain)
 		}
 	}
-	for _, item := range m.actionsForSelectedDevice() {
-		if item.reason == "" {
-			t.Fatalf("action %q is offered for a device that cannot be reached", item.label)
-		}
+	if got := m.availableActions(); len(got) != 0 {
+		t.Fatalf("actions offered for a device that cannot be reached: %+v", got)
+	}
+	// Its Checks tab explains instead of trying, and sends nothing.
+	next2, cmd2 := m.navigate(screenDiagnostics, 0)
+	if cmd2 != nil || next2.diag.loading {
+		t.Fatal("opening Checks for an unreachable device must not start a probe")
+	}
+	if plain := ansi.Strip(next2.View()); !strings.Contains(plain, "can't talk to this device") {
+		t.Fatalf("expected the Checks tab to say why:\n%s", plain)
 	}
 }
 
 func TestDiagnosticsExplainsWhyItCouldNotRun(t *testing.T) {
 	cases := map[core.ErrorKind][]string{
 		core.KindPermissionDenied:   {"not allowed to open", "70-openbitdo.rules", "udevadm"},
-		core.KindNoConfigChannel:    {"no configuration interface"},
+		core.KindNoConfigChannel:    {"can't talk to this device"},
 		core.KindDeviceDisconnected: {"disconnected", "press r"},
 	}
 	for kind, wants := range cases {
@@ -206,7 +219,7 @@ func TestDiagnosticsExplainsWhyItCouldNotRun(t *testing.T) {
 				t.Fatalf("%s: expected %q:\n%s", kind, want, plain)
 			}
 		}
-		if footer := ansi.Strip(m.viewFooter()); !strings.Contains(footer, "r retry") || strings.Contains(footer, "details") {
+		if footer := ansi.Strip(m.viewFooter()); !strings.Contains(footer, "r try again") || strings.Contains(footer, "details") {
 			t.Fatalf("%s: the footer should offer retry and nothing that needs results: %q", kind, footer)
 		}
 	}
@@ -244,7 +257,7 @@ func TestHelpListsEveryKeyOfTheCurrentView(t *testing.T) {
 	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("?")})
 	m = next.(Model)
 	plain := ansi.Strip(m.View())
-	for _, want := range []string{"Keys: Devices", "look for devices again", "filter the device list", "answering diagnostics", "[ Close ]"} {
+	for _, want := range []string{"Keys: Overview", "look for devices again", "next section", "working: settings can be changed", "[ Close ]"} {
 		if !strings.Contains(plain, want) {
 			t.Fatalf("expected %q in help:\n%s", want, plain)
 		}
@@ -347,20 +360,96 @@ func TestSlotPreviewStartsAtTheNextSlotAndCycles(t *testing.T) {
 	}
 }
 
-func TestNothingIsCutMidWordInTheDetailPanel(t *testing.T) {
+func TestLongTextWrapsInsteadOfBeingCut(t *testing.T) {
 	m, _ := loadedModel(t, 100, 30)
-	m.devices.cursor = 2 // the candidate device has the longest text
-	for _, line := range strings.Split(ansi.Strip(m.View()), "\n") {
-		if strings.Contains(line, "Blocked until runtime and hardware confirmat") && !strings.Contains(line, "confirmation") {
-			t.Fatalf("line cut mid-word: %q", line)
-		}
-	}
+	m, _ = m.navigate(screenDevices, 2) // the candidate device has the longest text
 	plain := ansi.Strip(m.View())
-	// The reason and the tier note each wrap onto further lines in full.
-	for _, want := range []string{"not available: this model is not confirmed for", "not a fault in the device."} {
+	// The tier note runs over several lines and ends intact.
+	for _, want := range []string{"This model is recognised", "it is not a fault in the device."} {
 		if !strings.Contains(plain, want) {
 			t.Fatalf("expected %q to be readable in full:\n%s", want, plain)
 		}
+	}
+}
+
+// One cursor, always in the pane: device and section are switched by their
+// own keys from any tab, and esc is never needed to "get out" of a region.
+func TestGettingAroundNeedsNoFocusSwitching(t *testing.T) {
+	m, _ := loadedModel(t, 100, 30)
+	press := func(keys ...string) {
+		t.Helper()
+		for _, key := range keys {
+			next, cmd := m.Update(*keyMsg(key))
+			m = drainCmds(t, next.(Model), cmd)
+		}
+	}
+
+	press("tab")
+	if m.screen != screenDiagnostics {
+		t.Fatalf("tab should move to Checks, got %v", m.screen)
+	}
+	first := m.diag.device
+	press("d")
+	if m.screen != screenDiagnostics || sameDevice(m.diag.device, first) {
+		t.Fatal("d should show the next device's checks without leaving the tab")
+	}
+	press("3")
+	if m.screen != screenMapping {
+		t.Fatalf("3 should jump to Mapping, got %v", m.screen)
+	}
+	press("tab")
+	if m.screen != screenDevices {
+		t.Fatalf("tab should wrap round to Overview, got %v", m.screen)
+	}
+	press("2", "s")
+	if m.screen != screenSettings {
+		t.Fatalf("s should open settings, got %v", m.screen)
+	}
+	press("esc")
+	if m.screen != screenDiagnostics {
+		t.Fatalf("leaving settings should return to the tab it was opened from, got %v", m.screen)
+	}
+	press("esc")
+	if m.screen != screenDevices {
+		t.Fatalf("esc on a tab should go back to Overview, got %v", m.screen)
+	}
+}
+
+// Leaving the mapping editor with unapplied changes asks first, whichever
+// way the user is leaving, and then carries on to where they were going.
+func TestLeavingADirtyMappingDraftAsksThenContinues(t *testing.T) {
+	m, _ := loadedModel(t, 100, 30)
+	next, cmd := m.navigate(screenMapping, 0)
+	m = drainCmds(t, next, cmd)
+	nextModel, _ := m.Update(*keyMsg("right")) // change the first key's target
+	m = nextModel.(Model)
+	if !m.mapping.dirty() {
+		t.Fatal("expected a changed target to make the draft dirty")
+	}
+
+	nextModel, _ = m.Update(*keyMsg("d")) // off to the next device
+	m = nextModel.(Model)
+	if !m.modal.active || m.screen != screenMapping || m.devices.cursor != 0 {
+		t.Fatal("expected a confirmation before the draft is dropped")
+	}
+	nextModel, cmd = m.Update(*keyMsg("enter")) // Discard is the default button here
+	m = drainCmds(t, nextModel.(Model), cmd)
+	if m.devices.cursor != 1 || m.screen != screenMapping || m.mapping.dirty() {
+		t.Fatalf("expected to arrive at the next device's Mapping tab, got device %d screen %v", m.devices.cursor, m.screen)
+	}
+}
+
+func TestVerdictSeparatesWorkingFromLimited(t *testing.T) {
+	responding := core.DeviceHealth{State: core.HealthResponding, Answered: 5, Total: 12}
+	if got := verdictFor(responding, true).word; got != "Working" {
+		t.Fatalf("a device whose settings can be changed is Working, got %q", got)
+	}
+	// Answering some checks is not the same as being usable.
+	if got := verdictFor(responding, false).word; got != "Limited" {
+		t.Fatalf("a device that can only be read is Limited, got %q", got)
+	}
+	if got := verdictFor(core.DeviceHealth{State: core.HealthNoChannel}, false).word; got != "Can't connect" {
+		t.Fatalf("unexpected verdict for an unreachable device: %q", got)
 	}
 }
 

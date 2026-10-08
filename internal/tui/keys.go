@@ -39,6 +39,13 @@ func (m Model) viewHints() []keyHint {
 	}
 	moveHint := keyHint{key: move, label: "move", help: "move the selection (j/k too)"}
 
+	// Keys that work on every tab, listed after the tab's own.
+	shell := []keyHint{{key: "tab", label: "section", help: "next section (also ← →, or 1, 2, 3 to jump)"}}
+	if len(m.devices.filtered) > 1 {
+		shell = append(shell, keyHint{key: "d", label: "next device", help: "next device (D for the previous one)"})
+	}
+	shell = append(shell, keyHint{key: "s", label: "settings"})
+
 	switch m.screen {
 	case screenDevices:
 		if m.devices.filtering {
@@ -48,22 +55,16 @@ func (m Model) viewHints() []keyHint {
 				{key: "esc", label: "clear filter"},
 			}
 		}
-		if m.devices.pane == paneActions {
-			return []keyHint{
-				moveHint,
-				{key: choose, label: "run", help: "run the selected action"},
-				{key: back, label: "devices", help: "back to the device list (← too)"},
-				{key: "r", label: "rescan", help: "look for devices again"},
-				{key: "s", label: "settings"},
-			}
+		hints := []keyHint{}
+		if len(m.availableActions()) > 0 {
+			hints = append(hints,
+				keyHint{key: move, label: "choose", help: "move through the You can list (j/k too)"},
+				keyHint{key: choose, label: "do it", help: "do the selected thing"})
 		}
-		return []keyHint{
-			moveHint,
-			{key: choose, label: "actions", help: "open its actions (→ or tab too)"},
-			{key: "r", label: "rescan", help: "look for devices again"},
-			{key: "/", label: "filter", help: "filter the device list by name"},
-			{key: "s", label: "settings"},
-		}
+		hints = append(hints, shell...)
+		return append(hints,
+			keyHint{key: "r", label: "rescan", help: "look for devices again"},
+			keyHint{key: "/", label: "filter", help: "filter the device list by name"})
 
 	case screenDiagnostics:
 		if m.diag.showSupportRequest {
@@ -75,21 +76,20 @@ func (m Model) viewHints() []keyHint {
 			}
 		}
 		if m.diag.loading || m.diag.err != nil {
-			return []keyHint{
-				{key: "r", label: "retry", help: "run diagnostics again"},
-				{key: back, label: "back", help: "back to the device list"},
-			}
+			return append([]keyHint{{key: "r", label: "try again", help: "run the checks again"}}, shell...)
 		}
-		return []keyHint{
-			moveHint,
-			{key: "r", label: "rerun", help: "run diagnostics again"},
-			{key: "d", label: "details", help: "raw details of the selected check"},
-			{key: "f", label: "issues only", help: "show only the checks that did not pass"},
+		return append([]keyHint{
+			{key: move, label: "move", help: "move through the checks (j/k too)"},
+			{key: choose, label: "details", help: "show or hide the raw details of the selected check"},
+			{key: "r", label: "rerun", help: "run the checks again"},
 			{key: "v", label: "report", help: "view the full report, to copy or save"},
-			{key: back, label: "back", help: "back to the device list"},
-		}
+			{key: "f", label: "issues only", help: "show only the checks that got no answer"},
+		}, shell...)
 
 	case screenMapping:
+		if m.mapping.unavailable != "" || m.mapping.loading || m.mapping.err != nil {
+			return shell
+		}
 		if m.mapping.previewing() {
 			return []keyHint{
 				{key: "p", label: "next slot", help: "preview the next slot"},
@@ -98,14 +98,14 @@ func (m Model) viewHints() []keyHint {
 			}
 		}
 		hints := []keyHint{
-			moveHint,
+			{key: move, label: "move", help: "move through the rows (j/k too)"},
 			{key: "←→", label: "change", help: "change the selected row's target"},
 			{key: choose, label: "run row", help: "run Apply, Undo or Reset"},
 		}
 		if m.mapping.kind == core.KindUltimate2 {
 			hints = append(hints, keyHint{key: "p", label: "preview slot", help: "look at another slot"})
 		}
-		return append(hints, keyHint{key: back, label: "back", help: "back to the device list"})
+		return append(hints, shell...)
 
 	case screenFirmware:
 		switch m.fw.stage {
@@ -122,7 +122,7 @@ func (m Model) viewHints() []keyHint {
 			moveHint,
 			{key: choose, label: "change", help: "change the selected setting"},
 			{key: "pg↑↓", label: "scroll", help: "scroll the information below"},
-			{key: back, label: "back", help: "back to the device list"},
+			{key: back, label: "back", help: "back to where you were"},
 		}
 
 	case screenRecovery:
@@ -178,14 +178,14 @@ func (m Model) footerHints(width int) string {
 func (m Model) screenTitle() string {
 	switch m.screen {
 	case screenDevices:
-		return "Devices"
+		return "Overview"
 	case screenDiagnostics:
 		if m.diag.showSupportRequest {
-			return "Diagnostics report"
+			return "Report"
 		}
-		return "Diagnostics"
+		return "Checks"
 	case screenMapping:
-		return "Mapping editor"
+		return "Mapping"
 	case screenFirmware:
 		return "Firmware"
 	case screenSettings:
@@ -211,8 +211,8 @@ func (m Model) helpLines() []string {
 	}
 	if m.screen == screenDevices {
 		lines = append(lines, "",
-			styleBadgeFull.Render(IconTierFull)+"  answering diagnostics",
-			styleBadgeCandidate.Render(IconTierCandidate)+"  not checked yet, or checking now",
+			styleBadgeFull.Render(IconTierFull)+"  working: settings can be changed",
+			styleBadgeCandidate.Render(IconTierCandidate)+"  limited (read only), or still checking",
 			styleBadgeDetect.Render(IconTierDetect)+"  connected, but OpenBitdo can't talk to it",
 		)
 	}

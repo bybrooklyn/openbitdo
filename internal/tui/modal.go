@@ -34,10 +34,15 @@ const (
 	discardActionBack discardAction = iota
 	discardActionQuit
 	discardActionLoadSlot
+	// discardActionNavigate carries on to wherever the user was heading
+	// when the unapplied draft stopped them.
+	discardActionNavigate
 )
 
 type discardMappingMsg struct {
-	action discardAction
+	action    discardAction
+	screen    screen // for discardActionNavigate
+	deviceIdx int
 }
 
 func newModal(title string, body []string, danger bool, confirmLabel string, onConfirm tea.Msg) modal {
@@ -74,7 +79,7 @@ var (
 	}
 )
 
-func discardMappingModal(action discardAction) modal {
+func discardMappingModal(onDiscard discardMappingMsg) modal {
 	return newModal(
 		"Discard mapping draft?",
 		[]string{
@@ -82,7 +87,7 @@ func discardMappingModal(action discardAction) modal {
 			"",
 			"Discarding leaves the connected device unchanged.",
 		},
-		false, "Discard", discardMappingMsg{action: action},
+		false, "Discard", onDiscard,
 	)
 }
 

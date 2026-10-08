@@ -85,74 +85,70 @@ func waitForAllOutputs(t *testing.T, tm *teatest.TestModel, substrs ...string) {
 	}, teatest.WithCheckInterval(10*time.Millisecond), teatest.WithDuration(5*time.Second))
 }
 
-// TestTeatest_DashboardRendersAndKeyboardNavMoves: the app starts, renders
-// the device dashboard, and keyboard Down actually moves the device-list
-// selection — landing on the candidate-readonly device surfaces its
-// plain-language tier explanation (the GitHub issue #15 fix), which can
-// only render once that device is actually selected.
-func TestTeatest_DashboardRendersAndKeyboardNavMoves(t *testing.T) {
-	tm, _, _ := newTeatestModel(t, filepath.Join(t.TempDir(), "config.toml"), 100, 30)
-	waitForOutput(t, tm, "Retro 108 Mechanical Keyboard") // initial frame: header, device list, and detail panel together
+func pressRune(tm *teatest.TestModel, r rune) {
+	tm.Send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+}
 
-	tm.Send(tea.KeyMsg{Type: tea.KeyDown})
-	tm.Send(tea.KeyMsg{Type: tea.KeyDown})
+// TestTeatest_OverviewRendersAndDeviceKeyMoves: the app starts on the first
+// device's Overview, and d moves down the device list — landing on the
+// candidate-readonly device surfaces its plain-language explanation (the
+// GitHub issue #15 fix), which only renders once that device is selected.
+func TestTeatest_OverviewRendersAndDeviceKeyMoves(t *testing.T) {
+	tm, _, _ := newTeatestModel(t, filepath.Join(t.TempDir(), "config.toml"), 100, 30)
+	waitForAllOutputs(t, tm, "DEVICES", "Retro 108 Mechanical", "You can")
+
+	pressRune(tm, 'd')
+	pressRune(tm, 'd')
 	waitForOutput(t, tm, "This model is recognised")
 }
 
-// TestTeatest_GamepadNavDrivesSameNavigationAsKeyboard: a simulated gamepad
-// d-pad event, fed through the same channel internal/input would use,
-// drives identical navigation to a keyboard arrow key. "› Diagnose" (the
-// literal focus marker viewDeviceDetail only renders once the actions pane
-// actually has focus) can't appear from the initial device-list-focused
-// frame, so its appearance is real proof the DPad-right event moved focus.
+// TestTeatest_GamepadNavDrivesSameNavigationAsKeyboard: simulated gamepad
+// events, fed through the same channel internal/input would use, reach the
+// same navigation a keyboard does. Button 3 steps through devices and the
+// d-pad steps through sections, so a controller alone can get everywhere.
 func TestTeatest_GamepadNavDrivesSameNavigationAsKeyboard(t *testing.T) {
 	tm, navCh, _ := newTeatestModel(t, filepath.Join(t.TempDir(), "config.toml"), 100, 30)
-	waitForOutput(t, tm, "Retro 108 Mechanical Keyboard")
+	waitForOutput(t, tm, "Retro 108 Mechanical")
 
-	navCh <- input.NavEvent{Kind: input.EventDPadChanged, DPad: input.DirDown}
-	navCh <- input.NavEvent{Kind: input.EventDPadChanged, DPad: input.DirDown}
+	navCh <- input.NavEvent{Kind: input.EventButtonDown, Button: 3}
+	navCh <- input.NavEvent{Kind: input.EventButtonDown, Button: 3}
 	waitForOutput(t, tm, "This model is recognised")
 
 	navCh <- input.NavEvent{Kind: input.EventDPadChanged, DPad: input.DirRight}
-	waitForOutput(t, tm, "› Run diagnostics")
+	waitForOutput(t, tm, "All checks") // only the Checks tab renders this
 }
 
 // TestTeatest_MappingEditorPresetCycling: preset cycling in the mapping
 // editor actually changes the rendered target value, using the real ported
-// preset data (not the placeholder list stage 2 originally had). The
-// assertion checks the exact selected-row line ("...  (←/→ to change)" is
-// only ever appended to the currently-selected row), not a bare hex value —
-// button B's mock-initial target is already 0x0005, so a bare-substring
-// check would spuriously pass without cycling ever happening.
+// preset data. The assertion checks the exact selected-row line ("...
+// (←/→ to change)" is only ever appended to the currently-selected row),
+// not a bare value — button B's mock-initial target is already 0x0005, so a
+// bare-substring check would spuriously pass without cycling ever happening.
 func TestTeatest_MappingEditorPresetCycling(t *testing.T) {
 	tm, _, _ := newTeatestModel(t, filepath.Join(t.TempDir(), "config.toml"), 100, 30)
-	waitForOutput(t, tm, "Retro 108 Mechanical Keyboard")
+	waitForOutput(t, tm, "Retro 108 Mechanical")
 
-	tm.Send(tea.KeyMsg{Type: tea.KeyRight}) // JP108 (full support) selected by default; into actions pane
-	waitForOutput(t, tm, "› Run diagnostics")
-	tm.Send(tea.KeyMsg{Type: tea.KeyDown}) // Diagnose(0) -> Mapping Editor(1)
-	tm.Send(tea.KeyMsg{Type: tea.KeyEnter})
-	waitForOutput(t, tm, "A (0x0004)  (←/→ to change)") // button A's mock-initial target, row 0 selected by default
+	pressRune(tm, '3')                                  // the Mapping tab, for the JP108 selected by default
+	waitForOutput(t, tm, "A (0x0004)  (←/→ to change)") // button A's mock-initial target, row 0 selected
 
 	tm.Send(tea.KeyMsg{Type: tea.KeyRight})
 	waitForOutput(t, tm, "B (0x0005)  (←/→ to change)")
 }
 
 // TestTeatest_FirmwareIsNotOfferedIn010: firmware cannot run in v0.0.3, so
-// it is not an action a user can walk onto. The device panel says so once,
-// and the action list ends at the mapping editor: moving down from it goes
-// nowhere, and no risk acknowledgement can be reached.
+// it is listed under "Not yet" with the release's label and is not something
+// the cursor can reach: walking down the "You can" list ends on the last
+// available action, and enter runs that one.
 func TestTeatest_FirmwareIsNotOfferedIn010(t *testing.T) {
 	tm, _, _ := newTeatestModel(t, filepath.Join(t.TempDir(), "config.toml"), 100, 30)
-	waitForAllOutputs(t, tm, "Retro 108 Mechanical Keyboard", "Firmware update: Deferred in 0.0.3.")
+	waitForAllOutputs(t, tm, "Not yet", "Update firmware", "Deferred in 0.0.3")
 
-	tm.Send(tea.KeyMsg{Type: tea.KeyRight}) // into actions pane at Run diagnostics(0)
-	waitForOutput(t, tm, "› Run diagnostics")
-	tm.Send(tea.KeyMsg{Type: tea.KeyDown}) // -> Mapping editor(1), the last row
-	waitForOutput(t, tm, "› Mapping editor")
-	tm.Send(tea.KeyMsg{Type: tea.KeyDown}) // nothing below it
+	for range 6 { // more presses than there are actions
+		tm.Send(tea.KeyMsg{Type: tea.KeyDown})
+	}
+	waitForOutput(t, tm, "› Remap keys")
 	tm.Send(tea.KeyMsg{Type: tea.KeyEnter})
-	waitForOutput(t, tm, "Key mapping:") // enter opened the mapping editor, not firmware
+	waitForOutput(t, tm, "Key mapping") // the mapping editor, not a firmware dialog
 }
 
 // TestTeatest_SettingsTogglePersistsAcrossReload: toggling a setting writes

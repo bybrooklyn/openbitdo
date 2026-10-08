@@ -22,8 +22,7 @@ func (m Model) updateSettings(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "esc":
-			m.screen = screenDevices
-			return m, nil
+			return m.leaveSettings(), nil
 		case "up", "k":
 			if m.settingsCursor > 0 {
 				m.settingsCursor--
@@ -65,13 +64,23 @@ func (m Model) triggerSettingsRow() (tea.Model, tea.Cmd) {
 		}
 		return m, cmdSaveSettings(m.settingsPath, m.settings)
 	case 2:
-		m.screen = screenDevices
+		return m.leaveSettings(), nil
 	}
 	return m, nil
 }
 
-// settingsFirstRow is the panel line the first setting row is drawn on.
-const settingsFirstRow = 2
+// leaveSettings goes back to the tab Settings was opened from.
+func (m Model) leaveSettings() Model {
+	m.screen = screenDevices
+	if isTab(m.prevScreen) {
+		m.screen = m.prevScreen
+	}
+	return m
+}
+
+// settingsFirstRow is the panel line the first setting row is drawn on. The
+// page's title is drawn by the shell, above the pane.
+const settingsFirstRow = 0
 
 type settingRow struct {
 	label, value, about string
@@ -96,13 +105,13 @@ func (m Model) settingRows() []settingRow {
 			label: "Save reports", value: reports,
 			about: "When a report file is written by itself. To save one by hand: diagnostics, v, w.",
 		},
-		{label: "Back", about: "Return to the device list."},
+		{label: "Back", about: "Return to where you were."},
 	}
 }
 
 func (m Model) viewSettings(height int) string {
 	text := max(1, m.width-4)
-	lines := []string{stylePanelTitle.Render("Settings"), ""}
+	var lines []string
 
 	rows := m.settingRows()
 	for i, row := range rows {
@@ -129,7 +138,7 @@ func (m Model) viewSettings(height int) string {
 	start, end, more := viewportWindow(len(info), m.settingsInfoOffset, m.settingsInfoOffset, visible)
 	lines = append(lines, info[start:end]...)
 	if more != "" {
-		lines = append(lines, styleFaint.Render(fmt.Sprintf("lines %d-%d of %d · pgup/pgdn to scroll", start+1, end, len(info))))
+		lines = append(lines, styleFaint.Render(fmt.Sprintf("%d-%d of %d · pgup/pgdn to scroll", start+1, end, len(info))))
 	}
 
 	return renderBoundedPanel(m.width-2, height-2, strings.Join(lines, "\n"))
@@ -223,9 +232,9 @@ func (m Model) friendlyNavNote(note string) string {
 }
 
 func (m Model) settingsInfoVisibleRows() int {
-	// View reserves two outer panel rows. The title, its blank line, the
-	// setting rows, the explanation and a blank line sit above the info
-	// block; one more row is kept for the scroll indicator.
+	// View reserves two outer panel rows. The setting rows, the explanation
+	// and a blank line sit above the info block; one more row is kept for
+	// the scroll indicator.
 	panelHeight := max(1, m.height-calculateLayout(m.width, m.height).headerHeight-
 		calculateLayout(m.width, m.height).footerHeight-2)
 	available := max(1, panelHeight-(settingsFirstRow+settingsRowCount+2))

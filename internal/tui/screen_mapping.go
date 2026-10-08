@@ -6,6 +6,7 @@ import (
 
 	"github.com/bybrooklyn/openbitdo/internal/core"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 )
 
 // jp108Presets is the exact remap-target cycle from the prior Rust editor
@@ -137,6 +138,10 @@ type mappingState struct {
 	rowOffset int
 	applying  bool
 	statusMsg string
+
+	// unavailable is why this device has no mapping editor right now. When
+	// set, the tab explains that instead of loading anything.
+	unavailable string
 }
 
 func newMappingState() mappingState { return mappingState{} }
@@ -255,6 +260,12 @@ func (m Model) updateMapping(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyMsg:
+		if m.mapping.unavailable != "" {
+			if msg.String() == "esc" {
+				m.screen = screenDevices
+			}
+			return m, nil
+		}
 		if m.mapping.previewing() {
 			switch msg.String() {
 			case "esc":
@@ -265,7 +276,7 @@ func (m Model) updateMapping(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m.previewNextU2Slot()
 			case "enter":
 				if m.mapping.dirty() {
-					m.modal = discardMappingModal(discardActionLoadSlot)
+					m.modal = discardMappingModal(discardMappingMsg{action: discardActionLoadSlot})
 					return m, nil
 				}
 				return m.loadPreviewedSlotIntoDraft()
@@ -275,7 +286,7 @@ func (m Model) updateMapping(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch msg.String() {
 		case "esc":
 			if m.mapping.dirty() {
-				m.modal = discardMappingModal(discardActionBack)
+				m.modal = discardMappingModal(discardMappingMsg{action: discardActionBack})
 				return m, nil
 			}
 			m.screen = screenDevices
@@ -512,6 +523,17 @@ func (m Model) handleMappingApplyResult(report core.WriteRecoveryReport, err err
 	return m, cmdSaveReport(m.settings.ReportSaveMode, m.settingsPath, "mapping-apply", &device, status, message, nil, nil, nil)
 }
 
+// mappingUnavailableAdvice says what, if anything, would change the answer.
+func mappingUnavailableAdvice(reason string) string {
+	switch reason {
+	case "button-map framing not hardware-confirmed":
+		return "OpenBitdo knows what a button map looks like for this controller, but not yet how the controller expects it to be sent. Writing a guess could scramble the controller's settings, so the editor stays off until that is confirmed on real hardware. You can explore the editor with openbitdo --mock."
+	case "Write locked until restart":
+		return "An earlier write failed, so all writes are off until you restart OpenBitdo."
+	}
+	return "Nothing was read from or written to the device. The Overview tab lists what you can do with it today."
+}
+
 func (m Model) viewMapping(height int) string {
 	var b strings.Builder
 	text := max(1, m.width-4)
@@ -519,8 +541,16 @@ func (m Model) viewMapping(height int) string {
 	if m.mapping.kind == core.KindUltimate2 {
 		kindLabel = "Button mapping preview (mock only)"
 	}
-	b.WriteString(stylePanelTitle.Render(truncate(kindLabel+": "+m.mapping.device.DisplayName, text)) + "\n\n")
+	// The sidebar names the device; the title only has to name the editor.
+	b.WriteString(stylePanelTitle.Render(truncate(kindLabel, text)) + "\n\n")
 
+	if m.mapping.unavailable != "" {
+		var u strings.Builder
+		u.WriteString(stylePanelTitle.Render(truncate("Remapping isn't available yet", text)) + "\n\n")
+		u.WriteString(wrapStyled(styleBody, "Why: "+m.mapping.unavailable+".", text) + "\n\n")
+		u.WriteString(wrapStyled(styleFaint, mappingUnavailableAdvice(m.mapping.unavailable), text))
+		return renderBoundedPanel(m.width-2, height-2, u.String())
+	}
 	if m.mapping.loading {
 		b.WriteString(styleFaint.Render("Reading the current mapping from the device…"))
 		return renderBoundedPanel(m.width-2, height-2, b.String())
@@ -603,7 +633,13 @@ func (m Model) viewMapping(height int) string {
 			// styling within line/value to clash with) so styleSelectedRow's
 			// inverted background isn't cut short by an inner reset code —
 			// see styleSelectedRow's doc comment in theme.go.
-			b.WriteString(styleSelectedRow.Render("› "+line+"  (←/→ to change)") + "\n")
+			// The reminder is dropped where it would be cut off; the footer
+			// carries the same hint.
+			row := "› " + line
+			if hint := "  (←/→ to change)"; lipgloss.Width(row+hint) <= max(1, m.width-4) {
+				row += hint
+			}
+			b.WriteString(styleSelectedRow.Render(row) + "\n")
 		} else {
 			b.WriteString("  " + styleBody.Render(line) + "\n")
 		}

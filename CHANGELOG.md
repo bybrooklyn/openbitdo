@@ -29,19 +29,27 @@ All notable changes to OpenBitdo are tracked here.
 
 ### Changed
 
-- The dashboard shows what each device is doing now (responding, not answering, unreachable, no
-  permission) instead of only its registry tier, and shows device names instead of registry IDs.
-  This replaces the `Status` / `Works now` / `Blocked` / `Next step` card.
-- A device with no configuration interface is reported as unreachable, and diagnostics and
-  mapping are not offered for it.
-- Text wraps instead of being cut off at the edge of a panel.
+- The TUI is laid out differently. Devices are always listed down the left, each with a plain
+  verdict (working, limited, can't connect, no access). The right side shows the selected device
+  in three tabs: Overview, Checks and Mapping. This replaces the two-panel dashboard and its
+  `Status` / `Works now` / `Blocked` / `Next step` card.
+- There is one cursor, always in the right-hand pane. `tab` (or `1`-`3`, or `←` `→`) changes
+  section and `d` changes device from anywhere; there is no focus to move between panels.
+- Overview splits a device's actions into "You can" and "Not yet", with the reason beside each
+  thing that is not available. Only what can be done is selectable.
+- A device that answers checks but whose settings cannot be changed is "Limited", not
+  "Supported". A device with no configuration interface is "Can't connect", and nothing is
+  offered for it.
+- Device names replace registry IDs. Text wraps instead of being cut off at the edge.
 - The help overlay lists the keys for the current view; the footer only shows keys that work
   where you are.
-- Diagnostics names checks in plain words and explains unanswered ones. The report is available
-  for every device and can be copied (`c`) or saved (`w`). On the diagnostics screen `v` opens
-  the report and `f` filters to unanswered checks (`s` and `tab` still work).
-- Firmware is shown once per device as `Deferred in 0.0.3` instead of as a disabled action.
-  Settings and Quit are no longer rows in each device's action list (`s` and `q`).
+- Checks names each check in plain words and explains unanswered ones. `enter` shows a check's
+  raw details, `v` opens the report (copy with `c`, save with `w`), `f` filters to unanswered
+  checks.
+- Firmware is listed under "Not yet" as `Deferred in 0.0.3` instead of as a disabled action.
+  Settings is a page opened with `s`, not a row in each device's action list.
+- A controller can reach everything: the d-pad changes section and its third button changes
+  device.
 
 ### Hardware evidence
 

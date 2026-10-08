@@ -257,12 +257,9 @@ func TestTeatest_U2PaddleRemapDraftAndApply(t *testing.T) {
 	tm, _, _ := newTeatestModel(t, filepath.Join(t.TempDir(), "config.toml"), 100, 30)
 	waitForOutput(t, tm, "Retro 108 Mechanical Keyboard")
 
-	tm.Send(tea.KeyMsg{Type: tea.KeyDown}) // JP108 -> Ultimate2 (mock device order)
-	waitForOutput(t, tm, "› ● Ultimate 2 Wireless Controller")
-	tm.Send(tea.KeyMsg{Type: tea.KeyRight}) // into actions pane, Run diagnostics(0)
-	waitForOutput(t, tm, "› Run diagnostics")
-	tm.Send(tea.KeyMsg{Type: tea.KeyDown}) // Diagnose(0) -> Mapping Editor(1)
-	tm.Send(tea.KeyMsg{Type: tea.KeyEnter})
+	pressRune(tm, 'd') // JP108 -> Ultimate2 (mock device order)
+	waitForOutput(t, tm, "┃ Ultimate 2 Wireless")
+	pressRune(tm, '3') // its Mapping tab
 	waitForAllOutputs(t, tm, "Button mapping preview", "more below")
 
 	for range core.AllU2Buttons { // move the cursor past all 17 button rows onto Paddle1's row

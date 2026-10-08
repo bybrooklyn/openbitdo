@@ -7,9 +7,9 @@ OpenBitdo is unofficial and not affiliated with 8BitDo. Device writes always car
 
 ## What OpenBitdo Does Today
 
-- Detect connected 8BitDo devices and show what each one is doing right now: responding, not answering, unreachable, or blocked by permissions.
-- Run diagnostics, and view, copy or save the report.
-- Say for every selected device which actions are available, why the others are not, and what to do next.
+- Detect connected 8BitDo devices and give each a plain verdict: working, limited (it can be read but not changed), can't connect, or no access.
+- Check the connection, and view, copy or save the report.
+- Say for every device what you can do with it now, and what you can't do yet and why.
 - Edit supported mappings for the currently confirmed JP108 flow.
 - Preview Ultimate 2 mapping in mock mode only; real Ultimate 2 mapping is blocked with the reason `button-map framing not hardware-confirmed`.
 - Show Firmware Update as disabled and deferred in `v0.0.3`; activating it does not download firmware, preflight firmware, or open a device session.
@@ -31,10 +31,10 @@ Contributors: [`justfile`](justfile) has common dev commands (`just build`, `jus
 
 1. Launch `openbitdo`.
 2. If you do not have hardware attached yet, launch `openbitdo --mock` to preview the interface.
-3. Pick a device from the list. Each row shows its live state; the panel beside it lists what you can do.
-4. Run diagnostics first. They only read from the device, and are the safe path for every 8BitDo device that can be reached.
-5. Open the report (`v` on the diagnostics screen) and copy or save it when a device is blocked, experimental, or behaving unexpectedly.
-6. Press `?` on any screen for the keys that work there.
+3. Your devices are listed down the left with a verdict each. The right side shows the selected one in three sections: **Overview** (what you can and can't do), **Checks** (what the device answered) and **Mapping**.
+4. Move between sections with `tab` (or `1`, `2`, `3`) and between devices with `d`. `↑↓` and `enter` act inside the section you are in.
+5. Checks only read from the device. Open the report there (`v`) and copy or save it when a device is limited or behaving unexpectedly.
+6. Press `?` anywhere for the keys that work there.
 
 OpenBitdo enables mouse support for clicking and scrolling, which by default
 intercepts click-drag so your terminal can't use it for normal text

@@ -94,11 +94,11 @@ func TestView_ResponsiveMatrixStaysWithinBounds(t *testing.T) {
 		width, height int
 		want          string
 	}{
-		{60, 18, "Devices"},
-		{80, 24, "Devices"},
-		{96, 24, "Devices"},
-		{100, 30, "Devices"},
-		{120, 40, "Devices"},
+		{60, 18, "DEVICES"},
+		{80, 24, "DEVICES"},
+		{96, 24, "DEVICES"},
+		{100, 30, "DEVICES"},
+		{120, 40, "DEVICES"},
 	}
 	for _, tc := range cases {
 		t.Run(fmt.Sprintf("%dx%d", tc.width, tc.height), func(t *testing.T) {
@@ -136,62 +136,75 @@ func TestView_TooSmallShowsResizeOnly(t *testing.T) {
 	}
 }
 
-func TestMouse_UnavailableActionShowsReasonWithoutTransition(t *testing.T) {
+// What cannot be done yet is listed under "Not yet" with its reason, and is
+// not something the cursor or a click can land on.
+func TestOverview_NotYetItemsAreNotSelectable(t *testing.T) {
 	m, c := newTestModel(t, filepath.Join(t.TempDir(), "config.toml"))
-	m = loadDevices(t, m, c)
-	// The Ultimate 2's mapping editor is blocked on real hardware.
-	m.devices.cursor = 1
-	m.devices.pane = paneActions
-	m.devices.actionIdx = 0
+	m = loadDevicesAndDrain(t, m, c)
+	m, _ = m.navigate(screenDevices, 1) // the Ultimate 2: remapping is blocked on real hardware
 
-	mappingRow := renderedRowContaining(t, m.View(), "Mapping editor")
-	next, _ := m.Update(tea.MouseMsg{Button: tea.MouseButtonLeft, Action: tea.MouseActionPress, X: m.width - 10, Y: mappingRow})
-	m = next.(Model)
-	if m.screen != screenDevices {
-		t.Fatalf("unavailable action click changed screens to %v", m.screen)
+	view := ansi.Strip(m.View())
+	notYet := view[strings.Index(view, "Not yet"):]
+	for _, want := range []string{"Remap buttons", "waiting on hardware testing", "Update firmware", "Deferred in 0.0.3"} {
+		if !strings.Contains(notYet, want) {
+			t.Fatalf("expected %q under Not yet:\n%s", want, view)
+		}
 	}
-	if !strings.Contains(m.statusLine, "not hardware-confirmed") {
-		t.Fatalf("expected the reason in the status line, got %q", m.statusLine)
-	}
-	if !m.notice.transient {
-		t.Fatal("the reason is already beside the row, so the notice must clear itself")
+	for _, item := range m.availableActions() {
+		if item.kind == actionMapping || item.kind == actionFirmware {
+			t.Fatalf("%q is offered although it cannot be done", item.label)
+		}
 	}
 
-	// A click on the wrapped reason under the row means the same row.
-	reasonRow := renderedRowContaining(t, m.View(), "not available:")
-	m.devices.actionIdx = 0
-	next, _ = m.Update(tea.MouseMsg{Button: tea.MouseButtonLeft, Action: tea.MouseActionPress, X: m.width - 10, Y: reasonRow})
-	if got := next.(Model).devices.actionIdx; got != 1 {
-		t.Fatalf("clicking a row's reason line should select that row, got action %d", got)
+	row := renderedRowContaining(t, m.View(), "Remap buttons")
+	next, cmd := m.Update(tea.MouseMsg{Button: tea.MouseButtonLeft, Action: tea.MouseActionPress, X: m.width - 20, Y: row})
+	if next.(Model).screen != screenDevices || cmd != nil {
+		t.Fatal("clicking something under Not yet must do nothing")
 	}
 }
 
-func TestMouse_DeviceRowsActionsAndWheelUseSharedGeometry(t *testing.T) {
+func TestMouse_SidebarTabsAndActionsShareTheDrawnGeometry(t *testing.T) {
 	m, c := newTestModel(t, filepath.Join(t.TempDir(), "config.toml"))
 	m = loadDevicesAndDrain(t, m, c)
 	if len(m.devices.filtered) < 3 {
 		t.Fatalf("expected at least three mock devices, got %d", len(m.devices.filtered))
 	}
 
-	deviceRow := renderedRowContaining(t, m.View(), "Ultimate 2 Wireless Controller")
-	next, _ := m.Update(tea.MouseMsg{Button: tea.MouseButtonLeft, Action: tea.MouseActionPress, X: 2, Y: deviceRow})
-	m = next.(Model)
-	if m.devices.cursor != 1 || m.devices.pane != paneDeviceList {
-		t.Fatalf("device row click selected cursor=%d pane=%v, want cursor=1 paneDeviceList", m.devices.cursor, m.devices.pane)
+	// Either line of a device's entry in the sidebar selects it.
+	deviceRow := renderedRowContaining(t, m.View(), "Ultimate 2 Wireless")
+	for _, y := range []int{deviceRow, deviceRow + 1} {
+		m.devices.cursor = 0
+		next, _ := m.Update(tea.MouseMsg{Button: tea.MouseButtonLeft, Action: tea.MouseActionPress, X: 4, Y: y})
+		m = next.(Model)
+		if m.devices.cursor != 1 || m.screen != screenDevices {
+			t.Fatalf("sidebar click at row %d selected cursor=%d screen=%v, want device 1 on Overview", y, m.devices.cursor, m.screen)
+		}
 	}
 
+	// A tab title switches section and keeps the device.
+	tabRow := renderedRowContaining(t, m.View(), "Checks")
+	tabCol := strings.Index(strings.Split(ansi.Strip(m.View()), "\n")[tabRow], "Checks")
+	tabX := lipgloss.Width(strings.Split(ansi.Strip(m.View()), "\n")[tabRow][:tabCol])
+	next, _ := m.Update(tea.MouseMsg{Button: tea.MouseButtonLeft, Action: tea.MouseActionPress, X: tabX + 1, Y: tabRow})
+	m = next.(Model)
+	if m.screen != screenDiagnostics || m.diag.device.VidPid.PID != 0x6012 {
+		t.Fatalf("tab click: screen=%v device=%s, want Checks for the Ultimate 2", m.screen, m.diag.device.VidPid)
+	}
+
+	// The wheel moves the pane's cursor.
 	next, _ = m.Update(tea.MouseMsg{Button: tea.MouseButtonWheelDown})
 	m = next.(Model)
-	if m.devices.cursor != 2 {
-		t.Fatalf("device wheel should move selection by three rows up to list bounds, got cursor=%d", m.devices.cursor)
+	if m.diag.cursor != 3 {
+		t.Fatalf("wheel should move the check cursor by three, got %d", m.diag.cursor)
 	}
 
-	m.devices.cursor = 0
-	diagnoseRow := renderedRowContaining(t, m.View(), "Run diagnostics")
-	next, _ = m.Update(tea.MouseMsg{Button: tea.MouseButtonLeft, Action: tea.MouseActionPress, X: m.width - 10, Y: diagnoseRow})
+	// A "You can" row runs when clicked.
+	m, _ = m.navigate(screenDevices, 0)
+	saveRow := renderedRowContaining(t, m.View(), "Remap keys")
+	next, _ = m.Update(tea.MouseMsg{Button: tea.MouseButtonLeft, Action: tea.MouseActionPress, X: m.width - 30, Y: saveRow})
 	m = next.(Model)
-	if m.screen != screenDiagnostics {
-		t.Fatalf("enabled Diagnose action click should open diagnostics, got screen=%v", m.screen)
+	if m.screen != screenMapping {
+		t.Fatalf("clicking Remap keys should open the Mapping tab, got screen=%v", m.screen)
 	}
 }
 
@@ -219,7 +232,7 @@ func TestMouse_DiagnosticsSettingsMappingAndModalContracts(t *testing.T) {
 		{Command: protocol.CommandID("DiagGamma"), OK: true, Severity: protocol.SeverityOK},
 	}
 	diagnosticRow := renderedRowContaining(t, m.View(), "DiagGamma")
-	next, _ := m.Update(tea.MouseMsg{Button: tea.MouseButtonLeft, Action: tea.MouseActionPress, X: 5, Y: diagnosticRow})
+	next, _ := m.Update(tea.MouseMsg{Button: tea.MouseButtonLeft, Action: tea.MouseActionPress, X: m.width - 20, Y: diagnosticRow})
 	m = next.(Model)
 	if m.diag.cursor != 2 {
 		t.Fatalf("diagnostics row click selected cursor=%d, want 2", m.diag.cursor)
@@ -228,7 +241,7 @@ func TestMouse_DiagnosticsSettingsMappingAndModalContracts(t *testing.T) {
 	m.screen = screenSettings
 	before := m.settings.ReportSaveMode
 	settingsRow := renderedRowContaining(t, m.View(), "Save reports")
-	next, _ = m.Update(tea.MouseMsg{Button: tea.MouseButtonLeft, Action: tea.MouseActionPress, X: 5, Y: settingsRow})
+	next, _ = m.Update(tea.MouseMsg{Button: tea.MouseButtonLeft, Action: tea.MouseActionPress, X: m.width - 20, Y: settingsRow})
 	m = next.(Model)
 	if m.settingsCursor != 1 || m.settings.ReportSaveMode == before {
 		t.Fatalf("settings row click cursor=%d mode=%s before=%s", m.settingsCursor, m.settings.ReportSaveMode, before)
@@ -247,7 +260,7 @@ func TestMouse_DiagnosticsSettingsMappingAndModalContracts(t *testing.T) {
 		t.Fatalf("mapping wheel cursor=%d rowOffset=%d, want cursor=15 and scrolled viewport", m.mapping.cursor, m.mapping.rowOffset)
 	}
 
-	m.modal = discardMappingModal(discardActionBack)
+	m.modal = discardMappingModal(discardMappingMsg{action: discardActionBack})
 	box, _, cancel := modalGeometry(m.modal, m.width, m.height)
 	next, _ = m.Update(tea.MouseMsg{Button: tea.MouseButtonLeft, Action: tea.MouseActionPress, X: box.x - 1, Y: box.y})
 	m = next.(Model)
@@ -278,21 +291,21 @@ func TestMouse_MappingUsesActualRenderedRowsAndIgnoresIndicators(t *testing.T) {
 	view := m.View()
 	indicatorRow := renderedRowContaining(t, view, "more above")
 	beforeCursor := m.mapping.cursor
-	next, cmd := m.Update(tea.MouseMsg{Button: tea.MouseButtonLeft, Action: tea.MouseActionPress, X: 4, Y: indicatorRow})
+	next, cmd := m.Update(tea.MouseMsg{Button: tea.MouseButtonLeft, Action: tea.MouseActionPress, X: m.width - 20, Y: indicatorRow})
 	m = next.(Model)
 	if cmd != nil || m.mapping.cursor != beforeCursor || m.mapping.applying {
 		t.Fatal("clicking a mapping scroll indicator must not select or execute an action")
 	}
 
 	visibleRow := renderedRowContaining(t, m.View(), m.mappingRowText(17))
-	next, cmd = m.Update(tea.MouseMsg{Button: tea.MouseButtonLeft, Action: tea.MouseActionPress, X: 4, Y: visibleRow})
+	next, cmd = m.Update(tea.MouseMsg{Button: tea.MouseButtonLeft, Action: tea.MouseActionPress, X: m.width - 20, Y: visibleRow})
 	m = next.(Model)
 	if cmd != nil || m.mapping.cursor != 17 {
 		t.Fatalf("visible mapping row click selected cursor=%d cmd=%v, want cursor=17 and no command", m.mapping.cursor, cmd != nil)
 	}
 
 	applyRow := renderedRowContaining(t, m.View(), "Apply Changes")
-	next, cmd = m.Update(tea.MouseMsg{Button: tea.MouseButtonLeft, Action: tea.MouseActionPress, X: 4, Y: applyRow})
+	next, cmd = m.Update(tea.MouseMsg{Button: tea.MouseButtonLeft, Action: tea.MouseActionPress, X: m.width - 20, Y: applyRow})
 	m = next.(Model)
 	if cmd == nil || !m.mapping.applying {
 		t.Fatal("clicking the rendered Apply Changes row must start the explicit mock apply")
@@ -552,7 +565,6 @@ func TestDiagnostics_RunThenBack(t *testing.T) {
 	if !ok {
 		t.Fatal("expected a selected device")
 	}
-	m.devices.pane = paneActions
 	m.devices.actionIdx = 0
 	next, cmd := m.triggerDevicesEnter()
 	m = next.(Model)
@@ -689,38 +701,34 @@ func TestView_ModalDimsBackgroundInsteadOfReplacingIt(t *testing.T) {
 	}
 }
 
-// TestView_PanelsUseLeftBarNotRoundedBox proves the border-style change
-// actually rendered, on two different screens: the rounded box's unique
-// corner glyphs (╭╮╰╯, from lipgloss.RoundedBorder — not used anywhere else
-// in this codebase) must be entirely gone, and the new left-only bar
-// character must be present instead.
-func TestView_PanelsUseLeftBarNotRoundedBox(t *testing.T) {
-	roundedCorners := []string{"╭", "╮", "╰", "╯"}
+// TestView_OneFrameAroundEverything: the app is drawn as a single rounded
+// frame holding the device list, the tabs and the pane. Panels inside it
+// are plain indented text, not boxes of their own.
+func TestView_OneFrameAroundEverything(t *testing.T) {
+	m, c := newTestModel(t, filepath.Join(t.TempDir(), "config.toml"))
+	m = loadDevicesAndDrain(t, m, c)
 
-	assertLeftBarNotRoundedBox := func(t *testing.T, screenName, rendered string) {
-		t.Helper()
-		for _, corner := range roundedCorners {
-			if strings.Contains(rendered, corner) {
-				t.Fatalf("%s: expected no rounded-box corner glyphs, found %q", screenName, corner)
+	for _, target := range []screen{screenDevices, screenDiagnostics, screenMapping, screenSettings} {
+		m, _ = m.navigate(target, 0)
+		plain := ansi.Strip(m.View())
+		lines := strings.Split(plain, "\n")
+		if !strings.HasPrefix(lines[0], "╭─ OpenBitdo") || !strings.HasSuffix(lines[0], "╮") {
+			t.Fatalf("screen %v: expected the frame's top edge with the title, got %q", target, lines[0])
+		}
+		if last := lines[len(lines)-1]; !strings.HasPrefix(last, "╰") || !strings.HasSuffix(last, "╯") {
+			t.Fatalf("screen %v: expected the frame's bottom edge, got %q", target, last)
+		}
+		for _, corner := range []string{"╭", "╮", "╰", "╯"} {
+			if n := strings.Count(plain, corner); n != 1 {
+				t.Fatalf("screen %v: expected one frame, found %d %q corners:\n%s", target, n, corner, plain)
 			}
 		}
-		if !strings.Contains(rendered, "┃") {
-			t.Fatalf("%s: expected the new left-bar glyph ┃ to be present", screenName)
+		for i, line := range lines {
+			if w := lipgloss.Width(line); w != m.width {
+				t.Fatalf("screen %v: line %d is %d wide, want %d: %q", target, i, w, m.width, line)
+			}
 		}
 	}
-
-	m, c := newTestModel(t, filepath.Join(t.TempDir(), "config.toml"))
-	m = loadDevices(t, m, c)
-	assertLeftBarNotRoundedBox(t, "Devices", m.View())
-
-	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRight}) // select JP108, into actions pane
-	m = next.(Model)
-	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // Diagnose
-	m = next.(Model)
-	if m.screen != screenDiagnostics {
-		t.Fatalf("expected Diagnose to move to the diagnostics screen, got %v", m.screen)
-	}
-	assertLeftBarNotRoundedBox(t, "Diagnostics", m.View())
 }
 
 // TestStylePanelTitleAndStyleAccentAreDistinct guards against the exact
@@ -800,7 +808,7 @@ func TestMappingEditorSelectionIsDistinctFromHeading(t *testing.T) {
 
 	view := m.viewMapping(30)
 
-	headingRendered := stylePanelTitle.Render("Key mapping: JP108")
+	headingRendered := stylePanelTitle.Render("Key mapping")
 	if !strings.Contains(view, headingRendered) {
 		t.Fatalf("expected the panel heading to use stylePanelTitle, got:\n%s", view)
 	}
@@ -825,20 +833,21 @@ func TestMappingEditorSelectionIsDistinctFromHeading(t *testing.T) {
 // footer's controller glyphs (A/B/dpad) must only appear when
 // internal/input actually wired up a gamepad nav stream at startup.
 func TestScreenHelp_ControllerHintsOnlyShownWhenGamepadConnected(t *testing.T) {
-	m, _ := newTestModel(t, filepath.Join(t.TempDir(), "config.toml"))
+	m, c := newTestModel(t, filepath.Join(t.TempDir(), "config.toml"))
+	m = loadDevicesAndDrain(t, m, c)
 
 	help := m.footerHints(200)
 	if strings.Contains(help, "enter/A") || strings.Contains(help, "esc/B") || strings.Contains(help, "dpad") {
 		t.Fatalf("expected no controller glyphs with no gamepad connected, got: %s", help)
 	}
-	if !strings.Contains(help, "enter") || !strings.Contains(help, "esc") {
+	if !strings.Contains(help, "enter") {
 		t.Fatalf("expected plain keyboard-only hints, got: %s", help)
 	}
 
+	m = loadDevicesAndDrain(t, m, c)
 	m.navNotes = []string{"pid=0x6012: gamepad nav active"}
-	m.devices.pane = paneActions // the pane with a "back" hint
 	help = m.footerHints(200)
-	if !strings.Contains(help, "enter/A") || !strings.Contains(help, "esc/B") || !strings.Contains(help, "dpad") {
+	if !strings.Contains(help, "enter/A") || !strings.Contains(help, "dpad") {
 		t.Fatalf("expected controller glyphs once a gamepad is connected, got: %s", help)
 	}
 }
@@ -856,16 +865,16 @@ func TestScreenHelp_UnavailableNavNoteDoesNotCountAsConnected(t *testing.T) {
 	}
 }
 
-// TestHelp_DevicesScreenMentionsEveryWayIntoActions guards the Devices
-// omission: enter, right and tab all move focus into the Actions pane
-// (screen_devices.go), and the help overlay must say so.
-func TestHelp_DevicesScreenMentionsEveryWayIntoActions(t *testing.T) {
-	m, _ := newTestModel(t, filepath.Join(t.TempDir(), "config.toml"))
-	m.screen = screenDevices
+// TestHelp_OverviewMentionsHowToGetAround: the help overlay must name the
+// keys that change section and device, since nothing else on screen is
+// needed to get anywhere.
+func TestHelp_OverviewMentionsHowToGetAround(t *testing.T) {
+	m, c := newTestModel(t, filepath.Join(t.TempDir(), "config.toml"))
+	m = loadDevicesAndDrain(t, m, c)
 	help := ansi.Strip(strings.Join(m.helpLines(), "\n"))
-	for _, want := range []string{"enter", "→", "tab", "j/k"} {
+	for _, want := range []string{"tab", "next section", "1, 2, 3", "next device", "j/k", "settings"} {
 		if !strings.Contains(help, want) {
-			t.Fatalf("expected the Devices help to mention %q, got:\n%s", want, help)
+			t.Fatalf("expected the Overview help to mention %q, got:\n%s", want, help)
 		}
 	}
 }
@@ -915,9 +924,9 @@ func TestViewDeviceDetail_NoDoubleBlankLineBeforeActions(t *testing.T) {
 	m, c := newTestModel(t, filepath.Join(t.TempDir(), "config.toml"))
 	m = loadDevices(t, m, c)
 
-	view := m.deviceDetailPanel(50, 30).render()
-	if !strings.Contains(ansi.Strip(view), "Actions") {
-		t.Fatalf("expected the default selected mock device to show its actions, got:\n%s", ansi.Strip(view))
+	view := m.viewDevices(30)
+	if !strings.Contains(ansi.Strip(view), "You can") || !strings.Contains(ansi.Strip(view), "Not yet") {
+		t.Fatalf("expected the default selected mock device to show both lists, got:\n%s", ansi.Strip(view))
 	}
 	if got := countConsecutiveBlankLines(view); got > 1 {
 		t.Fatalf("expected at most one consecutive blank line, found a run of %d, in:\n%s", got, ansi.Strip(view))
