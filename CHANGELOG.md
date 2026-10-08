@@ -50,6 +50,16 @@ All notable changes to OpenBitdo are tracked here.
   Settings is a page opened with `s`, not a row in each device's action list.
 - A controller can reach everything: the d-pad changes section and its third button changes
   device.
+- A device that works as a controller or keyboard but has no configuration interface is shown
+  as "Playing" or "Typing", with the settings limitation stated separately, instead of "Can't
+  connect".
+
+### Added
+
+- A Buttons tab: press anything on a controller and its button number lights up. It only reads
+  what the controller already sends, and is how to find the number of a back button or extra
+  shoulder button, which have no standard one. Decoding is tested against the report
+  descriptor and reports of a real Ultimate 2 in gamepad mode (`0x6012`).
 
 ### Hardware evidence
 

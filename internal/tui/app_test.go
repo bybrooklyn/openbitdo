@@ -872,7 +872,7 @@ func TestHelp_OverviewMentionsHowToGetAround(t *testing.T) {
 	m, c := newTestModel(t, filepath.Join(t.TempDir(), "config.toml"))
 	m = loadDevicesAndDrain(t, m, c)
 	help := ansi.Strip(strings.Join(m.helpLines(), "\n"))
-	for _, want := range []string{"tab", "next section", "1, 2, 3", "next device", "j/k", "settings"} {
+	for _, want := range []string{"tab", "next section", "1-4", "next device", "j/k", "settings"} {
 		if !strings.Contains(help, want) {
 			t.Fatalf("expected the Overview help to mention %q, got:\n%s", want, help)
 		}

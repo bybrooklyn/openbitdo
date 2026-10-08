@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/bybrooklyn/openbitdo/internal/core"
+	"github.com/bybrooklyn/openbitdo/internal/input"
 	"github.com/bybrooklyn/openbitdo/internal/protocol"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/x/ansi"
@@ -398,6 +399,10 @@ func TestGettingAroundNeedsNoFocusSwitching(t *testing.T) {
 		t.Fatalf("3 should jump to Mapping, got %v", m.screen)
 	}
 	press("tab")
+	if m.screen != screenButtons {
+		t.Fatalf("tab should move on to Buttons, got %v", m.screen)
+	}
+	press("tab")
 	if m.screen != screenDevices {
 		t.Fatalf("tab should wrap round to Overview, got %v", m.screen)
 	}
@@ -485,5 +490,69 @@ func TestWrapTextBreaksOnlyAtSpaces(t *testing.T) {
 				t.Errorf("wrapText(%q, %d) produced an over-long line %q", tc.in, tc.width, line)
 			}
 		}
+	}
+}
+
+// The Buttons tab shows what a controller sends. While it is open a press
+// is only shown: it must not also act as enter, or jump to another device.
+func TestButtonsTabShowsPressesWithoutActingOnThem(t *testing.T) {
+	m, _ := loadedModel(t, 100, 30)
+	m, _ = m.navigate(screenButtons, 1) // the Ultimate 2
+	m.devices.filtered[1].WorksAs = core.RoleGamepad
+	send := func(e input.NavEvent) {
+		t.Helper()
+		e.SourcePID = 0x6012
+		next, _ := m.Update(navEventMsg{event: e})
+		m = next.(Model)
+	}
+
+	send(input.NavEvent{Kind: input.EventButtonDown, Button: 3})
+	send(input.NavEvent{Kind: input.EventButtonUp, Button: 3})
+	send(input.NavEvent{Kind: input.EventButtonDown, Button: 3})
+	send(input.NavEvent{Kind: input.EventButtonDown, Button: 18})
+	send(input.NavEvent{Kind: input.EventDPadChanged, DPad: input.DirUpLeft})
+	send(input.NavEvent{Kind: input.EventButtonDown, Button: 1}) // "enter" elsewhere
+
+	if m.screen != screenButtons || m.devices.cursor != 1 {
+		t.Fatalf("a press on the Buttons tab moved the app: screen=%v device=%d", m.screen, m.devices.cursor)
+	}
+	state := m.pads[0x6012]
+	if state.presses[3] != 2 || !state.held[3] || !state.held[18] || state.last != 1 {
+		t.Fatalf("unexpected recorded state: %+v", state)
+	}
+	plain := ansi.Strip(m.View())
+	for _, want := range []string{"Last pressed: button 1", "Seen so far: 1 3 18", "D-pad: up-left", " 18 "} {
+		if !strings.Contains(plain, want) {
+			t.Fatalf("expected %q:\n%s", want, plain)
+		}
+	}
+
+	// c forgets this controller's presses.
+	next, _ := m.Update(*keyMsg("c"))
+	m = next.(Model)
+	if got := m.pads[0x6012]; got.events != 0 {
+		t.Fatalf("expected c to clear the recorded presses, got %+v", got)
+	}
+
+	// On any other tab the same press drives the menus again.
+	m, _ = m.navigate(screenDevices, 1)
+	send(input.NavEvent{Kind: input.EventButtonDown, Button: 3}) // next device
+	if m.devices.cursor != 2 {
+		t.Fatalf("expected button 3 to move to the next device off the Buttons tab, got device %d", m.devices.cursor)
+	}
+}
+
+func TestButtonsTabExplainsADeviceThatSendsNothing(t *testing.T) {
+	m, _ := loadedModel(t, 80, 24)
+	m, _ = m.navigate(screenButtons, 1) // a controller in a mode with no gamepad interface
+	plain := ansi.Strip(m.View())
+	if !strings.Contains(plain, "No button presses to show") || !strings.Contains(plain, "works as a gamepad") {
+		t.Fatalf("expected an explanation, not an empty grid:\n%s", plain)
+	}
+
+	m, _ = m.navigate(screenButtons, 0)
+	m.devices.filtered[0].WorksAs = core.RoleKeyboard
+	if plain := ansi.Strip(m.View()); !strings.Contains(plain, "This is a keyboard") {
+		t.Fatalf("expected the keyboard explanation:\n%s", plain)
 	}
 }

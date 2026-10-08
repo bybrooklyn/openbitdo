@@ -28,6 +28,7 @@ const (
 	screenFirmware
 	screenSettings
 	screenRecovery
+	screenButtons
 )
 
 // BuildInfo is displayed on the Settings screen.
@@ -59,6 +60,9 @@ type Model struct {
 
 	navEvents <-chan input.NavEvent
 	navNotes  []string
+	// pads is what each controller has sent this session, by PID, for the
+	// Buttons tab.
+	pads map[uint16]padState
 
 	width, height int
 	// paned is set on the copy of the model a screen works on, whose width
@@ -231,6 +235,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmd := cmdListenNav(m.navEvents)
 		if msg.event.Kind == input.EventDeviceConnected || msg.event.Kind == input.EventDeviceDisconnected {
 			return m.handleHotplugEvent(msg.event, cmd)
+		}
+		m = m.recordInput(msg.event)
+		if m.screen == screenButtons && !m.modal.active {
+			// The Buttons tab is for watching the controller. A press must
+			// not also act as enter or jump to another device.
+			return m, cmd
 		}
 		if m.modal.active {
 			navMsg := navToKeyMsg(msg.event)
@@ -567,6 +577,8 @@ func (m Model) route(msg tea.Msg) (tea.Model, tea.Cmd) {
 		next, cmd = inner.updateSettings(msg)
 	case screenRecovery:
 		next, cmd = inner.updateRecovery(msg)
+	case screenButtons:
+		next, cmd = inner.updateButtons(msg)
 	}
 	return m.outOfPane(next.(Model)), cmd
 }

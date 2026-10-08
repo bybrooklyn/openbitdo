@@ -31,8 +31,8 @@ Contributors: [`justfile`](justfile) has common dev commands (`just build`, `jus
 
 1. Launch `openbitdo`.
 2. If you do not have hardware attached yet, launch `openbitdo --mock` to preview the interface.
-3. Your devices are listed down the left with a verdict each. The right side shows the selected one in three sections: **Overview** (what you can and can't do), **Checks** (what the device answered) and **Mapping**.
-4. Move between sections with `tab` (or `1`, `2`, `3`) and between devices with `d`. `↑↓` and `enter` act inside the section you are in.
+3. Your devices are listed down the left with a verdict each. The right side shows the selected one in four sections: **Overview** (what you can and can't do), **Checks** (what the device answered), **Mapping**, and **Buttons** (press anything on a controller to see which button number it is).
+4. Move between sections with `tab` (or `1`-`4`) and between devices with `d`. `↑↓` and `enter` act inside the section you are in.
 5. Checks only read from the device. Open the report there (`v`) and copy or save it when a device is limited or behaving unexpectedly.
 6. Press `?` anywhere for the keys that work there.
 

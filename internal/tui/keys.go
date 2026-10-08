@@ -40,7 +40,7 @@ func (m Model) viewHints() []keyHint {
 	moveHint := keyHint{key: move, label: "move", help: "move the selection (j/k too)"}
 
 	// Keys that work on every tab, listed after the tab's own.
-	shell := []keyHint{{key: "tab", label: "section", help: "next section (also ← →, or 1, 2, 3 to jump)"}}
+	shell := []keyHint{{key: "tab", label: "section", help: "next section (also ← →, or 1-4 to jump)"}}
 	if len(m.devices.filtered) > 1 {
 		shell = append(shell, keyHint{key: "d", label: "next device", help: "next device (D for the previous one)"})
 	}
@@ -106,6 +106,9 @@ func (m Model) viewHints() []keyHint {
 			hints = append(hints, keyHint{key: "p", label: "preview slot", help: "look at another slot"})
 		}
 		return append(hints, shell...)
+
+	case screenButtons:
+		return append([]keyHint{{key: "c", label: "clear", help: "forget what has been pressed so far"}}, shell...)
 
 	case screenFirmware:
 		switch m.fw.stage {
@@ -186,6 +189,8 @@ func (m Model) screenTitle() string {
 		return "Checks"
 	case screenMapping:
 		return "Mapping"
+	case screenButtons:
+		return "Buttons"
 	case screenFirmware:
 		return "Firmware"
 	case screenSettings:

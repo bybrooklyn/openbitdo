@@ -25,6 +25,7 @@ var tabs = []struct {
 	{screenDevices, "Overview"},
 	{screenDiagnostics, "Checks"},
 	{screenMapping, "Mapping"},
+	{screenButtons, "Buttons"},
 }
 
 func isTab(s screen) bool {
@@ -113,6 +114,8 @@ func (m Model) paneView() string {
 		body = inner.viewSettings(height)
 	case screenRecovery:
 		body = inner.viewRecovery(height)
+	case screenButtons:
+		body = inner.viewButtons(height)
 	}
 	return clampRendered(body, g.pane.w, g.pane.h)
 }
@@ -336,7 +339,7 @@ func (m Model) shellKey(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 		}
 		next, cmd := m.navigate(m.tabOffset(delta), m.devices.cursor)
 		return next, cmd, true
-	case "1", "2", "3":
+	case "1", "2", "3", "4":
 		next, cmd := m.navigate(tabs[int(msg.String()[0]-'1')].screen, m.devices.cursor)
 		return next, cmd, true
 	case "d":
