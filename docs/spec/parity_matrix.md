@@ -28,7 +28,7 @@ Everything else it lists is firmware update only.
 
 The application reaches Pro 3, Ultimate 2, Ultimate 2 Bluetooth and the Arcade Controller only
 when they enumerate under the shared ID 0x310b (wired, or the 2.4G receiver in XInput mode) and
-asks the device which product it is. OpenBitdo lists 0x310b as detect-only today.
+asks the device which product it is. OpenBitdo does the same for the three controllers it has an editor for; whether a controller in that mode exposes a configuration interface on Linux is untested.
 
 ## Retro 108 Mechanical Keyboard (0x5209)
 
@@ -66,7 +66,7 @@ asks the device which product it is. OpenBitdo lists 0x310b as detect-only today
 | Stick-ring lighting: off, tracing, fire ring, per-LED colours, speed | yes | simulated (colours by hex or swatch; no colour wheel) |
 | Stick and trigger calibration | yes | no |
 | Profile library on the computer | yes | save and load one slot as a readable profile file |
-| Reached under the shared ID 0x310b | yes (only this way) | no |
+| Reached under the shared ID 0x310b | yes (only this way) | simulated: the device is asked which product it is and gets that product's editor |
 | Firmware update | yes | no (deferred) |
 
 Everything marked simulated for this controller waits on one thing: a real controller, switched

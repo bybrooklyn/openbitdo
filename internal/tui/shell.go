@@ -460,5 +460,5 @@ func (m Model) openMapping(device core.AppDevice) (Model, tea.Cmd) {
 	if m.mapping.kind == core.KindJP108 {
 		return m, cmdKeyboardRead(m.ctx, m.core, device.VidPid)
 	}
-	return m, cmdPadRead(m.ctx, m.core, device.VidPid)
+	return m, cmdPadRead(m.ctx, m.core, core.PadAddressOf(device))
 }

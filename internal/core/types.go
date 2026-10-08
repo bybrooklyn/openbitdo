@@ -28,6 +28,9 @@ type AppDevice struct {
 	// WorksAs is what the device is doing for the computer right now,
 	// independent of whether OpenBitdo can configure it.
 	WorksAs DeviceRole
+	// Product is the product this device said it is, when it enumerates
+	// under an id several products share; zero otherwise.
+	Product protocol.VidPid
 }
 
 // DeviceRole is the kind of input device the operating system sees.
@@ -153,6 +156,7 @@ type configBackupPayload struct {
 	keyboard      KeyboardProfile
 	padRecord     []byte
 	padMacros     [PadSlots][PadMacros]PadMacro
+	padProduct    protocol.VidPid
 }
 
 type deviceKind int

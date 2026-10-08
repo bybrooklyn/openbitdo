@@ -45,6 +45,11 @@ type OpenBitdoCore struct {
 	// to.
 	mockKeyboard *protocol.JP108Simulator
 	mockPad      *protocol.U2Simulator
+
+	// sharedProducts remembers, by serial, which product a device under
+	// the shared controller id said it is (0 when it could not say).
+	sharedMu       sync.Mutex
+	sharedProducts map[string]uint16
 }
 
 // transport is the transport for a keyboard-style device; see transportFor.
@@ -139,13 +144,17 @@ func (c *OpenBitdoCore) ListDevices(ctx context.Context) ([]AppDevice, error) {
 			continue
 		}
 		p := protocol.DeviceProfileFor(d.VidPid)
-		out = append(out, AppDevice{
+		device := AppDevice{
 			VidPid: d.VidPid, Name: p.Name, DisplayName: friendlyDeviceName(d.Product, p),
 			SupportLevel: p.SupportLevel, SupportTier: p.SupportTier,
 			ProtocolFamily: p.ProtocolFamily, Capability: p.Capability, Evidence: p.Evidence,
 			Serial: d.Serial, Connected: true, ConfigChannel: channels[d.VidPid],
 			WorksAs: roles[d.VidPid],
-		})
+		}
+		if d.VidPid.PID == protocol.SharedControllerPID && device.ConfigChannel == ChannelPresent {
+			c.resolveSharedProduct(ctx, &device)
+		}
+		out = append(out, device)
 	}
 	return out, nil
 }
@@ -446,4 +455,55 @@ func (c *OpenBitdoCore) sessionHandle(id FirmwareUpdateSessionID) (*firmwareSess
 		return nil, errNotFound("unknown session id: %s", id)
 	}
 	return handle, nil
+}
+
+// sharedProductAliases maps what a device under the shared id reports to
+// the product whose record it holds: a receiver stands for its controller.
+var sharedProductAliases = map[uint16]uint16{
+	0x6012: 0x6012, 0x6013: 0x6012, // Ultimate 2
+	0x6009: 0x6009, 0x600a: 0x6009, // Pro 3
+	0x600f: 0x600f, 0x6011: 0x600f, // Ultimate 2 Bluetooth
+}
+
+// resolveSharedProduct asks a device under the shared controller id which
+// product it is, once per serial, and gives the listing that product's
+// name and capabilities. A device that does not answer, or names a product
+// with no profile support here, is left as it was.
+func (c *OpenBitdoCore) resolveSharedProduct(ctx context.Context, device *AppDevice) {
+	c.sharedMu.Lock()
+	reported, known := c.sharedProducts[device.Serial]
+	c.sharedMu.Unlock()
+	if !known {
+		config := protocol.SessionConfig{RetryPolicy: protocol.DefaultRetryPolicy(), TimeoutProfile: protocol.DefaultTimeoutProfile()}
+		if session, err := protocol.NewDeviceSession(ctx, c.transportFor(device.VidPid), device.VidPid, config); err == nil {
+			reported, _ = session.ProductBehindSharedID(ctx)
+			_ = session.Close()
+		}
+		c.sharedMu.Lock()
+		if c.sharedProducts == nil {
+			c.sharedProducts = map[string]uint16{}
+		}
+		c.sharedProducts[device.Serial] = reported
+		c.sharedMu.Unlock()
+	}
+	product, ok := sharedProductAliases[reported]
+	if !ok {
+		return
+	}
+	device.Product = protocol.VidPid{VID: device.VidPid.VID, PID: product}
+	p := protocol.DeviceProfileFor(device.Product)
+	device.Name, device.DisplayName = p.Name, friendlyDeviceName("", p)
+	device.SupportLevel, device.SupportTier, device.Evidence = p.SupportLevel, p.SupportTier, p.Evidence
+	// Only the profile capability carries over: firmware and boot paths
+	// are not known to work through the shared id.
+	device.Capability = protocol.PidCapability{SupportsU2SlotConfig: p.Capability.SupportsU2SlotConfig}
+}
+
+// ForgetSharedProducts drops what devices under the shared id said they
+// were, so a rescan asks again. A controller swapped onto the same cable
+// keeps its predecessor's answer otherwise.
+func (c *OpenBitdoCore) ForgetSharedProducts() {
+	c.sharedMu.Lock()
+	c.sharedProducts = nil
+	c.sharedMu.Unlock()
 }

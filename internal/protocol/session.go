@@ -160,6 +160,40 @@ func NewDeviceSession(ctx context.Context, transport Transport, target VidPid, c
 	}, nil
 }
 
+// NewDeviceSessionAs opens the device enumerated as openAs and talks to it
+// as product. A controller plugged in by cable, or its receiver in XInput
+// mode, enumerates under an id several products share; once it has said
+// which product it is, it takes that product's commands.
+func NewDeviceSessionAs(ctx context.Context, transport Transport, openAs, product VidPid, config SessionConfig) (*DeviceSession, error) {
+	if err := transport.Open(ctx, openAs); err != nil {
+		return nil, err
+	}
+	return &DeviceSession{
+		transport: transport,
+		target:    product,
+		profile:   DeviceProfileFor(product),
+		config:    config,
+	}, nil
+}
+
+// SharedControllerPID is the id a Pro 3, Ultimate 2, Ultimate 2 Bluetooth
+// or Arcade Controller enumerates under when wired or in XInput mode.
+const SharedControllerPID uint16 = 0x310b
+
+// ProductBehindSharedID asks a device enumerated under the shared
+// controller id which product it is. The answer is the product's own id,
+// or its receiver's.
+func (s *DeviceSession) ProductBehindSharedID(ctx context.Context) (uint16, error) {
+	resp, err := s.SendCommand(ctx, CommandGetReportRevision, nil)
+	if err != nil {
+		return 0, err
+	}
+	if len(resp.Raw) < 24 {
+		return 0, errMalformedResponse(CommandGetReportRevision, len(resp.Raw))
+	}
+	return uint16(resp.Raw[22]) | uint16(resp.Raw[23])<<8, nil
+}
+
 func (s *DeviceSession) Profile() DeviceProfile { return s.profile }
 
 func (s *DeviceSession) Trace() []CommandExecutionReport { return s.trace }

@@ -367,6 +367,7 @@ func (m Model) updateDevices(msg tea.Msg) (tea.Model, tea.Cmd) {
 // what the user may have just fixed.
 func (m Model) rescanDevices() (tea.Model, tea.Cmd) {
 	m.core.ForgetFailedDiags()
+	m.core.ForgetSharedProducts()
 	m.devices.loading = true
 	m.devices.announceScan = true
 	return m, cmdLoadDevices(m.ctx, m.core)

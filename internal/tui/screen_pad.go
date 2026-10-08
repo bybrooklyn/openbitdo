@@ -26,16 +26,16 @@ type padApplyResultMsg struct {
 	err    error
 }
 
-func cmdPadRead(ctx context.Context, c *core.OpenBitdoCore, target protocol.VidPid) tea.Cmd {
+func cmdPadRead(ctx context.Context, c *core.OpenBitdoCore, target core.PadAddress) tea.Cmd {
 	return func() tea.Msg {
-		profile, err := c.PadReadProfile(ctx, target)
+		profile, err := c.PadReadProfileAt(ctx, target)
 		return padLoadedMsg{profile: profile, err: err}
 	}
 }
 
-func cmdPadApply(ctx context.Context, c *core.OpenBitdoCore, target protocol.VidPid, profile core.PadProfile) tea.Cmd {
+func cmdPadApply(ctx context.Context, c *core.OpenBitdoCore, target core.PadAddress, profile core.PadProfile) tea.Cmd {
 	return func() tea.Msg {
-		report, err := c.PadApply(ctx, target, profile)
+		report, err := c.PadApplyAt(ctx, target, profile)
 		return padApplyResultMsg{report: report, err: err}
 	}
 }
@@ -482,7 +482,7 @@ func (m Model) triggerPadRow() (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.mapping.applying = true
-		return m, cmdPadApply(m.ctx, m.core, m.mapping.device.VidPid, pad.draft)
+		return m, cmdPadApply(m.ctx, m.core, core.PadAddressOf(m.mapping.device), pad.draft)
 	case m.mapping.cursor == rows+1: // Undo
 		if n := len(pad.undo); n > 0 {
 			pad.draft, pad.undo = pad.undo[n-1], pad.undo[:n-1]

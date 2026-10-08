@@ -781,6 +781,7 @@ func (m Model) handleHotplugEvent(e input.NavEvent, listenCmd tea.Cmd) (Model, t
 	m, noticeCmd := m.setNotice(noticeInfo, summary, true)
 	// Whatever a failed probe was caused by, the device set just changed.
 	m.core.ForgetFailedDiags()
+	m.core.ForgetSharedProducts()
 
 	if e.Kind == input.EventDeviceDisconnected && m.screen == screenDiagnostics &&
 		m.diag.device.VidPid.PID == e.SourcePID && m.diag.device.Serial == e.Serial {

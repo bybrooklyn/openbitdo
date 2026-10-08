@@ -17,6 +17,9 @@ All notable changes to OpenBitdo are tracked here.
   confirmed on hardware.
 - Profile and macro names are written the way the vendor's application writes them, so each
   program can read names the other wrote.
+- A controller wired or in XInput mode enumerates under an ID several products share (0x310b).
+  It is now asked which product it is, and an Ultimate 2, Pro 3 or Ultimate 2 Bluetooth gets its
+  editor. Untested on hardware.
 - Pro 3 and Ultimate 2 Bluetooth: the controller editor covers them too, using each model's own
   record layout. Untested on hardware.
 - Ultimate 2 macros: each slot's four macros can be built in the editor (a trigger button, then

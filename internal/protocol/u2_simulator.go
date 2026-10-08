@@ -18,6 +18,9 @@ type U2Simulator struct {
 	// RecordSize is the size of the configuration record; zero means an
 	// Ultimate 2's.
 	RecordSize int
+	// ReportsPID is the product id the device gives when asked what it is
+	// (the report-revision query); zero leaves that query unanswered.
+	ReportsPID uint16
 	// Physical is the platform the mode switch selects.
 	Physical byte
 	// Records holds the stored record per platform, created zeroed on
@@ -97,6 +100,13 @@ func (u *U2Simulator) Write(data []byte) (int, error) {
 	crc := binary.LittleEndian.Uint16(data[8:])
 	offset := int(binary.LittleEndian.Uint32(data[14:]))
 
+	if cmd == 0x0100 && u.ReportsPID != 0 { // report revision: the product id rides in the header
+		frame := make([]byte, 64)
+		copy(frame, []byte{0x02, 0x04, 0x04, 0x00, 0x00, 0x01})
+		frame[22], frame[23] = byte(u.ReportsPID), byte(u.ReportsPID>>8)
+		u.pending = append(u.pending, frame)
+		return len(data), nil
+	}
 	if cmd == u2CmdConnected {
 		connected := byte(1)
 		if u.Off {

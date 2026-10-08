@@ -451,3 +451,61 @@ func TestSiblingControllersUseTheirOwnRecordLayout(t *testing.T) {
 		t.Fatal("a Pro 3 has no motion setting; writing one must be refused")
 	}
 }
+
+func TestControllerUnderTheSharedIDIsRoutedToItsProduct(t *testing.T) {
+	shared := protocol.VidPid{VID: 0x2dc8, PID: protocol.SharedControllerPID}
+	enumerated := func() []protocol.EnumeratedDevice {
+		return []protocol.EnumeratedDevice{{VidPid: shared, Product: "8BitDo Controller", Serial: "S1", Path: "/dev/hidraw9", UsagePage: 0xffa0, Usage: 0x01}}
+	}
+	ctx := context.Background()
+
+	// It says it is an Ultimate 2 receiver: listed as an Ultimate 2 with
+	// the profile capability and nothing else.
+	pad := &protocol.U2Simulator{ReportsPID: 0x6013, Physical: protocol.U2PlatformXInput}
+	c := padCore(pad)
+	c.enumerateDevices = enumerated
+	listDevices := c.ListDevices
+	devices, err := listDevices(ctx)
+	if err != nil || len(devices) != 1 {
+		t.Fatalf("devices=%+v err=%v", devices, err)
+	}
+	device := devices[0]
+	if device.VidPid != shared || device.Product.PID != 0x6012 || !device.Capability.SupportsU2SlotConfig ||
+		device.Capability.SupportsFirmware || device.SupportTier != protocol.TierFull {
+		t.Fatalf("unexpected listing: %+v", device)
+	}
+	if !strings.Contains(device.DisplayName, "Ultimate 2") {
+		t.Fatalf("display name = %q", device.DisplayName)
+	}
+	// The answer is remembered: a second listing does not ask again.
+	asked := len(pad.Frames)
+	if _, err := listDevices(ctx); err != nil || len(pad.Frames) != asked {
+		t.Fatalf("a second listing sent %d more frames", len(pad.Frames)-asked)
+	}
+
+	// Its profile is read and written with the Ultimate 2's layout.
+	addr := PadAddressOf(device)
+	profile, err := c.PadReadProfileAt(ctx, addr)
+	if err != nil || profile.Platform != protocol.U2PlatformXInput || !profile.HasLights {
+		t.Fatalf("profile: platform=%d err=%v", profile.Platform, err)
+	}
+	profile.Slots[0].Buttons[18] = PadA
+	report, err := c.PadApplyAt(ctx, addr, profile)
+	if err != nil || !report.WriteApplied {
+		t.Fatalf("apply: %+v err=%v", report, err)
+	}
+	if err := c.RestoreBackup(ctx, report.BackupID); err != nil {
+		t.Fatalf("restore through the shared id: %v", err)
+	}
+
+	// A product with no profile support here stays as it was listed.
+	pad.ReportsPID = 0x600b // Arcade Controller
+	c.ForgetSharedProducts()
+	devices, _ = listDevices(ctx)
+	if devices[0].Product.PID != 0 || devices[0].Capability.SupportsU2SlotConfig {
+		t.Fatalf("an unsupported product must not gain an editor: %+v", devices[0])
+	}
+	if _, err := c.PadReadProfileAt(ctx, PadAddressOf(devices[0])); err == nil {
+		t.Fatal("reading a profile from an unresolved shared id must be refused")
+	}
+}

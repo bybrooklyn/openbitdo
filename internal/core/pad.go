@@ -425,6 +425,29 @@ func encodePadSlot(record []byte, layout padLayout, i int, slot, was PadSlot) ([
 	return changed, nil
 }
 
+// PadAddress is how to reach a controller: the id it enumerates under and,
+// when that id is shared between products, the product it said it is.
+type PadAddress struct {
+	Enumerated protocol.VidPid
+	Product    protocol.VidPid
+}
+
+// PadAddressOf is the address of a listed device.
+func PadAddressOf(device AppDevice) PadAddress {
+	return PadAddress{Enumerated: device.VidPid, Product: device.Product}
+}
+
+// product is the product whose commands and record layout apply.
+func (a PadAddress) product() protocol.VidPid {
+	if a.Product.PID != 0 {
+		return a.Product
+	}
+	return a.Enumerated
+}
+
+// shared reports whether the controller was reached under the shared id.
+func (a PadAddress) shared() bool { return a.Product.PID != 0 && a.Product != a.Enumerated }
+
 func supportsPadProfile(vidPid protocol.VidPid) bool {
 	return protocol.DeviceProfileFor(vidPid).Capability.SupportsU2SlotConfig
 }
@@ -432,7 +455,8 @@ func supportsPadProfile(vidPid protocol.VidPid) bool {
 // padSession opens a session and gets the controller ready to exchange its
 // record: checks it is connected, pauses its input reports and selects the
 // platform its mode switch is on. done resumes input reports and closes.
-func (c *OpenBitdoCore) padSession(ctx context.Context, vidPid protocol.VidPid) (session *protocol.DeviceSession, platform byte, done func(), err error) {
+func (c *OpenBitdoCore) padSession(ctx context.Context, addr PadAddress) (session *protocol.DeviceSession, platform byte, done func(), err error) {
+	vidPid := addr.product()
 	if !supportsPadProfile(vidPid) {
 		return nil, 0, nil, errPolicyDenied(ReasonUnsupportedPid, "controller profiles are not supported for %s", vidPid)
 	}
@@ -440,7 +464,7 @@ func (c *OpenBitdoCore) padSession(ctx context.Context, vidPid protocol.VidPid) 
 		AllowUnsafe: true, BrickRiskAck: true, Experimental: true,
 		RetryPolicy: protocol.DefaultRetryPolicy(), TimeoutProfile: protocol.DefaultTimeoutProfile(), TraceEnabled: true,
 	}
-	session, perr := protocol.NewDeviceSession(ctx, c.transportFor(vidPid), vidPid, config)
+	session, perr := protocol.NewDeviceSessionAs(ctx, c.transportFor(vidPid), addr.Enumerated, vidPid, config)
 	if perr != nil {
 		return nil, 0, nil, errProtocol(perr)
 	}
@@ -466,7 +490,7 @@ func (c *OpenBitdoCore) padSession(ctx context.Context, vidPid protocol.VidPid) 
 		_ = session.U2SetInputReports(context.WithoutCancel(ctx), true)
 		_ = session.Close()
 	}
-	platform, perr = padPlatform(ctx, session, vidPid)
+	platform, perr = padPlatform(ctx, session, addr)
 	if perr == nil {
 		perr = session.U2SelectPlatform(ctx, platform)
 	}
@@ -480,12 +504,18 @@ func (c *OpenBitdoCore) padSession(ctx context.Context, vidPid protocol.VidPid) 
 // PadReadProfile reads a controller's configuration for the platform its
 // mode switch is on.
 func (c *OpenBitdoCore) PadReadProfile(ctx context.Context, vidPid protocol.VidPid) (PadProfile, error) {
-	session, _, done, err := c.padSession(ctx, vidPid)
+	return c.PadReadProfileAt(ctx, PadAddress{Enumerated: vidPid})
+}
+
+// PadReadProfileAt is PadReadProfile for a controller that may have been
+// reached under the shared controller id.
+func (c *OpenBitdoCore) PadReadProfileAt(ctx context.Context, addr PadAddress) (PadProfile, error) {
+	session, _, done, err := c.padSession(ctx, addr)
 	if err != nil {
 		return PadProfile{}, err
 	}
 	defer done()
-	return readPadProfile(ctx, session, padLayoutFor(vidPid))
+	return readPadProfile(ctx, session, padLayoutFor(addr.product()))
 }
 
 func readPadProfile(ctx context.Context, session *protocol.DeviceSession, layout padLayout) (PadProfile, error) {
@@ -513,13 +543,20 @@ func readPadProfile(ctx context.Context, session *protocol.DeviceSession, layout
 // commits, and reads the record back. If the readback does not match, or a
 // step fails after something was written, the backup is written back.
 func (c *OpenBitdoCore) PadApply(ctx context.Context, vidPid protocol.VidPid, edited PadProfile) (WriteRecoveryReport, error) {
+	return c.PadApplyAt(ctx, PadAddress{Enumerated: vidPid}, edited)
+}
+
+// PadApplyAt is PadApply for a controller that may have been reached under
+// the shared controller id.
+func (c *OpenBitdoCore) PadApplyAt(ctx context.Context, addr PadAddress, edited PadProfile) (WriteRecoveryReport, error) {
+	vidPid := addr.product()
 	// Nothing past the receiver's connection query has been exchanged with
 	// a real controller yet, so real writes stay behind advanced mode.
 	if !c.config.MockMode && c.transportOverride == nil && !c.AdvancedMode() {
 		return WriteRecoveryReport{}, errPolicyDenied(ReasonUnsupportedPid,
 			"writing controller profiles is not hardware-confirmed yet; turn on advanced mode to try it")
 	}
-	session, platform, done, err := c.padSession(ctx, vidPid)
+	session, platform, done, err := c.padSession(ctx, addr)
 	if err != nil {
 		return WriteRecoveryReport{}, err
 	}
@@ -560,7 +597,7 @@ func (c *OpenBitdoCore) PadApply(ctx context.Context, vidPid protocol.VidPid, ed
 			spans = append(spans, padRange{at, padMacroSection})
 		}
 	}
-	backupID := c.storeBackup(vidPid, configBackupPayload{kind: backupPad, padRecord: before.record, padMacros: before.Macros})
+	backupID := c.storeBackup(addr.Enumerated, configBackupPayload{kind: backupPad, padRecord: before.record, padMacros: before.Macros, padProduct: addr.Product})
 	report := WriteRecoveryReport{BackupID: backupID, HasBackupID: true}
 	effect := edited.LightEffect
 	if effect == 0 || !layout.hasLights() {
@@ -634,8 +671,9 @@ func writePadSpans(ctx context.Context, session *protocol.DeviceSession, record 
 
 // restorePadBackup writes a backed-up record back wherever the controller's
 // record now differs from it.
-func (c *OpenBitdoCore) restorePadBackup(ctx context.Context, vidPid protocol.VidPid, backup []byte, macros [PadSlots][PadMacros]PadMacro) error {
-	session, platform, done, err := c.padSession(ctx, vidPid)
+func (c *OpenBitdoCore) restorePadBackup(ctx context.Context, addr PadAddress, backup []byte, macros [PadSlots][PadMacros]PadMacro) error {
+	vidPid := addr.product()
+	session, platform, done, err := c.padSession(ctx, addr)
 	if err != nil {
 		return err
 	}
@@ -737,7 +775,14 @@ func PadMotionButtonName(target PadTarget) string {
 // Ultimate 2's mode switch chooses between XInput and DInput; a Pro 3
 // reached directly is on DInput or Switch; an Ultimate 2 Bluetooth reached
 // directly is always on Switch.
-func padPlatform(ctx context.Context, session *protocol.DeviceSession, vidPid protocol.VidPid) (byte, error) {
+func padPlatform(ctx context.Context, session *protocol.DeviceSession, addr PadAddress) (byte, error) {
+	vidPid := addr.product()
+	isU2 := vidPid.PID == 0x6012 || vidPid.PID == 0x6013
+	// Under the shared id a Pro 3 or Ultimate 2 Bluetooth is in XInput
+	// mode; an Ultimate 2 still says where its switch is.
+	if addr.shared() && !isU2 {
+		return protocol.U2PlatformXInput, nil
+	}
 	if vidPid.PID == 0x600f || vidPid.PID == 0x6011 {
 		return protocol.U2PlatformSwitch, nil
 	}
