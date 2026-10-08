@@ -125,6 +125,17 @@ func (m Model) viewHints() []keyHint {
 				{key: "I", label: "load file", help: "load a saved profile file into the draft"},
 			}, shell...)
 		}
+		if m.mapping.pad.macro.open {
+			return []keyHint{
+				{key: "t", label: "tap", help: "add a button tap: held 50 ms, then released"},
+				{key: "a", label: "step", help: "add an empty step after the selected one"},
+				{key: "b", label: "button", help: "hold or let go of a button in the selected step"},
+				{key: "l/r", label: "sticks", help: "turn the left or right stick in the selected step"},
+				{key: "←→", label: "time", help: "make the selected step shorter or longer"},
+				{key: "del", label: "remove"},
+				{key: "esc", label: "back", help: "back to the profile without saving"},
+			}
+		}
 		if m.mapping.pad.picking {
 			return []keyHint{
 				{key: "type", label: "to search", help: "narrow the list by name"},

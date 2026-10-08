@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"fmt"
+	"reflect"
 	"strings"
 
 	"github.com/bybrooklyn/openbitdo/internal/core"
@@ -57,6 +58,7 @@ const (
 	padRowLightEffect
 	padRowColor
 	padRowFireSpeed
+	padRowMacro
 )
 
 // Colour row selectors below PadLEDs are per-LED; these follow.
@@ -124,6 +126,9 @@ func buildPadRows() []padRow {
 	} {
 		rows = append(rows, padRow{kind: padRowOption, label: option.name, bit: option.bit})
 	}
+	for i := 0; i < core.PadMacros; i++ {
+		rows = append(rows, padRow{kind: padRowMacro, label: fmt.Sprintf("Macro %d", i+1), index: i})
+	}
 	rows = append(rows,
 		padRow{kind: padRowMotionTarget, label: "Motion steers"},
 		padRow{kind: padRowMotionButton, label: "Motion while pressing"},
@@ -165,6 +170,9 @@ type padEditor struct {
 	// rather than for the profile name.
 	typingColor bool
 	colorRow    int
+
+	// macro is the macro editor, open over the rows for one macro.
+	macro padMacroEditor
 }
 
 func padColorOf(slot *core.PadSlot, index int) *uint32 {
@@ -193,7 +201,8 @@ var padLightEffects = []struct {
 const padNameMax = 16
 
 func (s padEditor) dirty() bool {
-	return s.draft.Slots != s.loaded.Slots || s.draft.LightEffect != s.loaded.LightEffect
+	return s.draft.Slots != s.loaded.Slots || s.draft.LightEffect != s.loaded.LightEffect ||
+		!reflect.DeepEqual(s.draft.Macros, s.loaded.Macros)
 }
 
 // padEditing reports whether the Mapping tab is showing the controller
@@ -243,6 +252,9 @@ func (m Model) updatePad(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.mapping.pad.naming {
 			return m.updatePadName(msg)
+		}
+		if m.mapping.pad.macro.open {
+			return m.updatePadMacroEditor(msg)
 		}
 		if m.mapping.files.open {
 			return m.updateProfileFiles(msg)
@@ -442,6 +454,8 @@ func (m Model) triggerPadRow() (tea.Model, tea.Cmd) {
 			pad.naming, pad.nameInput, pad.typingColor = true, m.padSlot().Name, false
 		case padRowColor:
 			pad.naming, pad.nameInput, pad.typingColor, pad.colorRow = true, "", true, row.index
+		case padRowMacro:
+			m.openPadMacroEditor(row.index)
 		default:
 			m.padAdjustRow(row, 1)
 		}
@@ -458,7 +472,7 @@ func (m Model) triggerPadRow() (tea.Model, tea.Cmd) {
 		}
 	case m.mapping.cursor == rows+2: // Reset
 		m.padSnapshot()
-		pad.draft.Slots = pad.loaded.Slots
+		pad.draft.Slots, pad.draft.Macros, pad.draft.LightEffect = pad.loaded.Slots, pad.loaded.Macros, pad.loaded.LightEffect
 		m.mapping.statusMsg = "Draft reset."
 	}
 	return m, nil
@@ -636,6 +650,13 @@ func (m Model) padRowText(row padRow) (value string, changed bool) {
 		return "#" + core.FormatColor(a), a != b
 	case padRowFireSpeed:
 		return fmt.Sprintf("%d of 15", now.Lights.FireSpeed), now.Lights.FireSpeed != was.Lights.FireSpeed
+	case padRowMacro:
+		macro, before := pad.draft.Macros[pad.slot][row.index], pad.loaded.Macros[pad.slot][row.index]
+		changed := !reflect.DeepEqual(macro, before)
+		if macro.Empty() {
+			return "(none)  enter to make one", changed
+		}
+		return fmt.Sprintf("%s: %s plays %d steps", macro.Name, core.PadMotionButtonName(macro.Trigger), len(macro.Steps)), changed
 	}
 	on := "off"
 	if now.Options&row.bit != 0 {
@@ -652,6 +673,9 @@ func (m Model) padPanel(height int) devicePanel {
 
 	if pad.picking {
 		return m.padPickerPanel(panel, text)
+	}
+	if pad.macro.open {
+		return m.padMacroPanel(panel, text)
 	}
 	if m.mapping.files.open {
 		return m.profileFilesPanel(panel, text)
@@ -768,7 +792,7 @@ func (m Model) viewPad(height int) string {
 }
 
 func (m Model) clickPad(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
-	if m.mapping.loading || m.mapping.err != nil || m.mapping.files.open {
+	if m.mapping.loading || m.mapping.err != nil || m.mapping.files.open || m.mapping.pad.macro.open {
 		return m, nil
 	}
 	owner, ok := m.padPanel(m.height-3).ownerAt(msg.X, msg.Y)

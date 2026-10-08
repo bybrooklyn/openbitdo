@@ -62,7 +62,7 @@ func (s mappingState) dirty() bool {
 
 // typing reports whether keys are going into a text field or search box.
 func (s mappingState) typing() bool {
-	return s.kb.picking || s.kb.naming || s.pad.picking || s.pad.naming || s.kb.macro.open || s.files.open
+	return s.kb.picking || s.kb.naming || s.pad.picking || s.pad.naming || s.kb.macro.open || s.pad.macro.open || s.files.open
 }
 
 func (m Model) updateMapping(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -108,6 +108,7 @@ func (m Model) handleMappingApplyResult(report core.WriteRecoveryReport, err err
 			}
 			m.mapping.pad.loaded.Slots = m.mapping.pad.draft.Slots
 			m.mapping.pad.loaded.LightEffect = m.mapping.pad.draft.LightEffect
+			m.mapping.pad.loaded.Macros = m.mapping.pad.draft.Macros
 			m.mapping.pad.undo = nil
 		}
 	case report.RollbackFailed():

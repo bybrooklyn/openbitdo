@@ -61,7 +61,7 @@ asks the device which product it is. OpenBitdo lists 0x310b as detect-only today
 | Vibration strength per motor | yes | simulated |
 | Invert stick axes, swap sticks, swap triggers, swap d-pad and left stick | yes | simulated |
 | XInput vibration range | yes | no |
-| Macros: 4 per slot, recorded steps, repeat | yes | no |
+| Macros: 4 per slot, a trigger button, up to 200 steps, repeat and interval | yes | simulated. Built step by step; recording live input: no |
 | Motion (gyro) mapping: target stick, enabling button, hold or toggle, sensitivity, dead zone | yes | simulated |
 | Stick-ring lighting: off, tracing, fire ring, per-LED colours, speed | yes | simulated (colours by hex or swatch; no colour wheel) |
 | Stick and trigger calibration | yes | no |

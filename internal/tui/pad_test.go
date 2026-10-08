@@ -301,3 +301,70 @@ func TestPadEditorMotionAndLights(t *testing.T) {
 		t.Fatalf("the controller should hold the motion and light settings: %+v err=%v", profile.Slots[0].Motion, err)
 	}
 }
+
+func TestPadMacroEditorBuildsSavesAndApplies(t *testing.T) {
+	m, c := newTestModel(t, filepath.Join(t.TempDir(), "config.toml"))
+	m = loadDevicesAndDrain(t, m, c)
+	m.mockMode = true
+	next, cmd := m.navigate(screenMapping, 1)
+	m = drainCmds(t, next, cmd)
+
+	m.mapping.cursor = padRowIndex(t, "Macro 2")
+	m = press(t, m, "enter")
+	if !m.mapping.pad.macro.open || !strings.Contains(ansi.Strip(m.View()), "Macro 2 of slot 1") {
+		t.Fatal("enter on a macro row should open its editor")
+	}
+	// Tap A, then on the held step also hold R1 and push the left stick up,
+	// and make it longer. Letters here are commands, not shell shortcuts.
+	m = press(t, m, "t", "enter")
+	editor := m.mapping.pad.macro
+	if len(editor.macro.Steps) != 2 || editor.macro.Steps[0].Buttons != uint16(core.PadA) || editor.macro.Steps[1].Buttons != 0 {
+		t.Fatalf("a tap should add a held step and a released step: %+v", editor.macro.Steps)
+	}
+	m.mapping.pad.macro.cursor = padMacroHeadRows // the held step
+	m = press(t, m, "b", "down", "down", "down", "down", "down", "enter", "l", "right", "right")
+	step := m.mapping.pad.macro.macro.Steps[0]
+	if step.Buttons != uint16(core.PadA|core.PadR1) || step.Left != core.PadStickUp || step.Millis != 70 {
+		t.Fatalf("held step = %+v", step)
+	}
+
+	// Saving needs a name; a macro that ends holding something is refused.
+	m.mapping.pad.macro.cursor = padMacroHeadRows + 2 // Save
+	m = press(t, m, "enter")
+	if !m.mapping.pad.macro.open || !strings.Contains(m.mapping.pad.macro.problem, "name") {
+		t.Fatalf("saving without a name should say so: %q", m.mapping.pad.macro.problem)
+	}
+	m.mapping.pad.macro.cursor = padMacroRowName
+	m = press(t, m, "enter", "burst", "enter")
+	m.mapping.pad.macro.cursor = padMacroRowTrigger
+	m = press(t, m, "right") // Back paddle P2
+	m.mapping.pad.macro.cursor = padMacroHeadRows + 2
+	m = press(t, m, "enter")
+	if m.mapping.pad.macro.open || !m.mapping.dirty() {
+		t.Fatalf("expected the macro to save into the draft: %q", m.mapping.pad.macro.problem)
+	}
+	if value, changed := m.padRowText(padRows[padRowIndex(t, "Macro 2")]); !changed || value != "burst: Back paddle P2 plays 2 steps" {
+		t.Fatalf("macro row reads %q", value)
+	}
+
+	m.mapping.cursor = len(padRows)
+	nextModel, cmd := m.Update(*keyMsg("enter"))
+	m = drainCmds(t, nextModel.(Model), cmd)
+	if m.mapping.dirty() || !strings.Contains(m.mapping.statusMsg, "Applied and verified") {
+		t.Fatalf("expected a verified apply, status=%q", m.mapping.statusMsg)
+	}
+	profile, err := c.PadReadProfile(m.ctx, m.mapping.device.VidPid)
+	got := profile.Macros[0][1]
+	if err != nil || got.Name != "burst" || got.Trigger != core.PadPaddle2 || len(got.Steps) != 2 || got.Steps[0].Left != core.PadStickUp {
+		t.Fatalf("the controller should hold the macro: %+v err=%v", got, err)
+	}
+
+	// Removing it is an edit too.
+	m.mapping.cursor = padRowIndex(t, "Macro 2")
+	m = press(t, m, "enter")
+	m.mapping.pad.macro.cursor = padMacroHeadRows + 2 + 1 // Remove This Macro
+	m = press(t, m, "enter")
+	if !m.mapping.pad.draft.Macros[0][1].Empty() || !m.mapping.dirty() {
+		t.Fatal("removing the macro should empty it in the draft")
+	}
+}
