@@ -191,6 +191,7 @@ type configBackupPayload struct {
 	u2Profile     U2CoreProfile
 	u2ConfigBlob  []byte
 	keyboard      KeyboardProfile
+	padRecord     []byte
 }
 
 type deviceKind int
@@ -199,6 +200,7 @@ const (
 	backupJP108 deviceKind = iota
 	backupU2
 	backupKeyboard
+	backupPad
 )
 
 // WriteRecoveryReport describes the outcome of a backup-then-write-then-

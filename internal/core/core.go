@@ -41,19 +41,31 @@ type OpenBitdoCore struct {
 	// use, where transport() falls back to protocol.NewHidTransport().
 	transportOverride protocol.Transport
 
-	// mockKeyboard is the simulated keyboard mock mode talks to.
+	// mockKeyboard and mockPad are the simulated devices mock mode talks
+	// to.
 	mockKeyboard *protocol.JP108Simulator
+	mockPad      *protocol.U2Simulator
 }
 
+// transport is the transport for a keyboard-style device; see transportFor.
 func (c *OpenBitdoCore) transport() protocol.Transport {
+	return c.transportFor(protocol.VidPid{})
+}
+
+// transportFor is the transport to reach target through.
+func (c *OpenBitdoCore) transportFor(target protocol.VidPid) protocol.Transport {
 	var t protocol.Transport
 	if c.transportOverride != nil {
 		t = c.transportOverride
 	} else if c.config.MockMode {
-		// Mock mode has no hardware, but a keyboard's profile is worth
-		// exploring: a simulated Retro 108 stands in, so the real protocol
-		// code runs against it and edits persist for the session.
+		// Mock mode has no hardware, but a device's profile is worth
+		// exploring: a simulated Retro 108 or Ultimate 2 stands in, so the
+		// real protocol code runs against it and edits persist for the
+		// session.
 		t = c.mockKeyboard
+		if supportsPadProfile(target) {
+			t = c.mockPad
+		}
 	} else {
 		t = protocol.NewHidTransport()
 	}
@@ -83,6 +95,7 @@ func New(config Config) *OpenBitdoCore {
 		http:             &http.Client{},
 		enumerateDevices: protocol.EnumerateHIDDevices,
 		mockKeyboard:     &protocol.JP108Simulator{Volume: 3},
+		mockPad:          &protocol.U2Simulator{Physical: protocol.U2PlatformXInput},
 	}
 	c.advancedMode.Store(config.AdvancedMode)
 	return c

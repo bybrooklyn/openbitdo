@@ -1,0 +1,455 @@
+package core
+
+import (
+	"bytes"
+	"context"
+	"encoding/binary"
+	"fmt"
+	"math"
+	"unicode/utf16"
+
+	"github.com/bybrooklyn/openbitdo/internal/protocol"
+)
+
+// This file is the controller side of the core: an Ultimate 2's whole
+// configuration (three profile slots, each with a button map, stick and
+// trigger ranges, vibration strength and option switches), read from and
+// written to the controller's configuration record. The record's layout is
+// in docs/clean-room-evidence/dossiers/6012/u2_adv.toml.
+
+const (
+	// PadSlots is how many profile slots a controller holds.
+	PadSlots = 3
+	// PadButtons is how many inputs a slot's button map covers.
+	PadButtons = 22
+
+	padInUse = 0x20200911 // marks a slot or one of its sections as set
+
+	padOffFlags     = 0x000
+	padOffCRC       = 0x00c
+	padOffPlatform  = 0x010
+	padOffActive    = 0x012
+	padOffName      = 0x014 // 32 bytes per slot
+	padOffVibration = 0x074 // 12: flag, two float32
+	padOffSticks    = 0x098 // 8: flag, two (start, end)
+	padOffTriggers  = 0x0b0 // 8: flag, two (start, end)
+	padOffOptions   = 0x0c8 // 8: flag, option word
+	padOffButtons   = 0x0e0 // 92: flag, 22 targets
+
+	padNameLen = 32
+)
+
+// PadTarget is what a controller input is assigned to: one value from the
+// controller's own function list (see PadTargets).
+type PadTarget uint32
+
+// PadRange is the part of a stick's or trigger's travel that is used: below
+// Start reads as nothing, End and above as full.
+type PadRange struct{ Start, End byte }
+
+// Option switches a slot can have on.
+const (
+	PadInvertLeftX   uint32 = 0x0001
+	PadInvertLeftY   uint32 = 0x0002
+	PadInvertRightX  uint32 = 0x0004
+	PadInvertRightY  uint32 = 0x0008
+	PadSwapSticks    uint32 = 0x0010
+	PadSwapTriggers  uint32 = 0x0080
+	PadSwapDpadStick uint32 = 0x0100
+)
+
+// PadSlot is one profile slot.
+type PadSlot struct {
+	// InUse is whether the slot holds a profile. An unused slot behaves as
+	// the controller's defaults.
+	InUse bool
+	Name  string
+	// Buttons is the button map, indexed as PadInputs.
+	Buttons [PadButtons]PadTarget
+	// LeftStick and RightStick are the used range of each stick (0-128);
+	// LeftTrigger and RightTrigger of each trigger (0-255).
+	LeftStick, RightStick     PadRange
+	LeftTrigger, RightTrigger PadRange
+	// VibrationLeft and VibrationRight are motor strengths, 0 (off) to 5.
+	VibrationLeft, VibrationRight int
+	// Options is the slot's option switches (the Pad* bits). Bits this
+	// program does not name are kept as read.
+	Options uint32
+}
+
+// PadProfile is a controller's configuration for one platform.
+type PadProfile struct {
+	// Platform is the platform bank this was read from.
+	Platform byte
+	// ActiveSlot is the slot the controller is using, 0-2. It is changed
+	// on the controller, not from here.
+	ActiveSlot int
+	Slots      [PadSlots]PadSlot
+
+	// record is the raw record this was decoded from. Writes start from
+	// it so everything this program does not model is preserved.
+	record []byte
+}
+
+func decodePadName(raw []byte) string {
+	units := make([]uint16, 0, len(raw)/2)
+	for i := 0; i+1 < len(raw); i += 2 {
+		unit := binary.BigEndian.Uint16(raw[i:])
+		if unit == 0 {
+			break
+		}
+		if unit == 0xffff || raw[i] == 0xff || raw[i+1] == 0xff {
+			return "" // erased flash
+		}
+		units = append(units, unit)
+	}
+	return string(utf16.Decode(units))
+}
+
+func encodePadName(name string) ([]byte, error) {
+	units := utf16.Encode([]rune(name))
+	if len(units) > padNameLen/2 {
+		return nil, fmt.Errorf("a profile name holds at most %d characters", padNameLen/2)
+	}
+	raw := make([]byte, padNameLen)
+	for i, unit := range units {
+		binary.BigEndian.PutUint16(raw[i*2:], unit)
+	}
+	return raw, nil
+}
+
+func vibrationLevel(strength float32) int {
+	if math.IsNaN(float64(strength)) {
+		return 5
+	}
+	// Stored as level/5; a small tolerance absorbs float rounding.
+	return max(0, min(5, int(strength*5+0.01)))
+}
+
+func flagAt(record []byte, offset int) bool {
+	return binary.LittleEndian.Uint32(record[offset:]) == padInUse
+}
+
+// defaultPadSlot is how a slot behaves when nothing is set: every input is
+// itself and ranges are full.
+func defaultPadSlot(platform byte) PadSlot {
+	slot := PadSlot{
+		LeftStick: PadRange{0, 128}, RightStick: PadRange{0, 128},
+		LeftTrigger: PadRange{0, 255}, RightTrigger: PadRange{0, 255},
+		VibrationLeft: 5, VibrationRight: 5,
+	}
+	for i, input := range PadInputs {
+		slot.Buttons[i] = input.defaultFor(platform)
+	}
+	return slot
+}
+
+func decodePadProfile(record []byte) (PadProfile, error) {
+	if len(record) != protocol.U2RecordSize {
+		return PadProfile{}, fmt.Errorf("configuration record is %d bytes, expected %d", len(record), protocol.U2RecordSize)
+	}
+	profile := PadProfile{
+		Platform:   byte(binary.LittleEndian.Uint16(record[padOffPlatform:])),
+		ActiveSlot: int(binary.LittleEndian.Uint16(record[padOffActive:])),
+		record:     append([]byte(nil), record...),
+	}
+	if profile.ActiveSlot >= PadSlots {
+		profile.ActiveSlot = 0
+	}
+	for i := range profile.Slots {
+		slot := defaultPadSlot(profile.Platform)
+		slot.InUse = flagAt(record, padOffFlags+i*4)
+		if slot.InUse {
+			slot.Name = decodePadName(record[padOffName+i*padNameLen:][:padNameLen])
+		}
+		// Each section counts only when its own flag says it is set.
+		if at := padOffButtons + i*92; flagAt(record, at) {
+			for b := range slot.Buttons {
+				slot.Buttons[b] = PadTarget(binary.LittleEndian.Uint32(record[at+4+b*4:]))
+			}
+		}
+		if at := padOffSticks + i*8; flagAt(record, at) {
+			slot.LeftStick = PadRange{record[at+4], record[at+5]}
+			slot.RightStick = PadRange{record[at+6], record[at+7]}
+		}
+		if at := padOffTriggers + i*8; flagAt(record, at) {
+			slot.LeftTrigger = PadRange{record[at+4], record[at+5]}
+			slot.RightTrigger = PadRange{record[at+6], record[at+7]}
+		}
+		if at := padOffVibration + i*12; flagAt(record, at) {
+			slot.VibrationLeft = vibrationLevel(math.Float32frombits(binary.LittleEndian.Uint32(record[at+4:])))
+			slot.VibrationRight = vibrationLevel(math.Float32frombits(binary.LittleEndian.Uint32(record[at+8:])))
+		}
+		if at := padOffOptions + i*8; flagAt(record, at) {
+			slot.Options = binary.LittleEndian.Uint32(record[at+4:])
+		}
+		profile.Slots[i] = slot
+	}
+	return profile, nil
+}
+
+func (s PadSlot) validate() error {
+	for _, r := range []struct {
+		name string
+		r    PadRange
+		max  byte
+	}{{"left stick", s.LeftStick, 128}, {"right stick", s.RightStick, 128},
+		{"left trigger", s.LeftTrigger, 255}, {"right trigger", s.RightTrigger, 255}} {
+		if r.r.Start >= r.r.End || r.r.End > r.max {
+			return fmt.Errorf("%s range %d-%d is not within 0-%d", r.name, r.r.Start, r.r.End, r.max)
+		}
+	}
+	if s.VibrationLeft < 0 || s.VibrationLeft > 5 || s.VibrationRight < 0 || s.VibrationRight > 5 {
+		return fmt.Errorf("vibration strength %d/%d is outside 0-5", s.VibrationLeft, s.VibrationRight)
+	}
+	for i, target := range s.Buttons {
+		if !padTargetKnown(target) {
+			return fmt.Errorf("%s is assigned %#08x, which is not a function this controller has", PadInputs[i].Name, uint32(target))
+		}
+	}
+	_, err := encodePadName(s.Name)
+	return err
+}
+
+// padRange is a span of the record that changed.
+type padRange struct{ offset, length int }
+
+// encodePadSlot writes slot i into record and returns the spans it changed.
+// A section equal to what the record already decodes to is left alone, so
+// applying an unedited profile writes nothing.
+func encodePadSlot(record []byte, i int, slot, was PadSlot) ([]padRange, error) {
+	if err := slot.validate(); err != nil {
+		return nil, err
+	}
+	var changed []padRange
+	put := func(offset int, section []byte) {
+		if !bytes.Equal(record[offset:offset+len(section)], section) {
+			copy(record[offset:], section)
+			changed = append(changed, padRange{offset, len(section)})
+		}
+	}
+	flag := binary.LittleEndian.AppendUint32(nil, padInUse)
+
+	if slot.Name != was.Name {
+		name, _ := encodePadName(slot.Name)
+		put(padOffName+i*padNameLen, name)
+	}
+	if slot.Buttons != was.Buttons {
+		section := append([]byte(nil), flag...)
+		for _, target := range slot.Buttons {
+			section = binary.LittleEndian.AppendUint32(section, uint32(target))
+		}
+		put(padOffButtons+i*92, section)
+	}
+	if slot.LeftStick != was.LeftStick || slot.RightStick != was.RightStick {
+		put(padOffSticks+i*8, append(append([]byte(nil), flag...),
+			slot.LeftStick.Start, slot.LeftStick.End, slot.RightStick.Start, slot.RightStick.End))
+	}
+	if slot.LeftTrigger != was.LeftTrigger || slot.RightTrigger != was.RightTrigger {
+		put(padOffTriggers+i*8, append(append([]byte(nil), flag...),
+			slot.LeftTrigger.Start, slot.LeftTrigger.End, slot.RightTrigger.Start, slot.RightTrigger.End))
+	}
+	if slot.VibrationLeft != was.VibrationLeft || slot.VibrationRight != was.VibrationRight {
+		section := append([]byte(nil), flag...)
+		section = binary.LittleEndian.AppendUint32(section, math.Float32bits(float32(slot.VibrationLeft)*0.2))
+		section = binary.LittleEndian.AppendUint32(section, math.Float32bits(float32(slot.VibrationRight)*0.2))
+		put(padOffVibration+i*12, section)
+	}
+	if slot.Options != was.Options {
+		put(padOffOptions+i*8, binary.LittleEndian.AppendUint32(append([]byte(nil), flag...), slot.Options))
+	}
+	// A slot with anything set in it is in use.
+	if len(changed) > 0 || slot.InUse != was.InUse {
+		mark := make([]byte, 4)
+		if slot.InUse || len(changed) > 0 {
+			mark = flag
+		}
+		put(padOffFlags+i*4, mark)
+	}
+	return changed, nil
+}
+
+func supportsPadProfile(vidPid protocol.VidPid) bool {
+	return protocol.DeviceProfileFor(vidPid).Capability.SupportsU2SlotConfig
+}
+
+// padSession opens a session and gets the controller ready to exchange its
+// record: checks it is connected, pauses its input reports and selects the
+// platform its mode switch is on. done resumes input reports and closes.
+func (c *OpenBitdoCore) padSession(ctx context.Context, vidPid protocol.VidPid) (session *protocol.DeviceSession, platform byte, done func(), err error) {
+	if !supportsPadProfile(vidPid) {
+		return nil, 0, nil, errPolicyDenied(ReasonUnsupportedPid, "controller profiles are not supported for %s", vidPid)
+	}
+	config := protocol.SessionConfig{
+		AllowUnsafe: true, BrickRiskAck: true, Experimental: true,
+		RetryPolicy: protocol.DefaultRetryPolicy(), TimeoutProfile: protocol.DefaultTimeoutProfile(), TraceEnabled: true,
+	}
+	session, perr := protocol.NewDeviceSession(ctx, c.transportFor(vidPid), vidPid, config)
+	if perr != nil {
+		return nil, 0, nil, errProtocol(perr)
+	}
+	fail := func(err error) (*protocol.DeviceSession, byte, func(), error) {
+		_ = session.Close()
+		return nil, 0, nil, err
+	}
+	connected, perr := session.U2Connected(ctx)
+	if perr != nil {
+		return fail(errProtocol(perr))
+	}
+	if !connected {
+		return fail(errInvalidState("the controller is off or not connected to its receiver"))
+	}
+	if perr := session.U2SetInputReports(ctx, false); perr != nil {
+		return fail(errProtocol(perr))
+	}
+	done = func() {
+		_ = session.U2SetInputReports(context.WithoutCancel(ctx), true)
+		_ = session.Close()
+	}
+	platform, perr = session.U2PhysicalPlatform(ctx)
+	if perr == nil {
+		perr = session.U2SelectPlatform(ctx, platform)
+	}
+	if perr != nil {
+		done()
+		return nil, 0, nil, errProtocol(perr)
+	}
+	return session, platform, done, nil
+}
+
+// PadReadProfile reads a controller's configuration for the platform its
+// mode switch is on.
+func (c *OpenBitdoCore) PadReadProfile(ctx context.Context, vidPid protocol.VidPid) (PadProfile, error) {
+	session, _, done, err := c.padSession(ctx, vidPid)
+	if err != nil {
+		return PadProfile{}, err
+	}
+	defer done()
+	return readPadProfile(ctx, session)
+}
+
+func readPadProfile(ctx context.Context, session *protocol.DeviceSession) (PadProfile, error) {
+	record, err := session.U2ReadRecord(ctx, protocol.U2RecordSize)
+	if err != nil {
+		return PadProfile{}, errProtocol(err)
+	}
+	profile, err := decodePadProfile(record)
+	if err != nil {
+		return PadProfile{}, errProtocol(err)
+	}
+	return profile, nil
+}
+
+// PadApply writes an edited profile to the controller: it reads the record
+// first and keeps it as a backup, writes only the sections that changed,
+// commits, and reads the record back. If the readback does not match, or a
+// step fails after something was written, the backup is written back.
+func (c *OpenBitdoCore) PadApply(ctx context.Context, vidPid protocol.VidPid, edited PadProfile) (WriteRecoveryReport, error) {
+	// Nothing past the receiver's connection query has been exchanged with
+	// a real controller yet, so real writes stay behind advanced mode.
+	if !c.config.MockMode && c.transportOverride == nil && !c.AdvancedMode() {
+		return WriteRecoveryReport{}, errPolicyDenied(ReasonUnsupportedPid,
+			"writing controller profiles is not hardware-confirmed yet; turn on advanced mode to try it")
+	}
+	session, platform, done, err := c.padSession(ctx, vidPid)
+	if err != nil {
+		return WriteRecoveryReport{}, err
+	}
+	defer done()
+	if edited.Platform != platform {
+		return WriteRecoveryReport{}, errInvalidState("the controller's mode switch moved since this profile was read; reload it")
+	}
+
+	before, err := readPadProfile(ctx, session)
+	if err != nil {
+		return WriteRecoveryReport{}, err
+	}
+	record := append([]byte(nil), before.record...)
+	var spans []padRange
+	for i := range edited.Slots {
+		changed, err := encodePadSlot(record, i, edited.Slots[i], before.Slots[i])
+		if err != nil {
+			return WriteRecoveryReport{}, errInvalidState("slot %d: %v", i+1, err)
+		}
+		spans = append(spans, changed...)
+	}
+	backupID := c.storeBackup(vidPid, configBackupPayload{kind: backupPad, padRecord: before.record})
+	report := WriteRecoveryReport{BackupID: backupID, HasBackupID: true}
+	if len(spans) == 0 {
+		report.WriteApplied = true
+		return report, nil
+	}
+
+	applyErr := writePadSpans(ctx, session, record, spans)
+	if applyErr == nil {
+		report.WriteApplied = true
+		return report, nil
+	}
+	report.RollbackAttempted, report.WriteError = true, applyErr.Error()
+	if rollbackErr := writePadSpans(ctx, session, before.record, spans); rollbackErr != nil {
+		report.RollbackError = rollbackErr.Error()
+		return report, nil
+	}
+	report.RollbackSucceeded = true
+	return report, nil
+}
+
+// writePadSpans writes the given spans of record, commits, and checks the
+// controller now holds them.
+func writePadSpans(ctx context.Context, session *protocol.DeviceSession, record []byte, spans []padRange) error {
+	for _, span := range spans {
+		if err := session.U2WriteRecordRange(ctx, record, span.offset, span.length); err != nil {
+			return fmt.Errorf("write at %#x: %w", span.offset, err)
+		}
+	}
+	if err := session.U2Commit(ctx); err != nil {
+		return fmt.Errorf("commit: %w", err)
+	}
+	got, err := session.U2ReadRecord(ctx, protocol.U2RecordSize)
+	if err != nil {
+		return fmt.Errorf("readback failed: %w", err)
+	}
+	for _, span := range spans {
+		if !bytes.Equal(got[span.offset:span.offset+span.length], record[span.offset:span.offset+span.length]) {
+			return fmt.Errorf("readback mismatch at %#x: the controller did not keep what was written", span.offset)
+		}
+	}
+	return nil
+}
+
+// restorePadBackup writes a backed-up record back wherever the controller's
+// record now differs from it.
+func (c *OpenBitdoCore) restorePadBackup(ctx context.Context, vidPid protocol.VidPid, backup []byte) error {
+	session, platform, done, err := c.padSession(ctx, vidPid)
+	if err != nil {
+		return err
+	}
+	defer done()
+	if byte(binary.LittleEndian.Uint16(backup[padOffPlatform:])) != platform {
+		return errInvalidState("this backup is for the other position of the controller's mode switch")
+	}
+	current, perr := session.U2ReadRecord(ctx, protocol.U2RecordSize)
+	if perr != nil {
+		return errProtocol(perr)
+	}
+	// Runs of differing bytes, leaving the header's crc, platform and
+	// active slot (0x0c-0x13) to the controller.
+	var spans []padRange
+	for i := 0; i < len(backup); i++ {
+		if (i >= padOffCRC && i < padOffName) || current[i] == backup[i] {
+			continue
+		}
+		start := i
+		for i < len(backup) && current[i] != backup[i] && (i < padOffCRC || i >= padOffName) {
+			i++
+		}
+		spans = append(spans, padRange{start, i - start})
+	}
+	if len(spans) == 0 {
+		return nil
+	}
+	if err := writePadSpans(ctx, session, backup, spans); err != nil {
+		return errProtocol(err)
+	}
+	return nil
+}

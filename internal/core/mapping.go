@@ -382,6 +382,9 @@ func (c *OpenBitdoCore) RestoreBackup(ctx context.Context, backupID ConfigBackup
 	if backup.payload.kind == backupU2 {
 		return u2MappingDeferredError()
 	}
+	if backup.payload.kind == backupPad {
+		return c.restorePadBackup(ctx, backup.target, backup.payload.padRecord)
+	}
 
 	session, err := c.openSessionForOps(ctx, backup.target)
 	if err != nil {
