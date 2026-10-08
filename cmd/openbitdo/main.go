@@ -224,7 +224,12 @@ func run() error {
 		cancel()
 	}()
 
-	nav := input.Start(ctx)
+	// Mock mode must not touch attached hardware: no controller navigation
+	// stream, and no hotplug events from real devices changing a mock list.
+	nav := input.StartResult{Events: make(chan input.NavEvent)}
+	if !*options.mock {
+		nav = input.Start(ctx)
+	}
 
 	model := tui.NewModel(ctx, cancel, c, nav, tui.Options{
 		Build:    build,

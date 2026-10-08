@@ -18,6 +18,9 @@ const (
 	CodeUnknownCommand       ErrorCode = "UnknownCommand"
 	CodeDeviceNotOpen        ErrorCode = "DeviceNotOpen"
 	CodeDeviceDisconnected   ErrorCode = "DeviceDisconnected"
+	// CodePermissionDenied means the OS refused to open the device node for
+	// this user, as opposed to any other open failure.
+	CodePermissionDenied ErrorCode = "PermissionDenied"
 	// CodeU2ButtonMapUnavailable is returned by U2ReadButtonMap/
 	// U2WriteButtonMap for every call — see errU2ButtonMapChunkingUnconfirmed.
 	CodeU2ButtonMapUnavailable ErrorCode = "U2ButtonMapUnavailable"

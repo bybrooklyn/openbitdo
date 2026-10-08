@@ -15,3 +15,5 @@ import (
 func openNavDevice(info hid.DeviceInfo) (navDevice, error) {
 	return machid.Open(int(info.VendorID), int(info.ProductID), int(info.UsagePage), int(info.Usage))
 }
+
+func enumerateNavDevices() []hid.DeviceInfo { return hid.Enumerate(bitdoVID, 0) }
