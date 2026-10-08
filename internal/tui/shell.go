@@ -306,7 +306,7 @@ func (m Model) inSubView() bool {
 	case screenDiagnostics:
 		return m.diag.showSupportRequest
 	case screenMapping:
-		return m.mapping.previewing() || m.mapping.applying || m.mapping.kb.picking || m.mapping.kb.naming
+		return m.mapping.applying || m.mapping.typing()
 	}
 	return false
 }
@@ -460,5 +460,5 @@ func (m Model) openMapping(device core.AppDevice) (Model, tea.Cmd) {
 	if m.mapping.kind == core.KindJP108 {
 		return m, cmdKeyboardRead(m.ctx, m.core, device.VidPid)
 	}
-	return m, cmdU2ReadProfile(m.ctx, m.core, device.VidPid, core.U2Slot1)
+	return m, cmdPadRead(m.ctx, m.core, device.VidPid)
 }

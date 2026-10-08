@@ -108,22 +108,20 @@ func (m Model) viewHints() []keyHint {
 				{key: "X", label: "erase", help: "erase the keyboard's profile (asks first)"},
 			}, shell...)
 		}
-		if m.mapping.previewing() {
+		if m.mapping.pad.picking {
 			return []keyHint{
-				{key: "p", label: "next slot", help: "preview the next slot"},
-				{key: choose, label: "load slot", help: "load this slot into the editor"},
-				{key: back, label: "back", help: "back to the editor"},
+				{key: "type", label: "to search", help: "narrow the list by name"},
+				{key: move, label: "move"},
+				{key: "enter", label: "assign"},
+				{key: "esc", label: "cancel"},
 			}
 		}
-		hints := []keyHint{
-			{key: move, label: "move", help: "move through the rows (j/k too)"},
-			{key: "←→", label: "change", help: "change the selected row's target"},
-			{key: choose, label: "run row", help: "run Apply, Undo or Reset"},
-		}
-		if m.mapping.kind == core.KindUltimate2 {
-			hints = append(hints, keyHint{key: "p", label: "preview slot", help: "look at another slot"})
-		}
-		return append(hints, shell...)
+		return append([]keyHint{
+			{key: move, label: "move", help: "move through the rows (j/k, pgup/pgdn too)"},
+			{key: choose, label: "assign", help: "choose what a button does; on a setting, change it"},
+			{key: "←→", label: "step", help: "step a value or a choice; [ and ] step a range by 10"},
+			{key: "del", label: "default", help: "put a button back to its normal function"},
+		}, shell...)
 
 	case screenButtons:
 		return append([]keyHint{{key: "c", label: "clear", help: "forget what has been pressed so far"}}, shell...)
@@ -161,7 +159,7 @@ func (m Model) capturingText() bool {
 	if m.modal.active {
 		return false
 	}
-	return (m.screen == screenDevices && m.devices.filtering) || (m.keyboardEditing() && (m.mapping.kb.picking || m.mapping.kb.naming))
+	return (m.screen == screenDevices && m.devices.filtering) || (m.screen == screenMapping && m.mapping.typing())
 }
 
 func renderHint(h keyHint) string {

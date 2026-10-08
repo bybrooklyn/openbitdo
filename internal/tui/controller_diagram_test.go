@@ -5,7 +5,6 @@ import (
 	"encoding/base64"
 	"fmt"
 	"image/png"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -171,31 +170,5 @@ func TestRenderControllerDiagram_AlwaysIncludesLabeledASCII(t *testing.T) {
 	}
 	if !strings.Contains(ansi.Strip(view), "[K1") {
 		t.Fatal("expected the labeled ASCII grid regardless of Kitty support")
-	}
-}
-
-// TestViewMapping_IncludesControllerDiagram is the integration check: the
-// real Mapping Editor screen must actually include the diagram, not just
-// the isolated renderControllerDiagram function.
-func TestViewMapping_IncludesControllerDiagram(t *testing.T) {
-	t.Setenv("KITTY_WINDOW_ID", "")
-	t.Setenv("TERM", "xterm-256color")
-	t.Setenv("TERM_PROGRAM", "")
-
-	m, _ := newTestModel(t, filepath.Join(t.TempDir(), "config.toml"))
-	profile := core.U2CoreProfile{Mappings: []core.U2ButtonMapping{
-		{Button: core.AllU2Buttons[0], Target: core.U2FuncA},
-		{Button: core.AllU2Buttons[1], Target: core.U2FuncB},
-	}}
-	m.mapping = mappingState{
-		device:   core.AppDevice{Name: "Ultimate2"},
-		kind:     core.KindUltimate2,
-		u2Loaded: profile, u2Draft: profile,
-		cursor: 1,
-	}
-	view := m.viewMapping(30)
-	plain := ansi.Strip(view)
-	if !strings.Contains(plain, "[A") || !strings.Contains(plain, "[B") {
-		t.Fatalf("expected the controller diagram's button grid in the rendered Mapping Editor, got:\n%s", plain)
 	}
 }

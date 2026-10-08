@@ -4,6 +4,22 @@ All notable changes to OpenBitdo are tracked here.
 
 ## Unreleased
 
+### Added
+
+- Retro 108: the Mapping tab edits the whole profile. Any of the 104 assignable keys can be set to
+  a key (with an optional modifier), a media key or a mouse action through a searchable list; the
+  Win, Alt+Tab and Alt+F4 locks and the volume level are settings; the profile can be renamed or
+  erased. Each write is read back, and what was written is put back if the keyboard did not keep
+  it.
+- Ultimate 2: the controller's real configuration protocol (a checksummed header over one
+  1592-byte record per platform, written by byte range and committed) replaces frames that no
+  controller ever answered. A profile editor covers three slots, the 22-input button map (back
+  paddles and extra buttons included), stick and trigger ranges, vibration strength and option
+  switches. It runs against a simulated controller in `--mock`; on real hardware it stays behind
+  advanced mode until the exchange has been confirmed on a controller.
+- A 2.4G receiver is asked whether its controller is connected. A receiver whose controller is
+  off is shown as "Controller off" rather than as a working device.
+
 ### Fixed
 
 - Linux: devices could not be opened. OpenBitdo now talks to devices through the kernel's hidraw

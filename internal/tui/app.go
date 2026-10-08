@@ -16,7 +16,6 @@ import (
 	"github.com/bybrooklyn/openbitdo/internal/protocol"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/charmbracelet/x/ansi"
 )
 
 type screen int
@@ -179,6 +178,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case eraseKeyboardMsg, keyboardErasedMsg:
 		return m.updateKeyboard(msg)
 
+	case padLoadedMsg, padApplyResultMsg:
+		return m.updatePad(msg)
+
 	case discardMappingMsg:
 		m.modal = modal{}
 		switch msg.action {
@@ -192,8 +194,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case discardActionQuit:
 			m.cancel()
 			return m, tea.Quit
-		case discardActionLoadSlot:
-			return m.loadPreviewedSlotIntoDraft()
 		}
 		return m, nil
 
@@ -387,10 +387,13 @@ func (m Model) routeMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		case screenDiagnostics:
 			next, cmd = inner.clickDiagnostics(local)
 		case screenMapping:
-			if inner.keyboardEditing() {
+			switch {
+			case inner.keyboardEditing():
 				next, cmd = inner.clickKeyboard(local)
-			} else {
-				next, cmd = inner.clickMapping(local)
+			case inner.padEditing():
+				next, cmd = inner.clickPad(local)
+			default:
+				next, cmd = inner, nil
 			}
 		case screenSettings:
 			next, cmd = inner.clickSettings(local)
@@ -425,8 +428,14 @@ func (m Model) routeMouseWheel(delta int) (tea.Model, tea.Cmd) {
 			}
 			break
 		}
-		inner.mapping.cursor = clampInt(inner.mapping.cursor+delta, 0, inner.mapping.rowCount()-1)
-		inner.ensureMappingCursorVisible()
+		if inner.padEditing() {
+			if inner.mapping.pad.picking {
+				inner.mapping.pad.pickCursor = clampInt(inner.mapping.pad.pickCursor+delta, 0, len(inner.padPickerChoices())-1)
+			} else {
+				inner.mapping.cursor = clampInt(inner.mapping.cursor+delta, 0, inner.mapping.rowCount()-1)
+				inner.ensurePadCursorVisible()
+			}
+		}
 	case screenSettings:
 		inner.settingsInfoOffset = clampInt(inner.settingsInfoOffset+delta, 0, inner.settingsInfoMaxOffset())
 	}
@@ -442,39 +451,6 @@ func (m Model) clickDevices(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		return m.triggerDevicesEnter()
 	}
 	return m, nil
-}
-
-func (m Model) clickMapping(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
-	layout := calculateLayout(m.width, m.height)
-	content := rect{x: 0, y: layout.headerHeight, w: m.width, h: layout.bodyHeight}
-	if !content.contains(msg.X, msg.Y) {
-		return m, nil
-	}
-	line := renderedLine(m.viewMapping(layout.bodyHeight), msg.Y-layout.headerHeight)
-	editableRows := m.mapping.rowCount() - 3
-	start, end, _ := viewportWindow(editableRows, m.mapping.cursor, m.mapping.rowOffset, m.mappingVisibleRows())
-	for i := start; i < end; i++ {
-		if strings.Contains(line, m.mappingRowText(i)) {
-			m.mapping.cursor = i
-			return m, nil
-		}
-	}
-	actions := []string{"Apply Changes", "Undo Last Edit", "Reset Draft"}
-	for i, label := range actions {
-		if strings.Contains(line, label) {
-			m.mapping.cursor = editableRows + i
-			return m.triggerMappingRow()
-		}
-	}
-	return m, nil
-}
-
-func renderedLine(rendered string, row int) string {
-	lines := strings.Split(ansi.Strip(rendered), "\n")
-	if row < 0 || row >= len(lines) {
-		return ""
-	}
-	return lines[row]
 }
 
 func (m Model) clickDiagnostics(msg tea.MouseMsg) (tea.Model, tea.Cmd) {

@@ -10,8 +10,9 @@ OpenBitdo is unofficial and not affiliated with 8BitDo. Device writes always car
 - Detect connected 8BitDo devices and give each a plain verdict: working, limited (it can be read but not changed), can't connect, or no access.
 - Check the connection, and view, copy or save the report.
 - Say for every device what you can do with it now, and what you can't do yet and why.
-- Read and assign the ten dedicated buttons (A, B, K1-K8) of a Retro 108 keyboard.
-- Preview Ultimate 2 mapping in mock mode only; real Ultimate 2 mapping is blocked with the reason `button-map framing not hardware-confirmed`.
+- Retro 108 keyboard: assign any of its 104 keys and buttons (A, B, K1-K8 included) to a key with an optional modifier, a media key or a mouse action; set the Win / Alt+Tab / Alt+F4 locks and the volume level; rename or erase the profile.
+- Ultimate 2 controller: a full profile editor (three slots, button map with back paddles and extra buttons, stick and trigger ranges, vibration, option switches) runs against a simulated controller in mock mode. On a real controller it is blocked with the reason `button-map framing not hardware-confirmed` unless advanced mode is on, because that exchange has not been confirmed on hardware yet.
+- Tell a plugged-in 2.4G receiver whose controller is switched off from a working controller.
 - Show Firmware Update as disabled and deferred in `v0.0.3`; activating it does not download firmware, preflight firmware, or open a device session.
 - Keep unconfirmed devices in safe read-only or detect-only paths.
 - Navigate with a keyboard, mouse, or an 8BitDo controller when the OS exposes that controller as a standard HID gamepad (`usagePage=0x0001`, `usage=0x0005`).
@@ -107,7 +108,7 @@ Release support contract:
 - Linux `x86_64` and `aarch64`: Ubuntu 22.04-era glibc or newer.
 - macOS arm64: deployment target macOS 13; unsigned and non-notarized.
 - Firmware: unavailable.
-- Ultimate 2 mapping: mock preview only.
+- Ultimate 2 mapping: mock preview only; on real hardware behind advanced mode and unconfirmed.
 - Controller navigation: available only when the OS exposes a standard HID gamepad interface.
 
 ## License

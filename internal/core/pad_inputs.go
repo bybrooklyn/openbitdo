@@ -125,3 +125,9 @@ func (t PadTarget) String() string {
 	}
 	return fmt.Sprintf("Function %#08x", uint32(t))
 }
+
+// DefaultTarget is what input i does on this profile's platform when it has
+// no assignment.
+func (p PadProfile) DefaultTarget(i int) PadTarget {
+	return PadInputs[i].defaultFor(p.Platform)
+}

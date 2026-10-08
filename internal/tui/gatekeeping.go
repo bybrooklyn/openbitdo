@@ -32,7 +32,7 @@ func firmwareDisabledReason(device core.AppDevice, firmwareAvailable, unsafeAckn
 
 // mappingDisabledReason returns why the mapping editor is blocked for
 // device, or "" if it's available.
-func mappingDisabledReason(device core.AppDevice, mockMode, writeLockUntilRestart bool) string {
+func mappingDisabledReason(device core.AppDevice, mockMode, advancedMode, writeLockUntilRestart bool) string {
 	hasMapping := device.Capability.SupportsJP108DedicatedMap ||
 		(device.Capability.SupportsU2ButtonMap && device.Capability.SupportsU2SlotConfig)
 	switch {
@@ -40,7 +40,7 @@ func mappingDisabledReason(device core.AppDevice, mockMode, writeLockUntilRestar
 		return "this model is not confirmed for writing yet"
 	case !hasMapping:
 		return "there is no mapping editor for this model yet"
-	case device.Capability.SupportsU2ButtonMap && !mockMode:
+	case device.Capability.SupportsU2ButtonMap && !mockMode && !advancedMode:
 		return "button-map framing not hardware-confirmed"
 	case writeLockUntilRestart:
 		return "Write locked until restart"

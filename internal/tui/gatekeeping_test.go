@@ -53,21 +53,21 @@ func TestFirmwareDisabledReason_WriteLockOverridesEverything(t *testing.T) {
 
 func TestMappingDisabledReason_RequiresConfirmedMappingCapability(t *testing.T) {
 	full := core.AppDevice{SupportTier: protocol.TierFull}
-	if reason := mappingDisabledReason(full, false, false); reason != "there is no mapping editor for this model yet" {
+	if reason := mappingDisabledReason(full, false, false, false); reason != "there is no mapping editor for this model yet" {
 		t.Fatalf("got %q", reason)
 	}
 	full.Capability.SupportsJP108DedicatedMap = true
-	if reason := mappingDisabledReason(full, false, false); reason != "" {
+	if reason := mappingDisabledReason(full, false, false, false); reason != "" {
 		t.Fatalf("expected enabled once JP108 mapping capability is set, got %q", reason)
 	}
 }
 
 func TestMappingDisabledReason_BlocksRealUltimate2Mapping(t *testing.T) {
 	full := core.AppDevice{SupportTier: protocol.TierFull, Capability: protocol.PidCapability{SupportsU2ButtonMap: true, SupportsU2SlotConfig: true}}
-	if reason := mappingDisabledReason(full, false, false); reason != "button-map framing not hardware-confirmed" {
+	if reason := mappingDisabledReason(full, false, false, false); reason != "button-map framing not hardware-confirmed" {
 		t.Fatalf("expected real Ultimate2 mapping block, got %q", reason)
 	}
-	if reason := mappingDisabledReason(full, true, false); reason != "" {
+	if reason := mappingDisabledReason(full, true, false, false); reason != "" {
 		t.Fatalf("expected mock-only Ultimate2 preview enabled, got %q", reason)
 	}
 }

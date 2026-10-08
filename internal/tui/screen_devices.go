@@ -285,13 +285,10 @@ func (m Model) actionsFor(device core.AppDevice) []actionItem {
 
 	mapping := actionItem{
 		label: "Remap buttons", kind: actionMapping,
-		reason: mappingDisabledReason(device, m.mockMode, m.writeLockUntilRestart),
+		reason: mappingDisabledReason(device, m.mockMode, m.advancedMode, m.writeLockUntilRestart),
 	}
 	if device.Capability.SupportsJP108DedicatedMap {
 		mapping.label = "Remap keys"
-	}
-	if device.Capability.SupportsU2ButtonMap && m.mockMode {
-		mapping.note = "mock preview only"
 	}
 	if mapping.reason == "" && unreachable != "" {
 		mapping.reason = unreachable

@@ -33,7 +33,6 @@ type discardAction int
 const (
 	discardActionBack discardAction = iota
 	discardActionQuit
-	discardActionLoadSlot
 	// discardActionNavigate carries on to wherever the user was heading
 	// when the unapplied draft stopped them.
 	discardActionNavigate

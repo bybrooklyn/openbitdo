@@ -47,7 +47,7 @@ The release toolchain is Go `1.27.0` for development checks, CI, and artifacts.
 | macOS support | arm64, deployment target macOS 13, unsigned and non-notarized |
 | Intel macOS | unsupported |
 | Firmware | unavailable in production; implementation kept only for isolated tests with injected ephemeral keys and a local server |
-| Ultimate 2 mapping | mock preview only; real hardware blocked because `button-map framing not hardware-confirmed` |
+| Ultimate 2 mapping | mock preview only; real hardware blocked because `button-map framing not hardware-confirmed` unless advanced mode is on (unconfirmed on hardware) |
 | JP108 mapping | in scope |
 | Controller navigation | available only when the OS exposes a standard HID gamepad interface; unverified on real hardware, see below |
 | Hardware CI fixtures | deferred |

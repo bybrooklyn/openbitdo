@@ -338,29 +338,6 @@ func TestWriteLockBlocksMouseToo(t *testing.T) {
 	}
 }
 
-func TestSlotPreviewStartsAtTheNextSlotAndCycles(t *testing.T) {
-	m, c := newTestModel(t, filepath.Join(t.TempDir(), "config.toml"))
-	_ = c
-	m.screen = screenMapping
-	m.mapping.kind = core.KindUltimate2
-	m.mapping.device = core.AppDevice{VidPid: protocol.VidPid{VID: 0x2dc8, PID: 0x6012}}
-	m.mapping.u2Loaded.Slot = core.U2Slot1
-
-	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("p")})
-	m = drainCmds(t, next.(Model), cmd)
-	if m.mapping.u2PreviewSlot != core.U2Slot2 {
-		t.Fatalf("the first preview should be the slot after the loaded one, got slot %d", m.mapping.u2PreviewSlot)
-	}
-	next, cmd = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("p")})
-	m = drainCmds(t, next.(Model), cmd)
-	if m.mapping.u2PreviewSlot != core.U2Slot3 {
-		t.Fatalf("p inside the preview should move to the next slot, got slot %d", m.mapping.u2PreviewSlot)
-	}
-	if footer := ansi.Strip(m.viewFooter()); !strings.Contains(footer, "p next slot") || strings.Contains(footer, "←→") {
-		t.Fatalf("the preview's footer should list the preview's keys: %q", footer)
-	}
-}
-
 func TestLongTextWrapsInsteadOfBeingCut(t *testing.T) {
 	m, _ := loadedModel(t, 100, 30)
 	m, _ = m.navigate(screenDevices, 2) // the candidate device has the longest text

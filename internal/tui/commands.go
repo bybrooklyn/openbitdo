@@ -60,27 +60,6 @@ func cmdAutoDiagnose(ctx context.Context, c *core.OpenBitdoCore, device core.App
 	}
 }
 
-func cmdU2ReadProfile(ctx context.Context, c *core.OpenBitdoCore, target protocol.VidPid, slot core.U2SlotID) tea.Cmd {
-	return func() tea.Msg {
-		profile, err := c.U2ReadCoreProfile(ctx, target, slot)
-		return u2ProfileLoadedMsg{profile: profile, err: err}
-	}
-}
-
-func cmdU2PreviewSlot(ctx context.Context, c *core.OpenBitdoCore, target protocol.VidPid, slot core.U2SlotID) tea.Cmd {
-	return func() tea.Msg {
-		profile, err := c.U2PreviewSlot(ctx, target, slot)
-		return u2SlotPreviewMsg{slot: slot, profile: profile, err: err}
-	}
-}
-
-func cmdU2Apply(ctx context.Context, c *core.OpenBitdoCore, target protocol.VidPid, slot core.U2SlotID, mode byte, changes []core.U2ButtonMapping, l2, r2 float32) tea.Cmd {
-	return func() tea.Msg {
-		report, err := c.U2ApplyCoreProfileWithRecovery(ctx, target, slot, mode, changes, l2, r2, true)
-		return u2ApplyResultMsg{report: report, err: err}
-	}
-}
-
 func cmdCandidateProbe(ctx context.Context, c *core.OpenBitdoCore, device core.AppDevice, policy core.RuntimeUnlockPolicy) tea.Cmd {
 	return func() tea.Msg {
 		report, err := c.CandidateWriteProbe(ctx, device.VidPid, policy)

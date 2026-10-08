@@ -31,22 +31,6 @@ type autoDiagResultMsg struct {
 	err    error
 }
 
-type u2ProfileLoadedMsg struct {
-	profile core.U2CoreProfile
-	err     error
-}
-
-type u2ApplyResultMsg struct {
-	report core.WriteRecoveryReport
-	err    error
-}
-
-type u2SlotPreviewMsg struct {
-	slot    core.U2SlotID
-	profile core.U2CoreProfile
-	err     error
-}
-
 type candidateProbeResultMsg struct {
 	device core.AppDevice
 	report core.RuntimeUnlockReport

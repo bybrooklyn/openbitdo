@@ -103,25 +103,38 @@ func responsiveJP108MappingModel(t *testing.T, width, height int) Model {
 	return m
 }
 
-func responsiveU2MappingModel(t *testing.T, width, height int) Model {
+func TestOverviewEveryActionReachableAndClickableAt60x18(t *testing.T) {
+	m, c := responsiveModel(t, 60, 18)
+	m = loadDevicesAndDrain(t, m, c)
+	items := m.availableActions()
+	if len(items) < 3 {
+		t.Fatalf("expected the default device to offer at least three actions, got %d", len(items))
+	}
+
+	for i, item := range items {
+		m.devices.actionIdx = i
+		view := ansi.Strip(m.View())
+		if !strings.Contains(view, "› "+item.label) {
+			t.Fatalf("selected action %d %q not visible at 60x18:\n%s", i, item.label, view)
+		}
+		row := renderedRowContaining(t, m.View(), "› "+item.label)
+		probe := m
+		probe.devices.actionIdx = 0
+		next, _ := probe.Update(tea.MouseMsg{
+			Button: tea.MouseButtonLeft, Action: tea.MouseActionPress,
+			X: m.width - 20, Y: row,
+		})
+		if got := next.(Model); got.devices.actionIdx != i && got.screen == screenDevices {
+			t.Fatalf("clicking %q selected action %d, want %d", item.label, got.devices.actionIdx, i)
+		}
+	}
+}
+
+func responsivePadModel(t *testing.T, width, height int) Model {
 	t.Helper()
 	m, _ := responsiveModel(t, width, height)
 	m.screen = screenMapping
-	profile := core.U2CoreProfile{Slot: core.U2Slot1}
-	for _, button := range core.AllU2Buttons {
-		profile.Mappings = append(profile.Mappings, core.U2ButtonMapping{Button: button, Target: core.U2FuncA})
-	}
-	for _, paddle := range core.AllU2Paddles {
-		profile.PaddleMappings = append(profile.PaddleMappings, core.U2PaddleMapping{Paddle: paddle, Target: core.U2FuncNone})
-	}
-	m.mapping = mappingState{
-		device:   core.AppDevice{Name: "Ultimate2", VidPid: protocol.VidPid{VID: 0x2dc8, PID: 0x6012}},
-		kind:     core.KindUltimate2,
-		u2Loaded: profile,
-		u2Draft:  cloneU2Profile(profile),
-	}
-	m.mapping.cursor = len(profile.Mappings) + len(profile.PaddleMappings) - 1
-	m.ensureMappingCursorVisible()
+	m.mapping = padMapping()
 	return m
 }
 
@@ -157,11 +170,11 @@ func TestResponsiveEveryScreenCriticalContentAndFooter(t *testing.T) {
 			}
 		})
 
-		t.Run(size.name+"/u2-long-mapping-actions", func(t *testing.T) {
-			m := responsiveU2MappingModel(t, size.width, size.height)
-			assertResponsiveFrame(t, m, "Button mapping", "Apply", "Undo", "Reset", "more above")
+		t.Run(size.name+"/pad-profile-actions", func(t *testing.T) {
+			m := responsivePadModel(t, size.width, size.height)
+			assertResponsiveFrame(t, m, "Controller profile", "Apply", "Undo", "Reset")
 			m.mapping.cursor = m.mapping.rowCount() - 1
-			m.ensureMappingCursorVisible()
+			m.ensurePadCursorVisible()
 			assertResponsiveFrame(t, m, "Reset")
 		})
 
@@ -244,32 +257,5 @@ func TestResponsiveEveryScreenCriticalContentAndFooter(t *testing.T) {
 				t.Fatalf("confirm should dispatch discard action back to devices, got screen=%v", m.screen)
 			}
 		})
-	}
-}
-
-func TestOverviewEveryActionReachableAndClickableAt60x18(t *testing.T) {
-	m, c := responsiveModel(t, 60, 18)
-	m = loadDevicesAndDrain(t, m, c)
-	items := m.availableActions()
-	if len(items) < 3 {
-		t.Fatalf("expected the default device to offer at least three actions, got %d", len(items))
-	}
-
-	for i, item := range items {
-		m.devices.actionIdx = i
-		view := ansi.Strip(m.View())
-		if !strings.Contains(view, "› "+item.label) {
-			t.Fatalf("selected action %d %q not visible at 60x18:\n%s", i, item.label, view)
-		}
-		row := renderedRowContaining(t, m.View(), "› "+item.label)
-		probe := m
-		probe.devices.actionIdx = 0
-		next, _ := probe.Update(tea.MouseMsg{
-			Button: tea.MouseButtonLeft, Action: tea.MouseActionPress,
-			X: m.width - 20, Y: row,
-		})
-		if got := next.(Model); got.devices.actionIdx != i && got.screen == screenDevices {
-			t.Fatalf("clicking %q selected action %d, want %d", item.label, got.devices.actionIdx, i)
-		}
 	}
 }
