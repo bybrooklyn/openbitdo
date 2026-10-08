@@ -22,7 +22,9 @@ clean local run means CI should pass too.
 
 The recipes set `GOTOOLCHAIN=go1.27.0`, so they use the pinned release even
 if your system Go is a different one; the `go` command downloads it on first
-use. Running `go` directly, outside `just`, uses whatever Go you have.
+use. A `GOTOOLCHAIN` you set yourself is passed through instead, and the
+recipes then fail unless it selects that release. Running `go` directly,
+outside `just`, uses whatever Go you have.
 
 To look at a screen without a terminal, dump a frame as plain text:
 
