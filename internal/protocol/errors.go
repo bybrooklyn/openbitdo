@@ -21,6 +21,9 @@ const (
 	// CodePermissionDenied means the OS refused to open the device node for
 	// this user, as opposed to any other open failure.
 	CodePermissionDenied ErrorCode = "PermissionDenied"
+	// CodeNoConfigInterface means the device is connected but exposes no HID
+	// interface OpenBitdo can send configuration commands through.
+	CodeNoConfigInterface ErrorCode = "NoConfigInterface"
 	// CodeU2ButtonMapUnavailable is returned by U2ReadButtonMap/
 	// U2WriteButtonMap for every call — see errU2ButtonMapChunkingUnconfirmed.
 	CodeU2ButtonMapUnavailable ErrorCode = "U2ButtonMapUnavailable"
@@ -44,6 +47,10 @@ func (e *Error) Code() ErrorCode { return e.code }
 
 func errTransport(format string, a ...any) *Error {
 	return &Error{code: CodeTransport, message: fmt.Sprintf("transport error: %s", fmt.Sprintf(format, a...))}
+}
+
+func errNoConfigInterface(format string, a ...any) *Error {
+	return &Error{code: CodeNoConfigInterface, message: fmt.Sprintf("transport error: %s", fmt.Sprintf(format, a...))}
 }
 
 func errInvalidResponse(command CommandID, reason string) *Error {

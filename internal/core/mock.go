@@ -22,9 +22,10 @@ func mockDevice(vidPid protocol.VidPid, full bool) AppDevice {
 		serial = fmt.Sprintf("MOCK-DETECT-%04x", vidPid.PID)
 	}
 	return AppDevice{
-		VidPid: vidPid, Name: p.Name, SupportLevel: p.SupportLevel, SupportTier: p.SupportTier,
+		VidPid: vidPid, Name: p.Name, DisplayName: friendlyDeviceName("", p),
+		SupportLevel: p.SupportLevel, SupportTier: p.SupportTier,
 		ProtocolFamily: p.ProtocolFamily, Capability: capability, Evidence: p.Evidence,
-		Serial: serial, Connected: true,
+		Serial: serial, Connected: true, ConfigChannel: ChannelPresent,
 	}
 }
 

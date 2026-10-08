@@ -111,6 +111,7 @@ func IdentifyOnlyCapability() PidCapability {
 type DeviceProfile struct {
 	VidPid         VidPid
 	Name           string
+	DisplayName    string
 	SupportLevel   SupportLevel
 	SupportTier    SupportTier
 	ProtocolFamily ProtocolFamily

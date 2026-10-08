@@ -10,8 +10,11 @@ import (
 // AppDevice is a discovered or targeted 8BitDo device with its resolved
 // support profile.
 type AppDevice struct {
-	VidPid         protocol.VidPid
+	VidPid protocol.VidPid
+	// Name is the registry's canonical ID (e.g. "PID_108JP"); DisplayName
+	// is what a person should be shown.
 	Name           string
+	DisplayName    string
 	SupportLevel   protocol.SupportLevel
 	SupportTier    protocol.SupportTier
 	ProtocolFamily protocol.ProtocolFamily
@@ -19,6 +22,45 @@ type AppDevice struct {
 	Evidence       protocol.SupportEvidence
 	Serial         string
 	Connected      bool
+	// ConfigChannel says whether the connected device exposes the HID
+	// interface configuration commands travel over.
+	ConfigChannel ChannelState
+}
+
+// ChannelState is whether a device's configuration interface was found.
+type ChannelState int
+
+const (
+	// ChannelUnknown: the platform could not describe the device's
+	// interfaces, so only opening it will tell.
+	ChannelUnknown ChannelState = iota
+	ChannelPresent
+	// ChannelAbsent: every interface is known and none is the configuration
+	// interface. Diagnostics and mapping cannot reach this device.
+	ChannelAbsent
+)
+
+// friendlyDeviceName picks the name to show for a device: what the device
+// calls itself, else the catalog's name, else the registry ID without its
+// "PID_" prefix.
+func friendlyDeviceName(product string, profile protocol.DeviceProfile) string {
+	if name := cleanProductName(product); name != "" {
+		return name
+	}
+	if profile.DisplayName != "" {
+		return profile.DisplayName
+	}
+	return strings.TrimPrefix(profile.Name, "PID_")
+}
+
+// cleanProductName tidies an OS-reported product string. Some 8BitDo devices
+// repeat the vendor ("8BitDo 8BitDo Retro 108 Keyboard").
+func cleanProductName(product string) string {
+	fields := strings.Fields(product)
+	for len(fields) > 1 && strings.EqualFold(fields[0], fields[1]) {
+		fields = fields[1:]
+	}
+	return strings.Join(fields, " ")
 }
 
 // Scorecard computes this device's support scorecard.
@@ -30,7 +72,8 @@ func (d AppDevice) SupportStatus() UserSupportStatus { return SupportStatusForTi
 func appDeviceFromProfile(vidPid protocol.VidPid, serial string, connected bool) AppDevice {
 	p := protocol.DeviceProfileFor(vidPid)
 	return AppDevice{
-		VidPid: vidPid, Name: p.Name, SupportLevel: p.SupportLevel, SupportTier: p.SupportTier,
+		VidPid: vidPid, Name: p.Name, DisplayName: friendlyDeviceName("", p),
+		SupportLevel: p.SupportLevel, SupportTier: p.SupportTier,
 		ProtocolFamily: p.ProtocolFamily, Capability: p.Capability, Evidence: p.Evidence,
 		Serial: serial, Connected: connected,
 	}

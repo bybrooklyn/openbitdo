@@ -4,7 +4,11 @@ package protocol
 
 // PidRow is one row of the PID registry, generated from docs/spec/pid_matrix.csv.
 type PidRow struct {
-	Name           string
+	Name string
+	// DisplayName is the user-facing product name from
+	// docs/spec/device_name_catalog.md; empty when the catalog has only a
+	// placeholder for this PID.
+	DisplayName    string
 	Pid            uint16
 	SupportLevel   SupportLevel
 	SupportTier    SupportTier
@@ -174,6 +178,7 @@ func DeviceProfileFor(target VidPid) DeviceProfile {
 		return DeviceProfile{
 			VidPid:         target,
 			Name:           row.Name,
+			DisplayName:    row.DisplayName,
 			SupportLevel:   row.SupportLevel,
 			SupportTier:    row.SupportTier,
 			ProtocolFamily: row.ProtocolFamily,

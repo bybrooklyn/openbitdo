@@ -107,7 +107,9 @@ func (c *OpenBitdoCore) ListDevices(ctx context.Context) ([]AppDevice, error) {
 		}, nil
 	}
 
-	devices := addressableEnumeratedDevices(c.enumerateDevices())
+	enumerated := c.enumerateDevices()
+	channels := configChannelStates(enumerated)
+	devices := addressableEnumeratedDevices(enumerated)
 	out := make([]AppDevice, 0, len(devices))
 	for _, d := range devices {
 		if d.VidPid.VID != 0x2dc8 {
@@ -115,12 +117,40 @@ func (c *OpenBitdoCore) ListDevices(ctx context.Context) ([]AppDevice, error) {
 		}
 		p := protocol.DeviceProfileFor(d.VidPid)
 		out = append(out, AppDevice{
-			VidPid: d.VidPid, Name: p.Name, SupportLevel: p.SupportLevel, SupportTier: p.SupportTier,
+			VidPid: d.VidPid, Name: p.Name, DisplayName: friendlyDeviceName(d.Product, p),
+			SupportLevel: p.SupportLevel, SupportTier: p.SupportTier,
 			ProtocolFamily: p.ProtocolFamily, Capability: p.Capability, Evidence: p.Evidence,
-			Serial: d.Serial, Connected: true,
+			Serial: d.Serial, Connected: true, ConfigChannel: channels[d.VidPid],
 		})
 	}
 	return out, nil
+}
+
+// configChannelStates works out, per VID/PID, whether any enumerated
+// interface is the vendor configuration interface. A device is only called
+// ChannelAbsent when every one of its interfaces reported usage metadata;
+// an interface with none (a platform that cannot read it) leaves the answer
+// unknown rather than wrongly ruling the device out.
+func configChannelStates(devices []protocol.EnumeratedDevice) map[protocol.VidPid]ChannelState {
+	states := make(map[protocol.VidPid]ChannelState)
+	undescribed := make(map[protocol.VidPid]bool)
+	for _, d := range devices {
+		switch {
+		case d.IsVendorConfigInterface():
+			states[d.VidPid] = ChannelPresent
+		case d.UsagePage == 0 && d.Usage == 0:
+			undescribed[d.VidPid] = true
+		}
+		if _, seen := states[d.VidPid]; !seen {
+			states[d.VidPid] = ChannelAbsent
+		}
+	}
+	for vidPid, state := range states {
+		if state == ChannelAbsent && undescribed[vidPid] {
+			states[vidPid] = ChannelUnknown
+		}
+	}
+	return states
 }
 
 func stablePhysicalDeviceKey(device protocol.EnumeratedDevice) (string, bool) {
@@ -300,13 +330,19 @@ func (c *OpenBitdoCore) BeginnerDiagSummary(device AppDevice, diag protocol.Diag
 	}
 	blockedHint := fmt.Sprintf("Blocked operations: %s.", c.blockedOperationSummary(device))
 
+	if total == 0 {
+		return "No diagnostic checks ran, so nothing is known about how this device responds. " + blockedHint
+	}
+
 	base := fmt.Sprintf("Checks: %d/%d passed. Confirmed checks: %d/%d passed. %s %s %s %s %s",
 		passed, total, confirmedOK, confirmedTotal, experimentalHint, statusHint, transportHint, blockedHint, familyHint)
 
-	switch device.SupportTier {
-	case protocol.TierFull:
-		return base + " This device is full-support."
-	case protocol.TierCandidateReadOnly:
+	switch {
+	case passed == 0:
+		return base + " The device did not answer any check, whatever its listed support tier."
+	case device.SupportTier == protocol.TierFull:
+		return base + " Listed support tier: full."
+	case device.SupportTier == protocol.TierCandidateReadOnly:
 		return base + " This device is candidate-readonly: update and mapping stay blocked until runtime + hardware confirmation."
 	default:
 		return base + " This device is detect-only: use diagnostics only."

@@ -192,13 +192,13 @@ func selectVendorConfigInterfaceForGOOS(target VidPid, infos []hid.DeviceInfo, g
 				}
 			}
 			if allUnknown {
-				return hid.DeviceInfo{}, errTransport(
+				return hid.DeviceInfo{}, errNoConfigInterface(
 					"ambiguous HID interfaces for %s: %d interfaces have unknown usage metadata; vendor configuration interface %#04x:%#04x cannot be selected safely; available: %s",
 					target, len(targetInfos), vendorConfigUsagePage, vendorConfigUsage, detail,
 				)
 			}
 		}
-		return hid.DeviceInfo{}, errTransport(
+		return hid.DeviceInfo{}, errNoConfigInterface(
 			"no vendor configuration HID interface (usage page %#04x, usage %#04x) found for %s; available: %s",
 			vendorConfigUsagePage, vendorConfigUsage, target, detail)
 	}
