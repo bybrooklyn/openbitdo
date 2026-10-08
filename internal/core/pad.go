@@ -55,12 +55,18 @@ type padLayout struct {
 	// swapPaddleTriggers: this model numbers P1 and P2 the other way round
 	// when one plays a macro.
 	swapPaddleTriggers bool
+	// arcade: a leverless arcade controller. It has no sticks, triggers or
+	// vibration to tune, and a setting for opposite directions pressed at
+	// once instead.
+	arcade bool
 }
 
 var (
 	padLayoutU2   = padLayout{size: protocol.U2RecordSize, macros: 0x1f4, motion: 0x494, tracing: 0x4b8, fire: 0x4dc, custom: 0x50c}
 	padLayoutU2BT = padLayout{size: protocol.U2BTRecordSize, macros: 0x68c, motion: 0x92c, tracing: 0x950, fire: 0x974, custom: 0x9a4, swapPaddleTriggers: true}
 	padLayoutPro3 = padLayout{size: protocol.Pro3RecordSize, macros: 0x68c}
+	// An Arcade Controller's record is laid out as a Pro 3's.
+	padLayoutArcade = padLayout{size: protocol.Pro3RecordSize, macros: 0x68c, arcade: true}
 )
 
 func padLayoutFor(vidPid protocol.VidPid) padLayout {
@@ -69,6 +75,8 @@ func padLayoutFor(vidPid protocol.VidPid) padLayout {
 		return padLayoutU2BT
 	case 0x6009:
 		return padLayoutPro3
+	case 0x600b, 0x600c:
+		return padLayoutArcade
 	}
 	return padLayoutU2
 }
@@ -93,6 +101,14 @@ const (
 	PadSwapSticks    uint32 = 0x0010
 	PadSwapTriggers  uint32 = 0x0080
 	PadSwapDpadStick uint32 = 0x0100
+
+	// On an arcade controller: which direction wins when two opposite
+	// ones are pressed together. At most one is set; none means neither
+	// direction registers.
+	PadSOCDUpWins    uint32 = 0x10000
+	PadSOCDFirstWins uint32 = 0x20000
+	PadSOCDLastWins  uint32 = 0x40000
+	PadSOCDMask      uint32 = PadSOCDUpWins | PadSOCDFirstWins | PadSOCDLastWins
 )
 
 // Where motion (tilting the controller) is sent.
@@ -166,6 +182,9 @@ type PadProfile struct {
 	// HasMotion and HasLights say whether this model has a motion sensor
 	// mapping and stick-ring lights to configure.
 	HasMotion, HasLights bool
+	// Arcade says this is a leverless arcade controller: no sticks,
+	// triggers or vibration to tune, and the opposite-directions setting.
+	Arcade bool
 
 	// record is the raw record this was decoded from. Writes start from
 	// it so everything this program does not model is preserved.
@@ -238,7 +257,7 @@ func decodePadProfile(record []byte, layout padLayout) (PadProfile, error) {
 		Platform:   byte(binary.LittleEndian.Uint16(record[padOffPlatform:])),
 		ActiveSlot: int(binary.LittleEndian.Uint16(record[padOffActive:])),
 		record:     append([]byte(nil), record...),
-		layout:     layout, HasMotion: layout.hasMotion(), HasLights: layout.hasLights(),
+		layout:     layout, HasMotion: layout.hasMotion(), HasLights: layout.hasLights(), Arcade: layout.arcade,
 	}
 	if profile.ActiveSlot >= PadSlots {
 		profile.ActiveSlot = 0
@@ -379,6 +398,9 @@ func encodePadSlot(record []byte, layout padLayout, i int, slot, was PadSlot) ([
 	}
 	if slot.Options != was.Options {
 		put(padOffOptions+i*8, binary.LittleEndian.AppendUint32(append([]byte(nil), flag...), slot.Options))
+	}
+	if socd := slot.Options & PadSOCDMask; socd&(socd-1) != 0 || (socd != 0 && !layout.arcade) {
+		return nil, fmt.Errorf("the opposite-directions setting takes one choice, on an arcade controller only")
 	}
 	if (slot.Motion != was.Motion && !layout.hasMotion()) || (slot.Lights != was.Lights && !layout.hasLights()) {
 		return nil, fmt.Errorf("this controller has no motion or light settings")
@@ -777,6 +799,9 @@ func PadMotionButtonName(target PadTarget) string {
 // directly is always on Switch.
 func padPlatform(ctx context.Context, session *protocol.DeviceSession, addr PadAddress) (byte, error) {
 	vidPid := addr.product()
+	if vidPid.PID == 0x600b || vidPid.PID == 0x600c {
+		return session.ArcadePlatform(ctx)
+	}
 	isU2 := vidPid.PID == 0x6012 || vidPid.PID == 0x6013
 	// Under the shared id a Pro 3 or Ultimate 2 Bluetooth is in XInput
 	// mode; an Ultimate 2 still says where its switch is.

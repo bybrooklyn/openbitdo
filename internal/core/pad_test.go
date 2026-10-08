@@ -499,7 +499,7 @@ func TestControllerUnderTheSharedIDIsRoutedToItsProduct(t *testing.T) {
 	}
 
 	// A product with no profile support here stays as it was listed.
-	pad.ReportsPID = 0x600b // Arcade Controller
+	pad.ReportsPID = 0x2062 // Arcade Controller Pro
 	c.ForgetSharedProducts()
 	devices, _ = listDevices(ctx)
 	if devices[0].Product.PID != 0 || devices[0].Capability.SupportsU2SlotConfig {
@@ -507,5 +507,48 @@ func TestControllerUnderTheSharedIDIsRoutedToItsProduct(t *testing.T) {
 	}
 	if _, err := c.PadReadProfileAt(ctx, PadAddressOf(devices[0])); err == nil {
 		t.Fatal("reading a profile from an unresolved shared id must be refused")
+	}
+}
+
+func TestArcadeControllerProfile(t *testing.T) {
+	shared := protocol.VidPid{VID: 0x2dc8, PID: protocol.SharedControllerPID}
+	addr := PadAddress{Enumerated: shared, Product: protocol.VidPid{VID: 0x2dc8, PID: 0x600b}}
+	pad := &protocol.U2Simulator{Physical: protocol.U2PlatformXInput, RecordSize: protocol.Pro3RecordSize}
+	c := padCore(pad)
+	ctx := context.Background()
+
+	profile, err := c.PadReadProfileAt(ctx, addr)
+	if err != nil || !profile.Arcade || profile.HasMotion || profile.HasLights || profile.Platform != protocol.U2PlatformXInput {
+		t.Fatalf("arcade profile: %+v err=%v", profile.Arcade, err)
+	}
+	profile.Slots[0].Options |= PadSOCDLastWins
+	profile.Slots[0].Buttons[18] = PadL3
+	report, err := c.PadApplyAt(ctx, addr, profile)
+	if err != nil || !report.WriteApplied {
+		t.Fatalf("apply: %+v err=%v", report, err)
+	}
+	record := pad.Record(protocol.U2PlatformXInput)
+	if binary.LittleEndian.Uint32(record[0xc8+4:]) != 0x40000 || binary.LittleEndian.Uint32(record[0xe0+4+18*4:]) != 0x2 {
+		t.Fatal("the opposite-directions choice or the button was stored wrongly")
+	}
+
+	// Two choices at once is not a setting; nor is it one for a gamepad.
+	profile, _ = c.PadReadProfileAt(ctx, addr)
+	profile.Slots[0].Options |= PadSOCDUpWins
+	if _, err := c.PadApplyAt(ctx, addr, profile); err == nil {
+		t.Fatal("two opposite-directions choices must be refused")
+	}
+	gamepad := &protocol.U2Simulator{Physical: protocol.U2PlatformDInput}
+	g := padCore(gamepad)
+	plain, _ := g.PadReadProfile(ctx, padTarget)
+	plain.Slots[0].Options |= PadSOCDUpWins
+	if _, err := g.PadApply(ctx, padTarget, plain); err == nil {
+		t.Fatal("a gamepad has no opposite-directions setting")
+	}
+
+	// In Switch mode it is the Switch record that is read.
+	pad.Physical = protocol.U2PlatformSwitch
+	if profile, err := c.PadReadProfileAt(ctx, addr); err != nil || profile.Platform != protocol.U2PlatformSwitch {
+		t.Fatalf("Switch mode: platform=%d err=%v", profile.Platform, err)
 	}
 }

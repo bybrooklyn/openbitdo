@@ -59,7 +59,16 @@ const (
 	padRowColor
 	padRowFireSpeed
 	padRowMacro
+	padRowSOCD
 )
+
+var padSOCDChoices = []struct {
+	bits uint32
+	name string
+}{
+	{0, "neither registers"}, {core.PadSOCDUpWins, "up always wins"},
+	{core.PadSOCDFirstWins, "the first one pressed wins"}, {core.PadSOCDLastWins, "the last one pressed wins"},
+}
 
 // Colour row selectors below PadLEDs are per-LED; these follow.
 const (
@@ -126,6 +135,7 @@ func buildPadRows() []padRow {
 	} {
 		rows = append(rows, padRow{kind: padRowOption, label: option.name, bit: option.bit})
 	}
+	rows = append(rows, padRow{kind: padRowSOCD, label: "Opposite directions"})
 	for i := 0; i < core.PadMacros; i++ {
 		rows = append(rows, padRow{kind: padRowMacro, label: fmt.Sprintf("Macro %d", i+1), index: i})
 	}
@@ -315,7 +325,12 @@ func (m *Model) padSetButton(index int, target core.PadTarget) {
 // padRowMissing reports whether row edits something this controller model
 // does not have.
 func (m Model) padRowMissing(row padRow) bool {
+	arcade := m.mapping.pad.draft.Arcade
 	switch row.kind {
+	case padRowSOCD:
+		return !arcade
+	case padRowRange, padRowVibration, padRowOption:
+		return arcade
 	case padRowMotionTarget, padRowMotionButton, padRowMotionMode, padRowMotionSensitivity, padRowMotionDeadZone:
 		return !m.mapping.pad.draft.HasMotion
 	case padRowLightEffect, padRowColor, padRowFireSpeed:
@@ -439,6 +454,17 @@ func (m *Model) padAdjustRow(row padRow, delta int) {
 			m.padSnapshot()
 			m.padSlot().Lights.FireSpeed = next
 		}
+	case padRowSOCD:
+		m.padSnapshot()
+		slot := m.padSlot()
+		index := 0
+		for i, choice := range padSOCDChoices {
+			if choice.bits == slot.Options&core.PadSOCDMask {
+				index = i
+			}
+		}
+		n := len(padSOCDChoices)
+		slot.Options = slot.Options&^core.PadSOCDMask | padSOCDChoices[((index+sign(delta))%n+n)%n].bits
 	case padRowOption:
 		m.padSnapshot()
 		slot := m.padSlot()
@@ -671,6 +697,14 @@ func (m Model) padRowText(row padRow) (value string, changed bool) {
 		return "#" + core.FormatColor(a), a != b
 	case padRowFireSpeed:
 		return fmt.Sprintf("%d of 15", now.Lights.FireSpeed), now.Lights.FireSpeed != was.Lights.FireSpeed
+	case padRowSOCD:
+		name := padSOCDChoices[0].name
+		for _, choice := range padSOCDChoices {
+			if choice.bits == now.Options&core.PadSOCDMask {
+				name = choice.name
+			}
+		}
+		return name, now.Options&core.PadSOCDMask != was.Options&core.PadSOCDMask
 	case padRowMacro:
 		macro, before := pad.draft.Macros[pad.slot][row.index], pad.loaded.Macros[pad.slot][row.index]
 		changed := !reflect.DeepEqual(macro, before)

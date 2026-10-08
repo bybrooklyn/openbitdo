@@ -91,7 +91,9 @@ func (u *U2Simulator) Write(data []byte) (int, error) {
 		return 0, errTransport("simulator not open")
 	}
 	u.Frames = append(u.Frames, append([]byte(nil), data...))
-	if len(data) != 64 || data[0] != 0x81 || data[1] != 0x04 {
+	// Every request starts 81 04, except the arcade mode query: 81 00 52.
+	arcadeQuery := len(data) == 64 && data[1] == 0 && data[2] == 0x52
+	if len(data) != 64 || data[0] != 0x81 || (data[1] != 0x04 && !arcadeQuery) {
 		return len(data), nil // not this protocol: no answer
 	}
 	cmd := binary.LittleEndian.Uint16(data[2:])
@@ -163,6 +165,12 @@ func (u *U2Simulator) Write(data []byte) (int, error) {
 			u.macroStaged[arg][offset+i] &= b
 		}
 		u.reply(cmd, length, nil)
+	case u2CmdArcadeMode:
+		mode := byte(0)
+		if u.Physical == U2PlatformXInput {
+			mode = 2
+		}
+		u.reply(cmd, 1, []byte{mode})
 	case u2CmdGetLight:
 		u.reply(cmd, 1, []byte{u.Light})
 	case u2CmdSetLight:

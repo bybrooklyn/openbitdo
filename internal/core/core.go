@@ -463,6 +463,7 @@ var sharedProductAliases = map[uint16]uint16{
 	0x6012: 0x6012, 0x6013: 0x6012, // Ultimate 2
 	0x6009: 0x6009, 0x600a: 0x6009, // Pro 3
 	0x600f: 0x600f, 0x6011: 0x600f, // Ultimate 2 Bluetooth
+	0x600b: 0x600b, 0x600c: 0x600b, // Arcade Controller
 }
 
 // resolveSharedProduct asks a device under the shared controller id which

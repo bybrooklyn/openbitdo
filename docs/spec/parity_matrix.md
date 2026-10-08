@@ -78,7 +78,8 @@ on, answering the read. The receiver alone answers only the connection query.
 |---|---|
 | Pro 3 (0x6009), Ultimate 2 Bluetooth (0x600f) | simulated: the same editor as the Ultimate 2, over each model's own record layout (a Pro 3 has no motion or lights). Their older "hot-key" macro section is preserved but not editable. No hardware has been tried. |
 | Ultimate Bluetooth 1st gen (0x6007) | no |
-| Arcade Controller, Arcade Controller Pro | no |
+| Arcade Controller (0x600b) | simulated: button map, the opposite-directions (SOCD) choice, macros and profile name, reached under the shared ID. No hardware has been tried. |
+| Arcade Controller Pro (0x2062) | no |
 | Retro Mechanical Keyboard (0x5200) | no. It takes the same commands as the Retro 108 on the same report, with its own key ids (modifiers 100-106, A/B 109/108, K1-K8 116-110) and no numpad. What is missing is a device: which of its HID interfaces carries those reports is not known. |
 | Retro 87 Xbox, Retro 68, Riviera keyboard | no |
 | Retro R8, Riviera and SN30 Pro mice | no |

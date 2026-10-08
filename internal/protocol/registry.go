@@ -159,9 +159,9 @@ func DefaultCapabilityFor(pid uint16, tier SupportTier, family ProtocolFamily) P
 		cap.SupportsProfileRW = false
 	}
 	cap.SupportsJP108DedicatedMap = false
-	// A Pro 3 keeps its settings in the same kind of record as an
-	// Ultimate 2, but updates its firmware the standard way.
-	cap.SupportsU2SlotConfig = pid == 0x6009
+	// A Pro 3 and an Arcade Controller keep their settings in the same kind
+	// of record as an Ultimate 2, but update their firmware the standard way.
+	cap.SupportsU2SlotConfig = pid == 0x6009 || pid == 0x600b
 	cap.SupportsU2ButtonMap = false
 	return cap
 }

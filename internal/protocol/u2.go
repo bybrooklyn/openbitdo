@@ -27,6 +27,7 @@ const (
 	u2CmdReportState    uint16 = 0x0007
 	u2CmdSelectPlatform uint16 = 0x0014
 	u2CmdSetLight       uint16 = 0x0040
+	u2CmdArcadeMode     uint16 = 0x0052
 	u2CmdGetLight       uint16 = 0x0041
 	u2CmdMacroRead      uint16 = 0x0102
 	u2CmdMacroWrite     uint16 = 0x0103
@@ -135,6 +136,8 @@ func u2CommandCode(command CommandID) (uint16, bool) {
 		return u2CmdMacroWrite, true
 	case CommandU2MacroErase:
 		return u2CmdMacroErase, true
+	case CommandArcadeGetMode:
+		return u2CmdArcadeMode, true
 	case CommandU2SetLightEffect:
 		return u2CmdSetLight, true
 	}
@@ -381,4 +384,17 @@ func (s *DeviceSession) U2WriteMacroData(ctx context.Context, platform, slot byt
 		sent += accepted
 	}
 	return nil
+}
+
+// ArcadePlatform reads which platform record an Arcade Controller is
+// using: XInput or Switch.
+func (s *DeviceSession) ArcadePlatform(ctx context.Context) (byte, error) {
+	resp, err := s.SendCommand(ctx, CommandArcadeGetMode, nil)
+	if err != nil {
+		return 0, err
+	}
+	if len(resp.Raw) > u2DataOffset && resp.Raw[u2DataOffset] == 2 {
+		return U2PlatformXInput, nil
+	}
+	return U2PlatformSwitch, nil
 }

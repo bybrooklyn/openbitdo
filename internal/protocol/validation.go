@@ -67,7 +67,7 @@ var standardCandidateReadCommands = map[CommandID]bool{
 	CommandGetMode: true, CommandGetModeAlt: true, CommandReadProfile: true,
 	CommandU2GetConnected: true, CommandU2GetPhysicalMode: true, CommandU2SetReportState: true,
 	CommandU2SelectPlatform: true, CommandU2RecordRead: true, CommandU2GetLightEffect: true,
-	CommandU2MacroRead: true,
+	CommandU2MacroRead: true, CommandArcadeGetMode: true,
 }
 
 var jpCandidateReadCommands = map[CommandID]bool{
@@ -122,7 +122,7 @@ func isCommandAllowedByCapability(cap PidCapability, command CommandID) bool {
 		return cap.SupportsJP108DedicatedMap
 	case CommandU2GetConnected, CommandU2GetPhysicalMode, CommandU2SetReportState, CommandU2SelectPlatform,
 		CommandU2RecordRead, CommandU2RecordWrite, CommandU2Commit, CommandU2GetLightEffect, CommandU2SetLightEffect,
-		CommandU2MacroRead, CommandU2MacroWrite, CommandU2MacroErase:
+		CommandU2MacroRead, CommandU2MacroWrite, CommandU2MacroErase, CommandArcadeGetMode:
 		return cap.SupportsU2SlotConfig
 	default:
 		return false
@@ -152,7 +152,7 @@ var jpHandshakeDisallowed = map[CommandID]bool{
 	CommandU2GetConnected: true, CommandU2GetPhysicalMode: true, CommandU2SetReportState: true,
 	CommandU2SelectPlatform: true, CommandU2RecordRead: true, CommandU2RecordWrite: true, CommandU2Commit: true,
 	CommandU2GetLightEffect: true, CommandU2SetLightEffect: true,
-	CommandU2MacroRead: true, CommandU2MacroWrite: true, CommandU2MacroErase: true,
+	CommandU2MacroRead: true, CommandU2MacroWrite: true, CommandU2MacroErase: true, CommandArcadeGetMode: true,
 	CommandU2EnterBootloader: true, CommandU2FirmwareChunk: true, CommandU2FirmwareCommit: true,
 	CommandU2ExitBootloader: true,
 }
@@ -254,7 +254,7 @@ func ValidateResponse(command CommandID, response []byte) ResponseStatus {
 		return StatusInvalid
 	case CommandU2GetConnected, CommandU2GetPhysicalMode, CommandU2SelectPlatform,
 		CommandU2RecordRead, CommandU2RecordWrite, CommandU2Commit, CommandU2GetLightEffect, CommandU2SetLightEffect,
-		CommandU2MacroRead, CommandU2MacroWrite, CommandU2MacroErase:
+		CommandU2MacroRead, CommandU2MacroWrite, CommandU2MacroErase, CommandArcadeGetMode:
 		if len(response) < u2DataOffset {
 			return StatusMalformed
 		}
@@ -320,7 +320,7 @@ func minimumResponseLen(command CommandID) int {
 		return 6
 	case CommandU2GetConnected, CommandU2GetPhysicalMode, CommandU2SelectPlatform,
 		CommandU2RecordRead, CommandU2RecordWrite, CommandU2Commit, CommandU2GetLightEffect, CommandU2SetLightEffect,
-		CommandU2MacroRead, CommandU2MacroWrite, CommandU2MacroErase:
+		CommandU2MacroRead, CommandU2MacroWrite, CommandU2MacroErase, CommandArcadeGetMode:
 		return u2DataOffset
 	case CommandGetControllerVersion, CommandVersion:
 		return 5
