@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -531,5 +532,30 @@ func TestButtonsTabExplainsADeviceThatSendsNothing(t *testing.T) {
 	m.devices.filtered[0].WorksAs = core.RoleKeyboard
 	if plain := ansi.Strip(m.View()); !strings.Contains(plain, "This is a keyboard") {
 		t.Fatalf("expected the keyboard explanation:\n%s", plain)
+	}
+}
+
+// Every check a diagnostics run of an Ultimate 2 reports is named in plain
+// words; a check shown by its command ID is one nobody wrote a label for.
+func TestUltimate2DiagnosticChecksHavePlainLabels(t *testing.T) {
+	c := core.New(core.Config{MockMode: true})
+	diag, err := c.DiagProbe(context.Background(), protocol.VidPid{VID: 0x2dc8, PID: 0x6012})
+	if err != nil {
+		t.Fatalf("diagnostics: %v", err)
+	}
+	seen := map[protocol.CommandID]bool{}
+	for _, check := range diag.CommandChecks {
+		seen[check.Command] = true
+		if !check.OK {
+			t.Errorf("%s: a mock controller should answer every check: %s", check.Command, check.Detail)
+		}
+		if label := checkLabel(check.Command); label == string(check.Command) {
+			t.Errorf("%s has no plain-language label", check.Command)
+		}
+	}
+	for _, want := range []protocol.CommandID{protocol.CommandU2GetConnected, protocol.CommandU2GetPhysicalMode} {
+		if !seen[want] {
+			t.Errorf("diagnostics did not run %s", want)
+		}
 	}
 }

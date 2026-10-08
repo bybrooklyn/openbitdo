@@ -8,7 +8,6 @@ import (
 func formatDetectedPid(pid uint32) string { return fmt.Sprintf("detected pid %#04x", pid) }
 func formatRevision(rev uint32) string    { return fmt.Sprintf("report revision %d", rev) }
 func formatMode(mode uint32) string       { return fmt.Sprintf("mode %d", mode) }
-func formatSlot(slot uint32) string       { return fmt.Sprintf("current slot %d", slot) }
 
 func formatFirmwareVersion(versionX100 uint32, beta *uint32) string {
 	base := fmt.Sprintf("firmware %d.%02d", versionX100/100, versionX100%100)
@@ -66,7 +65,6 @@ var jpCandidatePIDs = jpCandidateDiagPIDs // same set, reused for gate 3
 
 var standardCandidateReadCommands = map[CommandID]bool{
 	CommandGetMode: true, CommandGetModeAlt: true, CommandReadProfile: true,
-	CommandU2GetCurrentSlot: true, CommandU2ReadConfigSlot: true, CommandU2ReadButtonMap: true,
 	CommandU2GetConnected: true, CommandU2GetPhysicalMode: true, CommandU2SetReportState: true,
 	CommandU2SelectPlatform: true, CommandU2RecordRead: true,
 }
@@ -119,12 +117,9 @@ func isCommandAllowedByCapability(cap PidCapability, command CommandID) bool {
 		CommandJp108ReadProfileName, CommandJp108WriteProfileName,
 		CommandJp108ReadMappedKeys, CommandJp108ReadMacroList:
 		return cap.SupportsJP108DedicatedMap
-	case CommandU2GetCurrentSlot, CommandU2ReadConfigSlot, CommandU2WriteConfigSlot,
-		CommandU2GetConnected, CommandU2GetPhysicalMode, CommandU2SetReportState, CommandU2SelectPlatform,
+	case CommandU2GetConnected, CommandU2GetPhysicalMode, CommandU2SetReportState, CommandU2SelectPlatform,
 		CommandU2RecordRead, CommandU2RecordWrite, CommandU2Commit:
 		return cap.SupportsU2SlotConfig
-	case CommandU2ReadButtonMap, CommandU2WriteButtonMap, CommandU2SetMode:
-		return cap.SupportsU2ButtonMap
 	default:
 		return false
 	}
@@ -148,8 +143,6 @@ var jp108PIDs = map[uint16]bool{0x5209: true}
 var jpHandshakeDisallowed = map[CommandID]bool{
 	CommandSetModeDInput: true, CommandReadProfile: true, CommandWriteProfile: true,
 	CommandFirmwareChunk: true, CommandFirmwareCommit: true,
-	CommandU2GetCurrentSlot: true, CommandU2ReadConfigSlot: true, CommandU2WriteConfigSlot: true,
-	CommandU2ReadButtonMap: true, CommandU2WriteButtonMap: true, CommandU2SetMode: true,
 	CommandU2GetConnected: true, CommandU2GetPhysicalMode: true, CommandU2SetReportState: true,
 	CommandU2SelectPlatform: true, CommandU2RecordRead: true, CommandU2RecordWrite: true, CommandU2Commit: true,
 	CommandU2EnterBootloader: true, CommandU2FirmwareChunk: true, CommandU2FirmwareCommit: true,
@@ -258,22 +251,6 @@ func ValidateResponse(command CommandID, response []byte) ResponseStatus {
 			return StatusOk
 		}
 		return StatusInvalid
-	case CommandU2GetCurrentSlot:
-		if len(response) < 6 {
-			return StatusMalformed
-		}
-		if response[0] == 0x02 && response[1] == 0x05 {
-			return StatusOk
-		}
-		return StatusInvalid
-	case CommandU2ReadConfigSlot, CommandU2ReadButtonMap:
-		if len(response) < 12 {
-			return StatusMalformed
-		}
-		if response[0] == 0x02 && response[1] == 0x05 {
-			return StatusOk
-		}
-		return StatusInvalid
 	case CommandGetControllerVersion, CommandVersion:
 		if len(response) < 5 {
 			return StatusMalformed
@@ -326,13 +303,9 @@ func minimumResponseLen(command CommandID) int {
 		return 6
 	case CommandGetMode, CommandGetModeAlt:
 		return 6
-	case CommandU2GetCurrentSlot:
-		return 6
 	case CommandU2GetConnected, CommandU2GetPhysicalMode, CommandU2SelectPlatform,
 		CommandU2RecordRead, CommandU2RecordWrite, CommandU2Commit:
 		return u2DataOffset
-	case CommandU2ReadConfigSlot, CommandU2ReadButtonMap:
-		return 12
 	case CommandGetControllerVersion, CommandVersion:
 		return 5
 	default:
@@ -355,8 +328,6 @@ func parseFields(command CommandID, response []byte) map[string]uint32 {
 	case (command == CommandGetControllerVersion || command == CommandVersion) && len(response) >= 5:
 		parsed["version_x100"] = uint32(binary.LittleEndian.Uint16(response[2:4]))
 		parsed["beta"] = uint32(response[4])
-	case command == CommandU2GetCurrentSlot && len(response) >= 6:
-		parsed["slot"] = uint32(response[5])
 	case command == CommandJp108ReadDedicatedMappings && len(response) >= 8:
 		parsed["key_id"] = uint32(response[2])
 		parsed["mapping_type"] = uint32(response[3])
@@ -409,11 +380,6 @@ func diagSuccessDetail(command CommandID, facts map[string]uint32) string {
 		default:
 			return "ok"
 		}
-	case CommandU2GetCurrentSlot:
-		if slot, ok := facts["slot"]; ok {
-			return formatSlot(slot)
-		}
-		return "ok"
 	case CommandJp108ReadDedicatedMappings:
 		// The check reads the A button, the first of the ten.
 		if usage, ok := facts["usage"]; ok && usage != 0 {

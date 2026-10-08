@@ -2,6 +2,10 @@ package core
 
 import "github.com/bybrooklyn/openbitdo/internal/protocol"
 
+// u2MappingDeferredReason is the release-scope wording the scorecard and
+// the diagnostics summary use for Ultimate 2 mapping outside mock mode.
+const u2MappingDeferredReason = "button-map framing not hardware-confirmed"
+
 type supportRuntimeScope struct {
 	firmwareEnabled  bool
 	u2MappingEnabled bool

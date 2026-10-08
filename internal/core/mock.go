@@ -34,8 +34,7 @@ var mockSafeReadOrder = []protocol.CommandID{
 	protocol.CommandGetModeAlt, protocol.CommandGetControllerVersion, protocol.CommandGetSuperButton,
 	protocol.CommandIdle, protocol.CommandVersion, protocol.CommandReadProfile,
 	protocol.CommandJp108ReadDedicatedMappings, protocol.CommandJp108ReadFeatureFlags,
-	protocol.CommandJp108ReadVoice, protocol.CommandU2GetCurrentSlot, protocol.CommandU2ReadConfigSlot,
-	protocol.CommandU2ReadButtonMap,
+	protocol.CommandJp108ReadVoice, protocol.CommandU2GetConnected, protocol.CommandU2GetPhysicalMode,
 }
 
 func mockDiagProbe(target protocol.VidPid) protocol.DiagProbeResult {
@@ -106,7 +105,7 @@ var mockUnknownFamilyAllowed = map[protocol.CommandID]bool{
 
 var mockJPHandshakeDisallowed = map[protocol.CommandID]bool{
 	protocol.CommandGetMode: true, protocol.CommandGetModeAlt: true, protocol.CommandReadProfile: true,
-	protocol.CommandU2GetCurrentSlot: true, protocol.CommandU2ReadConfigSlot: true, protocol.CommandU2ReadButtonMap: true,
+	protocol.CommandU2GetConnected: true, protocol.CommandU2GetPhysicalMode: true,
 }
 
 var mockStandardJP108Disallowed = map[protocol.CommandID]bool{
@@ -136,10 +135,8 @@ func mockDiagCapabilityAllowed(cap protocol.PidCapability, command protocol.Comm
 		return cap.SupportsProfileRW
 	case protocol.CommandJp108ReadDedicatedMappings, protocol.CommandJp108ReadFeatureFlags, protocol.CommandJp108ReadVoice:
 		return cap.SupportsJP108DedicatedMap
-	case protocol.CommandU2GetCurrentSlot, protocol.CommandU2ReadConfigSlot:
+	case protocol.CommandU2GetConnected, protocol.CommandU2GetPhysicalMode:
 		return cap.SupportsU2SlotConfig
-	case protocol.CommandU2ReadButtonMap:
-		return cap.SupportsU2ButtonMap
 	default:
 		return false
 	}
@@ -183,8 +180,10 @@ func mockDiagParsedFacts(command protocol.CommandID, target protocol.VidPid) map
 	case protocol.CommandGetControllerVersion, protocol.CommandVersion:
 		facts["version_x100"] = 4200
 		facts["beta"] = 0
-	case protocol.CommandU2GetCurrentSlot:
-		facts["slot"] = 1
+	case protocol.CommandU2GetConnected:
+		facts["connected"] = 1
+	case protocol.CommandU2GetPhysicalMode:
+		facts["xinput"] = 1
 	}
 	return facts
 }
@@ -207,10 +206,10 @@ func mockDiagDetail(command protocol.CommandID, facts map[string]uint32) string 
 		if version, ok := facts["version_x100"]; ok {
 			return fmt.Sprintf("firmware %d.%02d beta=%d", version/100, version%100, facts["beta"])
 		}
-	case protocol.CommandU2GetCurrentSlot:
-		if slot, ok := facts["slot"]; ok {
-			return fmt.Sprintf("current slot %d", slot)
-		}
+	case protocol.CommandU2GetConnected:
+		return "controller connected"
+	case protocol.CommandU2GetPhysicalMode:
+		return "mode switch on XInput"
 	}
 	return "ok"
 }
@@ -219,37 +218,6 @@ func defaultJP108Mappings() []DedicatedButtonMapping {
 	out := make([]DedicatedButtonMapping, 0, len(AllDedicatedButtons))
 	for idx, button := range AllDedicatedButtons {
 		out = append(out, DedicatedButtonMapping{Button: button, TargetHIDUsage: (0x04 + uint16(idx)) & 0x00ff})
-	}
-	return out
-}
-
-// u2DefaultButtonFunction is each core button's "does what it says"
-// default target — e.g. the A button defaults to acting as A. Mirrors the
-// dirty-room evidence's description of the array's default initializer
-// (each core slot pre-populated with its own natural function).
-var u2DefaultButtonFunction = map[U2ButtonID]U2Function{
-	U2A: U2FuncA, U2B: U2FuncB, U2X: U2FuncX, U2Y: U2FuncY,
-	U2L1: U2FuncL1, U2R1: U2FuncR1, U2L2: U2FuncL2, U2R2: U2FuncR2,
-	U2L3: U2FuncL3, U2R3: U2FuncR3, U2Select: U2FuncSelect, U2Start: U2FuncStart,
-	U2Home: U2FuncHome, U2DPadUp: U2FuncDPadUp, U2DPadDown: U2FuncDPadDown,
-	U2DPadLeft: U2FuncDPadLeft, U2DPadRight: U2FuncDPadRight,
-}
-
-func defaultU2Mappings() []U2ButtonMapping {
-	out := make([]U2ButtonMapping, 0, len(AllU2Buttons))
-	for _, button := range AllU2Buttons {
-		out = append(out, U2ButtonMapping{Button: button, Target: u2DefaultButtonFunction[button]})
-	}
-	return out
-}
-
-// defaultU2PaddleMappings returns the 4 back paddles unbound (U2FuncNone),
-// matching the dirty-room evidence's description of the array's default
-// initializer leaving paddle slots 18-21 with no function assigned.
-func defaultU2PaddleMappings() []U2PaddleMapping {
-	out := make([]U2PaddleMapping, 0, len(AllU2Paddles))
-	for _, paddle := range AllU2Paddles {
-		out = append(out, U2PaddleMapping{Paddle: paddle, Target: U2FuncNone})
 	}
 	return out
 }

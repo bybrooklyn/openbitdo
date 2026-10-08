@@ -10,7 +10,6 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
-	"reflect"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -118,116 +117,6 @@ func TestWriteRecoveryReportRollbackFailed(t *testing.T) {
 }
 
 var errWriteBoom = errInvalidState("simulated device write failure")
-
-type panicRecordingMappingTransport struct {
-	opens  int
-	closes int
-	writes int
-	reads  int
-}
-
-func (t *panicRecordingMappingTransport) Open(context.Context, protocol.VidPid) error {
-	t.opens++
-	panic("U2 mapping denial opened the HID transport")
-}
-
-func (t *panicRecordingMappingTransport) Close() error {
-	t.closes++
-	panic("U2 mapping denial closed the HID transport")
-}
-
-func (t *panicRecordingMappingTransport) Write([]byte) (int, error) {
-	t.writes++
-	panic("U2 mapping denial wrote to the HID transport")
-}
-
-func (t *panicRecordingMappingTransport) Read(context.Context, int, uint64) ([]byte, error) {
-	t.reads++
-	panic("U2 mapping denial read from the HID transport")
-}
-
-func requireU2MappingDeferred(t *testing.T, err error) {
-	t.Helper()
-	coreErr, ok := err.(*Error)
-	if !ok || coreErr.Kind != KindPolicyDenied || coreErr.Reason != ReasonNotHardwareConfirmed {
-		t.Fatalf("expected PolicyDenied/NotHardwareConfirmed, got %v", err)
-	}
-	if coreErr.Message != u2MappingDeferredReason {
-		t.Fatalf("expected exact U2 denial %q, got %q", u2MappingDeferredReason, coreErr.Message)
-	}
-}
-
-func requireNoMappingTransportIO(t *testing.T, transport *panicRecordingMappingTransport) {
-	t.Helper()
-	if transport.opens != 0 || transport.closes != 0 || transport.writes != 0 || transport.reads != 0 {
-		t.Fatalf("expected zero transport I/O, got opens=%d closes=%d writes=%d reads=%d",
-			transport.opens, transport.closes, transport.writes, transport.reads)
-	}
-}
-
-func TestRealU2ApplyPathsDenyBeforeTransportOrStateMutation(t *testing.T) {
-	target := protocol.VidPid{VID: 0x2dc8, PID: 0x6012}
-	changes := []U2ButtonMapping{{Button: U2A, Target: U2FuncStart}}
-
-	t.Run("recovery API", func(t *testing.T) {
-		transport := &panicRecordingMappingTransport{}
-		c := New(Config{})
-		c.transportOverride = transport
-		beforeChanges := append([]U2ButtonMapping(nil), changes...)
-
-		report, err := c.U2ApplyCoreProfileWithRecovery(context.Background(), target, U2Slot1, 1, changes, 0.25, 0.75, true)
-		requireU2MappingDeferred(t, err)
-		if !reflect.DeepEqual(report, WriteRecoveryReport{}) {
-			t.Fatalf("denied apply returned a mutated recovery report: %+v", report)
-		}
-		if !reflect.DeepEqual(changes, beforeChanges) {
-			t.Fatalf("denied apply mutated caller changes: before=%+v after=%+v", beforeChanges, changes)
-		}
-		if len(c.backups) != 0 || len(c.sessions) != 0 {
-			t.Fatalf("denied apply mutated core state: backups=%d sessions=%d", len(c.backups), len(c.sessions))
-		}
-		requireNoMappingTransportIO(t, transport)
-	})
-
-	t.Run("convenience API", func(t *testing.T) {
-		transport := &panicRecordingMappingTransport{}
-		c := New(Config{})
-		c.transportOverride = transport
-
-		backupID, hasBackup, err := c.U2ApplyCoreProfile(context.Background(), target, U2Slot1, 1, changes, 0.25, 0.75, true)
-		requireU2MappingDeferred(t, err)
-		if backupID != "" || hasBackup {
-			t.Fatalf("denied apply returned backup state: id=%q present=%v", backupID, hasBackup)
-		}
-		if len(c.backups) != 0 || len(c.sessions) != 0 {
-			t.Fatalf("denied apply mutated core state: backups=%d sessions=%d", len(c.backups), len(c.sessions))
-		}
-		requireNoMappingTransportIO(t, transport)
-	})
-}
-
-func TestRealU2RestoreDeniesBeforeTransportOrStateMutation(t *testing.T) {
-	target := protocol.VidPid{VID: 0x2dc8, PID: 0x6012}
-	transport := &panicRecordingMappingTransport{}
-	c := New(Config{})
-	c.transportOverride = transport
-	backupID := c.storeBackup(target, configBackupPayload{
-		kind: backupU2,
-		u2Profile: U2CoreProfile{
-			Slot: U2Slot2, Mode: 3, Mappings: []U2ButtonMapping{{Button: U2B, Target: U2FuncA}},
-		},
-		u2ConfigBlob: []byte{1, 2, 3, 4},
-	})
-	before := c.backups[backupID]
-	beforeCount := len(c.backups)
-
-	err := c.RestoreBackup(context.Background(), backupID)
-	requireU2MappingDeferred(t, err)
-	if len(c.backups) != beforeCount || !reflect.DeepEqual(c.backups[backupID], before) || len(c.sessions) != 0 {
-		t.Fatalf("denied restore mutated core state: backups=%d sessions=%d", len(c.backups), len(c.sessions))
-	}
-	requireNoMappingTransportIO(t, transport)
-}
 
 func TestBeginnerDiagSummaryReportsReleaseDeferrals(t *testing.T) {
 	u2 := appDeviceFromProfile(protocol.VidPid{VID: 0x2dc8, PID: 0x6012}, "", true)
@@ -916,59 +805,6 @@ func TestVerifyPostFlashReportsUnverifiedWhenDeviceDoesNotRespond(t *testing.T) 
 	}
 	if report.Message == "" {
 		t.Fatal("expected a non-empty explanatory message")
-	}
-}
-
-// --- U2PreviewSlot: must read exactly the requested slot, never overriding
-// it with the device's currently-active slot the way U2ReadCoreProfile
-// deliberately does for its own use case.
-
-func minimalOkResponse() []byte {
-	resp := make([]byte, 64)
-	resp[0], resp[1] = 0x02, 0x05
-	return resp
-}
-
-func TestU2PreviewSlotReadsRequestedSlotNotActiveSlot(t *testing.T) {
-	// PID 0x6012 is an Ultimate2 full-tier device (SupportsU2SlotConfig +
-	// SupportsU2ButtonMap) — see protocol.DeviceProfileFor's registry.
-	//
-	// U2ReadButtonMap is hard-blocked against real hardware (see its doc
-	// comment in internal/protocol -- the 22x uint32 wire shape needs
-	// multi-report chunking whose paging scheme isn't yet confirmed), so
-	// this test only pushes one response (U2ReadConfigSlot) -- the
-	// button-map "read" never reaches the transport at all. U2PreviewSlot
-	// tolerates that block gracefully (MappingsUnavailable set, rather than
-	// the whole preview failing), which is the behavior this test now
-	// covers alongside its original point: the requested slot, not the
-	// active one, is what gets targeted.
-	target := protocol.VidPid{VID: 0x2dc8, PID: 0x6012}
-	transport := &protocol.MockTransport{}
-	transport.PushReadData(minimalOkResponse()) // U2ReadConfigSlot response
-
-	c := New(Config{})
-	c.transportOverride = transport
-
-	profile, err := c.U2PreviewSlot(context.Background(), target, U2Slot3)
-	if err != nil {
-		t.Fatalf("U2PreviewSlot: %v", err)
-	}
-	if profile.Slot != U2Slot3 {
-		t.Fatalf("expected profile.Slot=%v, got %v", U2Slot3, profile.Slot)
-	}
-	if profile.MappingsUnavailable == "" {
-		t.Fatal("expected MappingsUnavailable to be set given U2ReadButtonMap is hard-blocked")
-	}
-	if len(profile.Mappings) != 0 || len(profile.PaddleMappings) != 0 {
-		t.Fatalf("expected no mappings when blocked, got %d buttons / %d paddles", len(profile.Mappings), len(profile.PaddleMappings))
-	}
-
-	writes := transport.Writes()
-	if len(writes) != 1 {
-		t.Fatalf("expected exactly 1 write (ReadConfigSlot only -- ReadButtonMap performs zero I/O when blocked, and critically no U2GetCurrentSlot call) — got %d: %v", len(writes), writes)
-	}
-	if len(writes[0]) < 5 || writes[0][4] != U2Slot3.WireValue() {
-		t.Fatalf("expected slot byte (index 4) = %#02x, got %v", U2Slot3.WireValue(), writes[0])
 	}
 }
 

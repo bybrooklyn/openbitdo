@@ -129,44 +129,6 @@ type DedicatedButtonMapping struct {
 	TargetHIDUsage uint16
 }
 
-// U2ButtonMapping is one Ultimate2 button -> function mapping. Target is a
-// single-bit function bitmask from the shared U2Function catalog (confirmed
-// wire encoding — see docs/clean-room-evidence/dossiers/6012/u2_core.toml),
-// not a raw HID usage code.
-type U2ButtonMapping struct {
-	Button U2ButtonID
-	Target U2Function
-}
-
-// U2PaddleMapping is one Ultimate2 back-paddle -> function mapping, the
-// paddle-side counterpart to U2ButtonMapping. See U2PaddleID/U2Function in
-// paddles.go.
-type U2PaddleMapping struct {
-	Paddle U2PaddleID
-	Target U2Function
-}
-
-// U2CoreProfile is the readable Ultimate2 core state and the editable mock
-// preview state. Real-device writes are deferred until button-map framing is
-// hardware-confirmed.
-type U2CoreProfile struct {
-	Slot                 U2SlotID
-	Mode                 byte
-	FirmwareVersion      string
-	L2Analog             float32
-	R2Analog             float32
-	SupportsTriggerWrite bool
-	Mappings             []U2ButtonMapping
-	PaddleMappings       []U2PaddleMapping
-	// MappingsUnavailable is non-empty when Mappings/PaddleMappings could
-	// not be read from real hardware — currently always the case for a real
-	// (non-mock) device, since the button-map wire chunking scheme isn't
-	// yet confirmed (see internal/protocol's U2ReadButtonMap). Empty for
-	// mock-mode profiles, where Mappings/PaddleMappings are always
-	// populated with synthetic defaults.
-	MappingsUnavailable string
-}
-
 // GuidedButtonTestResult is the outcome of a guided button-test walkthrough.
 type GuidedButtonTestResult struct {
 	DeviceKind     DeviceKind
@@ -184,12 +146,10 @@ type configBackup struct {
 	payload   configBackupPayload
 }
 
-// configBackupPayload holds exactly one of the two backup shapes.
+// configBackupPayload holds exactly one backup shape, selected by kind.
 type configBackupPayload struct {
 	kind          deviceKind
 	jp108Mappings []DedicatedButtonMapping
-	u2Profile     U2CoreProfile
-	u2ConfigBlob  []byte
 	keyboard      KeyboardProfile
 	padRecord     []byte
 }
@@ -198,7 +158,6 @@ type deviceKind int
 
 const (
 	backupJP108 deviceKind = iota
-	backupU2
 	backupKeyboard
 	backupPad
 )

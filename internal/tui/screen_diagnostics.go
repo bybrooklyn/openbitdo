@@ -216,12 +216,10 @@ func checkLabel(command protocol.CommandID) string {
 		return "Read feature flags"
 	case protocol.CommandJp108ReadVoice:
 		return "Read voice setting"
-	case protocol.CommandU2GetCurrentSlot:
-		return "Current profile slot"
-	case protocol.CommandU2ReadConfigSlot:
-		return "Read slot settings"
-	case protocol.CommandU2ReadButtonMap:
-		return "Read button map"
+	case protocol.CommandU2GetConnected:
+		return "Is the controller connected"
+	case protocol.CommandU2GetPhysicalMode:
+		return "Mode switch position"
 	}
 	return string(command)
 }

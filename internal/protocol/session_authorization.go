@@ -73,9 +73,6 @@ func (s *DeviceSession) allowPidScopedFullSupportPath(row CommandRow) bool {
 var candidateUnlockableWrites = map[CommandID]bool{
 	CommandSetModeDInput:              true,
 	CommandWriteProfile:               true,
-	CommandU2WriteButtonMap:           true,
-	CommandU2WriteConfigSlot:          true,
-	CommandU2SetMode:                  true,
 	CommandU2RecordWrite:              true,
 	CommandU2Commit:                   true,
 	CommandJp108WriteDedicatedMapping: true,
