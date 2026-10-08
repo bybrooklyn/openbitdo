@@ -189,3 +189,54 @@ func TestRealControllerEditorNeedsAdvancedModeUntilConfirmed(t *testing.T) {
 		t.Fatalf("advanced mode should open the editor, got %q", got)
 	}
 }
+
+func TestProfileFilesSaveAndLoadInBothEditors(t *testing.T) {
+	// Controller: save slot 1, change it, load the file back.
+	m := padModel(t)
+	m.mapping.cursor = padRowIndex(t, "Back paddle P1")
+	m = press(t, m, "right") // P1 -> A
+	saved := m.mapping.pad.draft.Slots[0]
+	m = press(t, m, "E")
+	if !strings.Contains(m.mapping.statusMsg, "Saved to ") || !strings.Contains(m.mapping.statusMsg, filepath.Join("profiles", "ultimate-2", "profile.toml")) {
+		t.Fatalf("status = %q", m.mapping.statusMsg)
+	}
+	// A second save asks before replacing, then replaces.
+	m = press(t, m, "E")
+	if !strings.Contains(m.mapping.statusMsg, "already exists") {
+		t.Fatalf("expected a replace prompt, got %q", m.mapping.statusMsg)
+	}
+	m = press(t, m, "E")
+	if !strings.Contains(m.mapping.statusMsg, "Saved to ") {
+		t.Fatalf("expected the second press to replace, got %q", m.mapping.statusMsg)
+	}
+	m = press(t, m, "right", "right", "I")
+	if !m.mapping.files.open || !strings.Contains(ansi.Strip(m.View()), "profile.toml") {
+		t.Fatal("I should list the saved profile")
+	}
+	m = press(t, m, "enter")
+	got := m.mapping.pad.draft.Slots[0]
+	saved.InUse = true // a loaded slot is one in use
+	if got != saved || m.mapping.files.open {
+		t.Fatalf("loading should restore the saved slot:\n got %+v\nwant %+v", got, saved)
+	}
+	if !m.mapping.canUndo() {
+		t.Fatal("loading a file should be undoable")
+	}
+
+	// Keyboard: same keys, its own directory; a controller file is refused.
+	k := keyboardModel(t, 100, 30)
+	k.settingsPath = m.settingsPath
+	k = press(t, k, "I")
+	if k.mapping.files.open || !strings.Contains(k.mapping.statusMsg, "No saved profiles yet") {
+		t.Fatalf("the keyboard has no saved profiles yet: %q", k.mapping.statusMsg)
+	}
+	k = press(t, k, "right", "E") // A button -> first target, then save
+	if !strings.Contains(k.mapping.statusMsg, filepath.Join("profiles", "retro-108")) {
+		t.Fatalf("status = %q", k.mapping.statusMsg)
+	}
+	want := k.mapping.kb.draft.Mappings[233]
+	k = press(t, k, "right", "I", "enter")
+	if k.mapping.kb.draft.Mappings[233] != want {
+		t.Fatalf("loading should restore the saved mapping, got %+v", k.mapping.kb.draft.Mappings[233])
+	}
+}

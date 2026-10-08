@@ -17,6 +17,9 @@ All notable changes to OpenBitdo are tracked here.
   confirmed on hardware.
 - Profile and macro names are written the way the vendor's application writes them, so each
   program can read names the other wrote.
+- Profile files: `E` in either editor saves the draft (a keyboard profile, or one controller slot)
+  as a readable TOML file under the config directory's `profiles/`; `I` loads one back into the
+  draft. A file a device could not hold is refused with the reason.
 - Ultimate 2: the controller's real configuration protocol (a checksummed header over one
   1592-byte record per platform, written by byte range and committed) replaces frames that no
   controller ever answered. A profile editor covers three slots, the 22-input button map (back

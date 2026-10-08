@@ -178,6 +178,17 @@ func (m Model) updatePad(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.mapping.pad.naming {
 			return m.updatePadName(msg)
 		}
+		if m.mapping.files.open {
+			return m.updateProfileFiles(msg)
+		}
+		switch msg.String() {
+		case "E":
+			m.saveProfileFile()
+			return m, nil
+		case "I":
+			m.openProfileFiles()
+			return m, nil
+		}
 		rows := len(padRows)
 		switch msg.String() {
 		case "esc":
@@ -461,6 +472,9 @@ func (m Model) padPanel(height int) devicePanel {
 	if pad.picking {
 		return m.padPickerPanel(panel, text)
 	}
+	if m.mapping.files.open {
+		return m.profileFilesPanel(panel, text)
+	}
 
 	platform := "DInput"
 	switch pad.draft.Platform {
@@ -573,7 +587,7 @@ func (m Model) viewPad(height int) string {
 }
 
 func (m Model) clickPad(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
-	if m.mapping.loading || m.mapping.err != nil {
+	if m.mapping.loading || m.mapping.err != nil || m.mapping.files.open {
 		return m, nil
 	}
 	owner, ok := m.padPanel(m.height-3).ownerAt(msg.X, msg.Y)

@@ -121,6 +121,8 @@ func (m Model) viewHints() []keyHint {
 				{key: "←→", label: "step", help: "step through the choices without opening the list"},
 				{key: "del", label: "default", help: "put the key back to its normal behaviour"},
 				{key: "X", label: "erase", help: "erase the keyboard's profile (asks first)"},
+				{key: "E", label: "save file", help: "save the draft to a profile file"},
+				{key: "I", label: "load file", help: "load a saved profile file into the draft"},
 			}, shell...)
 		}
 		if m.mapping.pad.picking {
@@ -136,6 +138,8 @@ func (m Model) viewHints() []keyHint {
 			{key: choose, label: "assign", help: "choose what a button does; on a setting, change it"},
 			{key: "←→", label: "step", help: "step a value or a choice; [ and ] step a range by 10"},
 			{key: "del", label: "default", help: "put a button back to its normal function"},
+			{key: "E", label: "save file", help: "save this slot to a profile file"},
+			{key: "I", label: "load file", help: "load a saved profile file into this slot"},
 		}, shell...)
 
 	case screenButtons:

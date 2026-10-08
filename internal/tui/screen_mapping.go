@@ -22,6 +22,8 @@ type mappingState struct {
 	// the controller editor's, used when kind is KindUltimate2.
 	kb  keyboardState
 	pad padEditor
+	// files is the saved-profile list, open over either editor.
+	files profileFiles
 
 	// cursor is the selected row: an editor row, then Apply, Undo, Reset.
 	cursor    int
@@ -60,7 +62,7 @@ func (s mappingState) dirty() bool {
 
 // typing reports whether keys are going into a text field or search box.
 func (s mappingState) typing() bool {
-	return s.kb.picking || s.kb.naming || s.pad.picking || s.pad.naming || s.kb.macro.open
+	return s.kb.picking || s.kb.naming || s.pad.picking || s.pad.naming || s.kb.macro.open || s.files.open
 }
 
 func (m Model) updateMapping(msg tea.Msg) (tea.Model, tea.Cmd) {

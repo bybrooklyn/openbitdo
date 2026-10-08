@@ -251,6 +251,17 @@ func (m Model) updateKeyboard(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.mapping.kb.macro.open {
 			return m.updateMacroEditor(msg)
 		}
+		if m.mapping.files.open {
+			return m.updateProfileFiles(msg)
+		}
+		switch msg.String() {
+		case "E":
+			m.saveProfileFile()
+			return m, nil
+		case "I":
+			m.openProfileFiles()
+			return m, nil
+		}
 		rows := len(keyboardRows)
 		switch msg.String() {
 		case "X":
@@ -559,6 +570,9 @@ func (m Model) keyboardPanel(height int) devicePanel {
 	if kb.macro.open {
 		return m.macroPanel(panel, text)
 	}
+	if m.mapping.files.open {
+		return m.profileFilesPanel(panel, text)
+	}
 
 	profile := "no profile yet (applying creates one)"
 	if kb.loaded.Name != "" {
@@ -680,7 +694,7 @@ func (m Model) viewKeyboard(height int) string {
 }
 
 func (m Model) clickKeyboard(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
-	if m.mapping.loading || m.mapping.err != nil {
+	if m.mapping.loading || m.mapping.err != nil || m.mapping.files.open {
 		return m, nil
 	}
 	owner, ok := m.keyboardPanel(m.height-3).ownerAt(msg.X, msg.Y)
