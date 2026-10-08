@@ -74,6 +74,13 @@ var jpCandidateReadCommands = map[CommandID]bool{
 	CommandJp108ReadDedicatedMappings: true, CommandJp108ReadFeatureFlags: true, CommandJp108ReadVoice: true,
 }
 
+// recordKeyboardReadCommands are the reads a record keyboard answers; see
+// kbrecord.go.
+var recordKeyboardReadCommands = map[CommandID]bool{
+	CommandKbRecordSetReportMode: true, CommandKbRecordRead: true,
+	CommandKbRecordMacroRead: true, CommandKbRecordLightsRead: true,
+}
+
 // isCommandAllowedForCandidatePID is gate 3 (support-tier restriction) for
 // candidate-readonly devices: a fixed read whitelist, plus writes only
 // through the write-unlock ceremony.
@@ -89,6 +96,9 @@ func isCommandAllowedForCandidatePID(pid uint16, command CommandID, safety Safet
 
 	if baseDiagReads[command] {
 		return standardCandidatePIDs[pid] || jpCandidatePIDs[pid] || pidWithSlotConfigCandidate[pid]
+	}
+	if recordKeyboardReadCommands[command] {
+		return recordKeyboardPIDs[pid]
 	}
 	if standardCandidatePIDs[pid] || pidWithSlotConfigCandidate[pid] {
 		return standardCandidateReadCommands[command]
@@ -124,6 +134,10 @@ func isCommandAllowedByCapability(cap PidCapability, command CommandID) bool {
 		CommandU2RecordRead, CommandU2RecordWrite, CommandU2Commit, CommandU2GetLightEffect, CommandU2SetLightEffect,
 		CommandU2MacroRead, CommandU2MacroWrite, CommandU2MacroErase, CommandArcadeGetMode:
 		return cap.SupportsU2SlotConfig
+	case CommandKbRecordSetReportMode, CommandKbRecordRead, CommandKbRecordWrite,
+		CommandKbRecordMacroRead, CommandKbRecordMacroErase, CommandKbRecordMacroWrite,
+		CommandKbRecordLightsRead, CommandKbRecordLightsBegin, CommandKbRecordLightsWrite:
+		return cap.SupportsRecordKeyboard
 	default:
 		return false
 	}
@@ -265,6 +279,19 @@ func ValidateResponse(command CommandID, response []byte) ResponseStatus {
 			return StatusOk
 		}
 		return StatusInvalid
+	case CommandKbRecordRead, CommandKbRecordWrite,
+		CommandKbRecordMacroRead, CommandKbRecordMacroErase, CommandKbRecordMacroWrite,
+		CommandKbRecordLightsRead, CommandKbRecordLightsBegin, CommandKbRecordLightsWrite:
+		if len(response) < kbRecordDataOffset {
+			return StatusMalformed
+		}
+		// A refusal (02 04 c0), a reply to some other command or a stray
+		// key report is not this command's answer.
+		cmd, _ := kbRecordCommandCode(command)
+		if _, _, ok := kbRecordReplyFor(response, cmd); ok {
+			return StatusOk
+		}
+		return StatusInvalid
 	case CommandGetControllerVersion, CommandVersion:
 		if len(response) < 5 {
 			return StatusMalformed
@@ -322,6 +349,10 @@ func minimumResponseLen(command CommandID) int {
 		CommandU2RecordRead, CommandU2RecordWrite, CommandU2Commit, CommandU2GetLightEffect, CommandU2SetLightEffect,
 		CommandU2MacroRead, CommandU2MacroWrite, CommandU2MacroErase, CommandArcadeGetMode:
 		return u2DataOffset
+	case CommandKbRecordRead, CommandKbRecordWrite,
+		CommandKbRecordMacroRead, CommandKbRecordMacroErase, CommandKbRecordMacroWrite,
+		CommandKbRecordLightsRead, CommandKbRecordLightsBegin, CommandKbRecordLightsWrite:
+		return kbRecordDataOffset
 	case CommandGetControllerVersion, CommandVersion:
 		return 5
 	default:

@@ -164,7 +164,10 @@ func (s *DeviceSession) recordExecution(report CommandExecutionReport) {
 }
 
 func (s *DeviceSession) timeoutForCommand(row CommandRow) uint64 {
-	if row.ID == CommandU2Commit || row.ID == CommandU2MacroErase {
+	// Preparing a record keyboard's macro slot or colour block may erase
+	// flash before it is acknowledged, as a controller's macro erase does.
+	if row.ID == CommandU2Commit || row.ID == CommandU2MacroErase ||
+		row.ID == CommandKbRecordMacroErase || row.ID == CommandKbRecordLightsBegin {
 		return max(s.config.TimeoutProfile.IOMs, uint64(u2CommitTimeout.Milliseconds()))
 	}
 	switch row.SafetyClass {

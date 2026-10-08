@@ -165,6 +165,10 @@ func (c *OpenBitdoCore) RestoreBackup(ctx context.Context, backupID ConfigBackup
 		return c.restorePadBackup(ctx, PadAddress{Enumerated: backup.target, Product: backup.payload.padProduct}, backup.payload.padRecord, backup.payload.padMacros)
 	}
 
+	if backup.payload.kind == backupRecordKeyboard {
+		return c.restoreKbRecordBackup(ctx, backup.target, backup.payload.recordKeyboard)
+	}
+
 	session, err := c.openSessionForOps(ctx, backup.target)
 	if err != nil {
 		return err
