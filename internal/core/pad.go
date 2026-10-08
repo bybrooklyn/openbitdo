@@ -36,15 +36,45 @@ const (
 	padOffTriggers  = 0x0b0 // 8: flag, two (start, end)
 	padOffOptions   = 0x0c8 // 8: flag, option word
 	padOffButtons   = 0x0e0 // 92: flag, 22 targets
-	padOffMotion    = 0x494 // 12: flag, button, mode, sensitivity, dead zone, target
-	padOffTracing   = 0x4b8 // 12: flag, colour, background
-	padOffFire      = 0x4dc // 16: flag, colour, background, speed
-	padOffCustom    = 0x50c // 100: flag, 24 colours
 
 	padMotionOff = 0x20190000 // the motion section's flag when motion is off
 
 	padNameLen = 32
 )
+
+// padLayout is where a controller model keeps the sections of its record
+// that follow the button map. The sections before it are in the same place
+// on every model.
+type padLayout struct {
+	size int
+	// macros is the recorded-macro section: 216 bytes per slot.
+	macros int
+	// motion (12 per slot), then tracing (12), fire (16) and custom (100)
+	// lights; zero when the model has none.
+	motion, tracing, fire, custom int
+	// swapPaddleTriggers: this model numbers P1 and P2 the other way round
+	// when one plays a macro.
+	swapPaddleTriggers bool
+}
+
+var (
+	padLayoutU2   = padLayout{size: protocol.U2RecordSize, macros: 0x1f4, motion: 0x494, tracing: 0x4b8, fire: 0x4dc, custom: 0x50c}
+	padLayoutU2BT = padLayout{size: protocol.U2BTRecordSize, macros: 0x68c, motion: 0x92c, tracing: 0x950, fire: 0x974, custom: 0x9a4, swapPaddleTriggers: true}
+	padLayoutPro3 = padLayout{size: protocol.Pro3RecordSize, macros: 0x68c}
+)
+
+func padLayoutFor(vidPid protocol.VidPid) padLayout {
+	switch vidPid.PID {
+	case 0x600f, 0x6011:
+		return padLayoutU2BT
+	case 0x6009:
+		return padLayoutPro3
+	}
+	return padLayoutU2
+}
+
+func (l padLayout) hasMotion() bool { return l.motion != 0 }
+func (l padLayout) hasLights() bool { return l.tracing != 0 }
 
 // PadTarget is what a controller input is assigned to: one value from the
 // controller's own function list (see PadTargets).
@@ -133,9 +163,14 @@ type PadProfile struct {
 	// Macros are each slot's four recorded macros.
 	Macros [PadSlots][PadMacros]PadMacro
 
+	// HasMotion and HasLights say whether this model has a motion sensor
+	// mapping and stick-ring lights to configure.
+	HasMotion, HasLights bool
+
 	// record is the raw record this was decoded from. Writes start from
 	// it so everything this program does not model is preserved.
 	record []byte
+	layout padLayout
 }
 
 func decodePadName(raw []byte) string {
@@ -195,14 +230,15 @@ func defaultPadSlot(platform byte) PadSlot {
 	return slot
 }
 
-func decodePadProfile(record []byte) (PadProfile, error) {
-	if len(record) != protocol.U2RecordSize {
-		return PadProfile{}, fmt.Errorf("configuration record is %d bytes, expected %d", len(record), protocol.U2RecordSize)
+func decodePadProfile(record []byte, layout padLayout) (PadProfile, error) {
+	if len(record) != layout.size {
+		return PadProfile{}, fmt.Errorf("configuration record is %d bytes, expected %d", len(record), layout.size)
 	}
 	profile := PadProfile{
 		Platform:   byte(binary.LittleEndian.Uint16(record[padOffPlatform:])),
 		ActiveSlot: int(binary.LittleEndian.Uint16(record[padOffActive:])),
 		record:     append([]byte(nil), record...),
+		layout:     layout, HasMotion: layout.hasMotion(), HasLights: layout.hasLights(),
 	}
 	if profile.ActiveSlot >= PadSlots {
 		profile.ActiveSlot = 0
@@ -234,23 +270,23 @@ func decodePadProfile(record []byte) (PadProfile, error) {
 		if at := padOffOptions + i*8; flagAt(record, at) {
 			slot.Options = binary.LittleEndian.Uint32(record[at+4:])
 		}
-		if at := padOffMotion + i*12; flagAt(record, at) && record[at+11] != PadMotionOff {
+		if at := layout.motion + i*12; layout.hasMotion() && flagAt(record, at) && record[at+11] != PadMotionOff {
 			slot.Motion = PadMotion{
 				Target: record[at+11], Button: PadTarget(binary.LittleEndian.Uint32(record[at+4:])),
 				Toggle:      record[at+8] == 2,
 				Sensitivity: max(1, min(10, int(record[at+9]))), DeadZone: min(100, int(record[at+10])),
 			}
 		}
-		if at := padOffTracing + i*12; flagAt(record, at) {
+		if at := layout.tracing + i*12; layout.hasLights() && flagAt(record, at) {
 			slot.Lights.TracingColor = binary.LittleEndian.Uint32(record[at+4:]) & 0xffffff
 			slot.Lights.TracingBackground = binary.LittleEndian.Uint32(record[at+8:]) & 0xffffff
 		}
-		if at := padOffFire + i*16; flagAt(record, at) {
+		if at := layout.fire + i*16; layout.hasLights() && flagAt(record, at) {
 			slot.Lights.FireColor = binary.LittleEndian.Uint32(record[at+4:]) & 0xffffff
 			slot.Lights.FireBackground = binary.LittleEndian.Uint32(record[at+8:]) & 0xffffff
 			slot.Lights.FireSpeed = max(1, min(15, int(record[at+12])))
 		}
-		if at := padOffCustom + i*100; flagAt(record, at) {
+		if at := layout.custom + i*100; layout.hasLights() && flagAt(record, at) {
 			for led := range slot.Lights.Custom {
 				slot.Lights.Custom[led] = binary.LittleEndian.Uint32(record[at+4+led*4:]) & 0xffffff
 			}
@@ -303,7 +339,7 @@ type padRange struct{ offset, length int }
 // encodePadSlot writes slot i into record and returns the spans it changed.
 // A section equal to what the record already decodes to is left alone, so
 // applying an unedited profile writes nothing.
-func encodePadSlot(record []byte, i int, slot, was PadSlot) ([]padRange, error) {
+func encodePadSlot(record []byte, layout padLayout, i int, slot, was PadSlot) ([]padRange, error) {
 	if err := slot.validate(); err != nil {
 		return nil, err
 	}
@@ -344,6 +380,9 @@ func encodePadSlot(record []byte, i int, slot, was PadSlot) ([]padRange, error) 
 	if slot.Options != was.Options {
 		put(padOffOptions+i*8, binary.LittleEndian.AppendUint32(append([]byte(nil), flag...), slot.Options))
 	}
+	if (slot.Motion != was.Motion && !layout.hasMotion()) || (slot.Lights != was.Lights && !layout.hasLights()) {
+		return nil, fmt.Errorf("this controller has no motion or light settings")
+	}
 	if slot.Motion != was.Motion {
 		section := binary.LittleEndian.AppendUint32(nil, padMotionOff)
 		if m := slot.Motion; m.Target == PadMotionOff {
@@ -357,23 +396,23 @@ func encodePadSlot(record []byte, i int, slot, was PadSlot) ([]padRange, error) 
 			section = binary.LittleEndian.AppendUint32(append([]byte(nil), flag...), uint32(m.Button))
 			section = append(section, mode, byte(m.Sensitivity), byte(m.DeadZone), m.Target)
 		}
-		put(padOffMotion+i*12, section)
+		put(layout.motion+i*12, section)
 	}
 	if l, w := slot.Lights, was.Lights; l.TracingColor != w.TracingColor || l.TracingBackground != w.TracingBackground {
 		section := binary.LittleEndian.AppendUint32(append([]byte(nil), flag...), l.TracingColor)
-		put(padOffTracing+i*12, binary.LittleEndian.AppendUint32(section, l.TracingBackground))
+		put(layout.tracing+i*12, binary.LittleEndian.AppendUint32(section, l.TracingBackground))
 	}
 	if l, w := slot.Lights, was.Lights; l.FireColor != w.FireColor || l.FireBackground != w.FireBackground || l.FireSpeed != w.FireSpeed {
 		section := binary.LittleEndian.AppendUint32(append([]byte(nil), flag...), l.FireColor)
 		section = binary.LittleEndian.AppendUint32(section, l.FireBackground)
-		put(padOffFire+i*16, append(section, byte(l.FireSpeed), 0, 0, 0))
+		put(layout.fire+i*16, append(section, byte(l.FireSpeed), 0, 0, 0))
 	}
 	if slot.Lights.Custom != was.Lights.Custom {
 		section := append([]byte(nil), flag...)
 		for _, colour := range slot.Lights.Custom {
 			section = binary.LittleEndian.AppendUint32(section, colour)
 		}
-		put(padOffCustom+i*100, section)
+		put(layout.custom+i*100, section)
 	}
 	// A slot with anything set in it is in use.
 	if len(changed) > 0 || slot.InUse != was.InUse {
@@ -409,12 +448,16 @@ func (c *OpenBitdoCore) padSession(ctx context.Context, vidPid protocol.VidPid) 
 		_ = session.Close()
 		return nil, 0, nil, err
 	}
-	connected, perr := session.U2Connected(ctx)
-	if perr != nil {
-		return fail(errProtocol(perr))
-	}
-	if !connected {
-		return fail(errInvalidState("the controller is off or not connected to its receiver"))
+	// Only an Ultimate 2 is asked whether it is connected: its receiver
+	// answers while the controller is off. The others are reached directly.
+	if vidPid.PID == 0x6012 || vidPid.PID == 0x6013 {
+		connected, perr := session.U2Connected(ctx)
+		if perr != nil {
+			return fail(errProtocol(perr))
+		}
+		if !connected {
+			return fail(errInvalidState("the controller is off or not connected to its receiver"))
+		}
 	}
 	if perr := session.U2SetInputReports(ctx, false); perr != nil {
 		return fail(errProtocol(perr))
@@ -423,7 +466,7 @@ func (c *OpenBitdoCore) padSession(ctx context.Context, vidPid protocol.VidPid) 
 		_ = session.U2SetInputReports(context.WithoutCancel(ctx), true)
 		_ = session.Close()
 	}
-	platform, perr = session.U2PhysicalPlatform(ctx)
+	platform, perr = padPlatform(ctx, session, vidPid)
 	if perr == nil {
 		perr = session.U2SelectPlatform(ctx, platform)
 	}
@@ -442,22 +485,24 @@ func (c *OpenBitdoCore) PadReadProfile(ctx context.Context, vidPid protocol.VidP
 		return PadProfile{}, err
 	}
 	defer done()
-	return readPadProfile(ctx, session)
+	return readPadProfile(ctx, session, padLayoutFor(vidPid))
 }
 
-func readPadProfile(ctx context.Context, session *protocol.DeviceSession) (PadProfile, error) {
-	record, err := session.U2ReadRecord(ctx, protocol.U2RecordSize)
+func readPadProfile(ctx context.Context, session *protocol.DeviceSession, layout padLayout) (PadProfile, error) {
+	record, err := session.U2ReadRecord(ctx, layout.size)
 	if err != nil {
 		return PadProfile{}, errProtocol(err)
 	}
-	profile, err := decodePadProfile(record)
+	profile, err := decodePadProfile(record, layout)
 	if err != nil {
 		return PadProfile{}, errProtocol(err)
 	}
-	if profile.LightEffect, err = session.U2LightEffect(ctx); err != nil {
-		return PadProfile{}, errProtocol(err)
+	if layout.hasLights() {
+		if profile.LightEffect, err = session.U2LightEffect(ctx); err != nil {
+			return PadProfile{}, errProtocol(err)
+		}
 	}
-	if profile.Macros, err = readPadMacros(ctx, session, record, profile.Platform); err != nil {
+	if profile.Macros, err = readPadMacros(ctx, session, record, layout, profile.Platform); err != nil {
 		return PadProfile{}, errProtocol(err)
 	}
 	return profile, nil
@@ -483,14 +528,15 @@ func (c *OpenBitdoCore) PadApply(ctx context.Context, vidPid protocol.VidPid, ed
 		return WriteRecoveryReport{}, errInvalidState("the controller's mode switch moved since this profile was read; reload it")
 	}
 
-	before, err := readPadProfile(ctx, session)
+	layout := padLayoutFor(vidPid)
+	before, err := readPadProfile(ctx, session, layout)
 	if err != nil {
 		return WriteRecoveryReport{}, err
 	}
 	record := append([]byte(nil), before.record...)
 	var spans []padRange
 	for i := range edited.Slots {
-		changed, err := encodePadSlot(record, i, edited.Slots[i], before.Slots[i])
+		changed, err := encodePadSlot(record, layout, i, edited.Slots[i], before.Slots[i])
 		if err != nil {
 			return WriteRecoveryReport{}, errInvalidState("slot %d: %v", i+1, err)
 		}
@@ -507,8 +553,8 @@ func (c *OpenBitdoCore) PadApply(ctx context.Context, vidPid protocol.VidPid, ed
 			}
 		}
 		macroSlots[slot] = true
-		section := encodePadMacroSection(platform, edited.Macros[slot])
-		at := padOffMacros + slot*padMacroSection
+		section := encodePadMacroSection(layout, platform, edited.Macros[slot])
+		at := layout.macros + slot*padMacroSection
 		if !bytes.Equal(record[at:at+padMacroSection], section) {
 			copy(record[at:], section)
 			spans = append(spans, padRange{at, padMacroSection})
@@ -517,7 +563,7 @@ func (c *OpenBitdoCore) PadApply(ctx context.Context, vidPid protocol.VidPid, ed
 	backupID := c.storeBackup(vidPid, configBackupPayload{kind: backupPad, padRecord: before.record, padMacros: before.Macros})
 	report := WriteRecoveryReport{BackupID: backupID, HasBackupID: true}
 	effect := edited.LightEffect
-	if effect == 0 {
+	if effect == 0 || !layout.hasLights() {
 		effect = before.LightEffect // a profile built without one leaves it alone
 	}
 	if len(spans) == 0 && len(macroSlots) == 0 && effect == before.LightEffect {
@@ -574,7 +620,7 @@ func writePadSpans(ctx context.Context, session *protocol.DeviceSession, record 
 	if err := session.U2Commit(ctx); err != nil {
 		return fmt.Errorf("commit: %w", err)
 	}
-	got, err := session.U2ReadRecord(ctx, protocol.U2RecordSize)
+	got, err := session.U2ReadRecord(ctx, len(record))
 	if err != nil {
 		return fmt.Errorf("readback failed: %w", err)
 	}
@@ -597,7 +643,11 @@ func (c *OpenBitdoCore) restorePadBackup(ctx context.Context, vidPid protocol.Vi
 	if byte(binary.LittleEndian.Uint16(backup[padOffPlatform:])) != platform {
 		return errInvalidState("this backup is for the other position of the controller's mode switch")
 	}
-	current, perr := session.U2ReadRecord(ctx, protocol.U2RecordSize)
+	layout := padLayoutFor(vidPid)
+	if len(backup) != layout.size {
+		return errInvalidState("this backup is for a different controller model")
+	}
+	current, perr := session.U2ReadRecord(ctx, layout.size)
 	if perr != nil {
 		return errProtocol(perr)
 	}
@@ -614,7 +664,7 @@ func (c *OpenBitdoCore) restorePadBackup(ctx context.Context, vidPid protocol.Vi
 		}
 		spans = append(spans, padRange{start, i - start})
 	}
-	now, err2 := readPadMacros(ctx, session, current, platform)
+	now, err2 := readPadMacros(ctx, session, current, layout, platform)
 	if err2 != nil {
 		return errProtocol(err2)
 	}
@@ -681,4 +731,25 @@ func PadMotionButtonName(target PadTarget) string {
 		return "Extra button R4"
 	}
 	return target.String()
+}
+
+// padPlatform works out which platform's record a controller is using. An
+// Ultimate 2's mode switch chooses between XInput and DInput; a Pro 3
+// reached directly is on DInput or Switch; an Ultimate 2 Bluetooth reached
+// directly is always on Switch.
+func padPlatform(ctx context.Context, session *protocol.DeviceSession, vidPid protocol.VidPid) (byte, error) {
+	if vidPid.PID == 0x600f || vidPid.PID == 0x6011 {
+		return protocol.U2PlatformSwitch, nil
+	}
+	platform, err := session.U2PhysicalPlatform(ctx)
+	if err != nil {
+		return 0, err
+	}
+	if vidPid.PID == 0x6009 {
+		if platform == protocol.U2PlatformXInput { // the switch's first position
+			return protocol.U2PlatformDInput, nil
+		}
+		return protocol.U2PlatformSwitch, nil
+	}
+	return platform, nil
 }

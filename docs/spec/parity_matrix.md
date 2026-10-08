@@ -76,7 +76,8 @@ on, answering the read. The receiver alone answers only the connection query.
 
 | Family | OpenBitdo |
 |---|---|
-| Pro 3, Ultimate 2 Bluetooth, Ultimate Bluetooth 1st gen | no. They use the same protocol and a record of a different size; the Ultimate 2 code is the base to extend. |
+| Pro 3 (0x6009), Ultimate 2 Bluetooth (0x600f) | simulated: the same editor as the Ultimate 2, over each model's own record layout (a Pro 3 has no motion or lights). Their older "hot-key" macro section is preserved but not editable. No hardware has been tried. |
+| Ultimate Bluetooth 1st gen (0x6007) | no |
 | Arcade Controller, Arcade Controller Pro | no |
 | Retro Mechanical Keyboard (0x5200) | no. Same per-key protocol as the Retro 108 with a different key table and report switch. |
 | Retro 87 Xbox, Retro 68, Riviera keyboard | no |

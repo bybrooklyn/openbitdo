@@ -14,7 +14,7 @@ import (
 // padMapping is the controller editor with a freshly read, unconfigured
 // controller on its DInput position.
 func padMapping() mappingState {
-	profile := core.PadProfile{Platform: protocol.U2PlatformDInput}
+	profile := core.PadProfile{Platform: protocol.U2PlatformDInput, HasMotion: true, HasLights: true}
 	for s := range profile.Slots {
 		profile.Slots[s] = core.DefaultPadSlot(profile.Platform)
 	}
@@ -175,7 +175,7 @@ func TestPadRowsAreClickable(t *testing.T) {
 
 func TestRealControllerEditorNeedsAdvancedModeUntilConfirmed(t *testing.T) {
 	device := core.AppDevice{SupportTier: protocol.TierFull,
-		Capability: protocol.PidCapability{SupportsU2ButtonMap: true, SupportsU2SlotConfig: true}}
+		Capability: protocol.PidCapability{SupportsU2SlotConfig: true}}
 	if got := mappingDisabledReason(device, false, false, false); got != "button-map framing not hardware-confirmed" {
 		t.Fatalf("a real controller should be gated by default, got %q", got)
 	}

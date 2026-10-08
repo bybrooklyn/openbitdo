@@ -380,3 +380,74 @@ func TestPadMacroRefusals(t *testing.T) {
 		}
 	}
 }
+
+func TestSiblingControllersUseTheirOwnRecordLayout(t *testing.T) {
+	ctx := context.Background()
+	rest := PadMacroStep{Millis: 20, Left: PadStickCentre, Right: PadStickCentre}
+	tap := PadMacroStep{Millis: 40, Buttons: uint16(PadX), Left: PadStickCentre, Right: PadStickCentre}
+
+	// Ultimate 2 Bluetooth: a larger record, with the macro, motion and
+	// light sections further along, and P1/P2 numbered the other way round
+	// as macro triggers.
+	bt := protocol.VidPid{VID: 0x2dc8, PID: 0x600f}
+	pad := &protocol.U2Simulator{Physical: protocol.U2PlatformSwitch, RecordSize: protocol.U2BTRecordSize}
+	c := padCore(pad)
+	profile, err := c.PadReadProfile(ctx, bt)
+	if err != nil || !profile.HasMotion || !profile.HasLights {
+		t.Fatalf("Ultimate 2 Bluetooth: %+v err=%v", profile.HasMotion, err)
+	}
+	// On Switch the Star button takes screenshots by default.
+	if profile.Slots[0].Buttons[12] != PadScreenshot || profile.Slots[0].Buttons[0] != PadA {
+		t.Fatalf("Switch defaults: %v", profile.Slots[0].Buttons[:13])
+	}
+	profile.Slots[2].Buttons[18] = PadB
+	profile.Slots[2].Motion = PadMotion{Target: PadMotionRightStick, Button: PadR2, Sensitivity: 5, DeadZone: 40}
+	profile.Slots[2].Lights.Custom[5] = 0x123456
+	profile.Macros[2][1] = PadMacro{Name: "bt", Trigger: PadPaddle1, Repeat: 1, Steps: []PadMacroStep{tap, rest}}
+	if report, err := c.PadApply(ctx, bt, profile); err != nil || !report.WriteApplied {
+		t.Fatalf("apply: %+v err=%v", report, err)
+	}
+	record := pad.Record(protocol.U2PlatformSwitch)
+	if len(record) != 0xad0 {
+		t.Fatalf("record is %d bytes", len(record))
+	}
+	if record[0x92c+2*12+11] != PadMotionRightStick || binary.LittleEndian.Uint32(record[0x9a4+2*100+4+5*4:]) != 0x123456 {
+		t.Fatal("motion or lights were not written where an Ultimate 2 Bluetooth keeps them")
+	}
+	header := record[0x68c+2*216+8+52:]
+	if header[34] != 2 || binary.LittleEndian.Uint32(header[40:]) != 0x04000000 {
+		t.Fatalf("macro header at the wrong place or with the wrong trigger: % x", header[32:44])
+	}
+	// The Ultimate 2's own offsets must be untouched on this model.
+	if !bytes.Equal(record[0x494:0x494+36], make([]byte, 36)) {
+		t.Fatal("something was written at the Ultimate 2's motion offset")
+	}
+	again, err := c.PadReadProfile(ctx, bt)
+	if err != nil || again.Slots[2].Buttons[18] != PadB || again.Macros[2][1].Trigger != PadPaddle1 || again.Slots[2].Lights.Custom[5] != 0x123456 {
+		t.Fatalf("read back: %+v err=%v", again.Macros[2][1], err)
+	}
+
+	// Pro 3: no motion or lights; macros where its record keeps them.
+	pro3 := protocol.VidPid{VID: 0x2dc8, PID: 0x6009}
+	pad = &protocol.U2Simulator{Physical: protocol.U2PlatformXInput, RecordSize: protocol.Pro3RecordSize}
+	c = padCore(pad)
+	profile, err = c.PadReadProfile(ctx, pro3)
+	if err != nil || profile.HasMotion || profile.HasLights {
+		t.Fatalf("Pro 3: motion=%v lights=%v err=%v", profile.HasMotion, profile.HasLights, err)
+	}
+	profile.Slots[0].LeftTrigger = PadRange{20, 200}
+	profile.Macros[0][0] = PadMacro{Name: "p3", Trigger: PadPaddle1, Repeat: 1, Steps: []PadMacroStep{tap, rest}}
+	if report, err := c.PadApply(ctx, pro3, profile); err != nil || !report.WriteApplied {
+		t.Fatalf("Pro 3 apply: %+v err=%v", report, err)
+	}
+	record = pad.Record(protocol.U2PlatformDInput) // a Pro 3's first switch position
+	if len(record) != 0x92c || record[0xb0+4] != 20 || binary.LittleEndian.Uint32(record[0x68c+8+40:]) != 0x02000000 {
+		t.Fatalf("Pro 3 record: %d bytes, trigger % x", len(record), record[0x68c+8+40:0x68c+8+44])
+	}
+	profile, _ = c.PadReadProfile(ctx, pro3)
+	profile.Slots[0].Motion.Target = PadMotionLeftStick
+	profile.Slots[0].Motion.Button = PadL2
+	if _, err := c.PadApply(ctx, pro3, profile); err == nil {
+		t.Fatal("a Pro 3 has no motion setting; writing one must be refused")
+	}
+}

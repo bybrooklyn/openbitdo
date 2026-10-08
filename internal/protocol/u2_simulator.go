@@ -15,6 +15,9 @@ type U2Simulator struct {
 	// Off makes the receiver answer that no controller is connected, and
 	// everything else go unanswered, as with the controller switched off.
 	Off bool
+	// RecordSize is the size of the configuration record; zero means an
+	// Ultimate 2's.
+	RecordSize int
 	// Physical is the platform the mode switch selects.
 	Physical byte
 	// Records holds the stored record per platform, created zeroed on
@@ -59,7 +62,11 @@ func (u *U2Simulator) Record(platform byte) []byte {
 		u.Records = map[byte][]byte{}
 	}
 	if u.Records[platform] == nil {
-		record := make([]byte, U2RecordSize)
+		size := u.RecordSize
+		if size == 0 {
+			size = U2RecordSize
+		}
+		record := make([]byte, size)
 		binary.LittleEndian.PutUint16(record[0x10:], uint16(platform))
 		u.Records[platform] = record
 	}
@@ -152,7 +159,7 @@ func (u *U2Simulator) Write(data []byte) (int, error) {
 		u.Light = byte(arg)
 		u.reply(cmd, 0, nil)
 	case u2CmdReportState:
-		u.InputReports = arg == 1
+		u.InputReports = arg != 0
 	case u2CmdSelectPlatform:
 		u.platform, u.staged = byte(arg), nil
 		u.reply(cmd, 0, nil)
@@ -165,7 +172,7 @@ func (u *U2Simulator) Write(data []byte) (int, error) {
 		end := min(len(record), offset+min(length, u2MaxChunk))
 		u.reply(cmd, end-offset, record[offset:end])
 	case u2CmdWrite:
-		if length < 1 || length > u2MaxChunk || offset+length > U2RecordSize {
+		if length < 1 || length > u2MaxChunk || offset+length > len(u.Record(u.platform)) {
 			break
 		}
 		chunk := data[u2DataOffset : u2DataOffset+length]

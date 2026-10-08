@@ -312,9 +312,24 @@ func (m *Model) padSetButton(index int, target core.PadTarget) {
 	m.padSlot().Buttons[index] = target
 }
 
+// padRowMissing reports whether row edits something this controller model
+// does not have.
+func (m Model) padRowMissing(row padRow) bool {
+	switch row.kind {
+	case padRowMotionTarget, padRowMotionButton, padRowMotionMode, padRowMotionSensitivity, padRowMotionDeadZone:
+		return !m.mapping.pad.draft.HasMotion
+	case padRowLightEffect, padRowColor, padRowFireSpeed:
+		return !m.mapping.pad.draft.HasLights
+	}
+	return false
+}
+
 // padAdjustRow changes a row's value by delta steps.
 func (m *Model) padAdjustRow(row padRow, delta int) {
 	pad := &m.mapping.pad
+	if m.padRowMissing(row) {
+		return
+	}
 	switch row.kind {
 	case padRowSlot:
 		// Which slot is shown is not an edit.
@@ -447,6 +462,9 @@ func (m Model) triggerPadRow() (tea.Model, tea.Cmd) {
 	switch {
 	case m.mapping.cursor < rows:
 		row := padRows[m.mapping.cursor]
+		if m.padRowMissing(row) {
+			return m, nil
+		}
 		switch row.kind {
 		case padRowButton:
 			pad.picking, pad.pickButton, pad.pickFilter, pad.pickCursor = true, row.index, "", 0
@@ -579,6 +597,9 @@ func (m *Model) ensurePadCursorVisible() {
 // what the controller holds.
 func (m Model) padRowText(row padRow) (value string, changed bool) {
 	pad := m.mapping.pad
+	if m.padRowMissing(row) {
+		return "not on this controller", false
+	}
 	now, was := pad.draft.Slots[pad.slot], pad.loaded.Slots[pad.slot]
 	switch row.kind {
 	case padRowSlot:

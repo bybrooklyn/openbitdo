@@ -21,7 +21,6 @@ const (
 	// PadMacroMaxSteps is the longest macro a controller holds.
 	PadMacroMaxSteps = 200
 
-	padOffMacros      = 0x1f4 // 216 per slot: flag, count, four 52-byte headers
 	padMacroSection   = 216
 	padMacroHeader    = 52
 	padMacroStepBytes = 10
@@ -200,7 +199,7 @@ func decodePadMacroSteps(data []byte) []PadMacroStep {
 
 // encodePadMacroSection is a slot's macro section of the record: which of
 // the four macros exist, with each one's name, trigger and length.
-func encodePadMacroSection(platform byte, macros [PadMacros]PadMacro) []byte {
+func encodePadMacroSection(layout padLayout, platform byte, macros [PadMacros]PadMacro) []byte {
 	section := make([]byte, padMacroSection)
 	binary.LittleEndian.PutUint32(section, padInUse)
 	for j, macro := range macros {
@@ -214,7 +213,7 @@ func encodePadMacroSection(platform byte, macros [PadMacros]PadMacro) []byte {
 		header[32] = platform
 		binary.LittleEndian.PutUint16(header[34:], uint16(len(macro.Steps)))
 		binary.LittleEndian.PutUint16(header[36:], uint16(j*protocol.U2MacroRegion))
-		binary.LittleEndian.PutUint32(header[40:], uint32(macro.Trigger))
+		binary.LittleEndian.PutUint32(header[40:], uint32(layout.wireTrigger(macro.Trigger)))
 		binary.LittleEndian.PutUint32(header[44:], uint32(macro.Repeat))
 		binary.LittleEndian.PutUint32(header[48:], uint32(macro.IntervalMillis))
 	}
@@ -223,17 +222,17 @@ func encodePadMacroSection(platform byte, macros [PadMacros]PadMacro) []byte {
 
 // readPadMacros reads every slot's macros: headers from the record, steps
 // from macro storage.
-func readPadMacros(ctx context.Context, session *protocol.DeviceSession, record []byte, platform byte) ([PadSlots][PadMacros]PadMacro, error) {
+func readPadMacros(ctx context.Context, session *protocol.DeviceSession, record []byte, layout padLayout, platform byte) ([PadSlots][PadMacros]PadMacro, error) {
 	var macros [PadSlots][PadMacros]PadMacro
 	for slot := 0; slot < PadSlots; slot++ {
-		section := record[padOffMacros+slot*padMacroSection:][:padMacroSection]
+		section := record[layout.macros+slot*padMacroSection:][:padMacroSection]
 		if binary.LittleEndian.Uint32(section) != padInUse {
 			continue
 		}
 		for j := 0; j < PadMacros; j++ {
 			header := section[8+j*padMacroHeader:][:padMacroHeader]
 			count := int(binary.LittleEndian.Uint16(header[34:]))
-			trigger := PadTarget(binary.LittleEndian.Uint32(header[40:]))
+			trigger := layout.wireTrigger(PadTarget(binary.LittleEndian.Uint32(header[40:])))
 			if count == 0 || count > PadMacroMaxSteps || !padMacroTrigger(trigger) {
 				continue
 			}
@@ -288,4 +287,18 @@ func writePadMacroSteps(ctx context.Context, session *protocol.DeviceSession, pl
 		}
 	}
 	return nil
+}
+
+// wireTrigger converts a macro trigger between this program's numbering
+// and the model's; the swap is its own inverse.
+func (l padLayout) wireTrigger(trigger PadTarget) PadTarget {
+	if l.swapPaddleTriggers {
+		switch trigger {
+		case PadPaddle1:
+			return PadPaddle2
+		case PadPaddle2:
+			return PadPaddle1
+		}
+	}
+	return trigger
 }

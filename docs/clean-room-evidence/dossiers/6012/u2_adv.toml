@@ -90,6 +90,11 @@ tracing = "12 bytes: flag, colour u32, background u32; colours are 0x00RRGGBB"
 fire_ring = "16 bytes: flag, colour u32, background u32, speed 1-15"
 per_led = "100 bytes: flag, 24 colours: the left ring's twelve lights from the bottom going clockwise, then the right ring's"
 
+[siblings]
+pro_3 = "0x6009: record of 0x92c bytes. Sections up to the button map are in the same place; a 3 x 392-byte hot-key macro section follows at 0x1f4, then recorded macros at 0x68c and xinput rumble at 0x914. No motion or light sections. Resuming input reports takes arg 0xaa01. The mode query's 1 selects the DInput record, 0 the Switch record."
+ultimate_2_bluetooth = "0x600f: record of 0xad0 bytes: as the Pro 3 to 0x92c, then motion at 0x92c, tracing 0x950, fire ring 0x974, per-LED 0x9a4. Reached directly it always uses the Switch record. P1 and P2 are numbered the other way round as macro triggers. Resuming input reports takes arg 0xaa01."
+hardware = "no"
+
 [record]
 size = "0x638 bytes, little-endian, three slots"
 layout = "0x000 flag u32 x3; 0x00c crc u32; 0x010 platform u16; 0x012 active slot u16; 0x014 name 32 bytes x3; 0x074 rumble 12 x3; 0x098 sticks 8 x3; 0x0b0 triggers 8 x3; 0x0c8 feature word 8 x3; 0x0e0 button map 92 x3 (flag u32 + 22 x u32); 0x1f4 macros 216 x3; 0x47c xinput rumble 8 x3; 0x494 motion 12 x3; 0x4b8 dynamic theme 12 x3; 0x4dc wheel theme 16 x3; 0x50c per-LED theme 100 x3"

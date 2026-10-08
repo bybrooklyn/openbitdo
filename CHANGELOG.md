@@ -17,6 +17,8 @@ All notable changes to OpenBitdo are tracked here.
   confirmed on hardware.
 - Profile and macro names are written the way the vendor's application writes them, so each
   program can read names the other wrote.
+- Pro 3 and Ultimate 2 Bluetooth: the controller editor covers them too, using each model's own
+  record layout. Untested on hardware.
 - Ultimate 2 macros: each slot's four macros can be built in the editor (a trigger button, then
   steps that hold buttons and stick directions for a time), saved, applied and removed.
 - Ultimate 2 motion and lights: the editor can steer a stick with the motion sensor (which stick,

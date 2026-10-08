@@ -43,7 +43,12 @@ const (
 	u2DataOffset = 18
 
 	// U2RecordSize is the size of an Ultimate 2's configuration record.
-	U2RecordSize = 0x638
+	// Its siblings keep the same sections at the front and add their own:
+	// a Pro 3's record is Pro3RecordSize, an Ultimate 2 Bluetooth's
+	// U2BTRecordSize.
+	U2RecordSize   = 0x638
+	Pro3RecordSize = 0x92c
+	U2BTRecordSize = 0xad0
 
 	// u2CommitTimeout is how long a commit may take: the controller writes
 	// its flash before it answers.
@@ -172,6 +177,10 @@ func (s *DeviceSession) U2SetInputReports(ctx context.Context, on bool) error {
 	var arg uint16
 	if on {
 		arg = 1
+		// A Pro 3 and an Ultimate 2 Bluetooth take a keyed value to resume.
+		if s.target.PID == 0x6009 || s.target.PID == 0x600f {
+			arg = 0xaa01
+		}
 	}
 	_, err = s.sendRow(ctx, row, u2Frame(row.Request, arg, nil, 0, 0, 0))
 	return err
@@ -195,8 +204,8 @@ func (s *DeviceSession) U2ReadRecord(ctx context.Context, size int) ([]byte, err
 	if err != nil {
 		return nil, err
 	}
-	if size < 1 || size > U2RecordSize {
-		return nil, errInvalidInput("record read of %d bytes is outside 1-%d", size, U2RecordSize)
+	if size < 1 || size > U2BTRecordSize {
+		return nil, errInvalidInput("record read of %d bytes is outside 1-%d", size, U2BTRecordSize)
 	}
 	record := make([]byte, 0, size)
 	for len(record) < size {
@@ -224,15 +233,15 @@ func (s *DeviceSession) U2WriteRecordRange(ctx context.Context, record []byte, o
 	if err != nil {
 		return err
 	}
-	if len(record) != U2RecordSize {
-		return errInvalidInput("a configuration record is %d bytes, got %d", U2RecordSize, len(record))
+	if n := len(record); n != U2RecordSize && n != Pro3RecordSize && n != U2BTRecordSize {
+		return errInvalidInput("%d bytes is not the size of any known configuration record", n)
 	}
-	if offset < 0 || length < 1 || offset+length > U2RecordSize {
+	if offset < 0 || length < 1 || offset+length > len(record) {
 		return errInvalidInput("range %d+%d is outside the record", offset, length)
 	}
 	for end := offset + length; offset < end; {
 		chunk := record[offset:min(end, offset+u2MaxChunk)]
-		resp, err := s.sendRow(ctx, row, u2Frame(row.Request, 0, chunk, len(chunk), U2RecordSize, uint32(offset)))
+		resp, err := s.sendRow(ctx, row, u2Frame(row.Request, 0, chunk, len(chunk), uint32(len(record)), uint32(offset)))
 		if err != nil {
 			return err
 		}
