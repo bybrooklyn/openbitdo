@@ -26,11 +26,29 @@ const (
 // configUsageFor is the usage page/usage of the HID interface configuration
 // commands travel over for a given device.
 func configUsageFor(target VidPid) (page, usage uint16) {
-	if jp108PIDs[target.PID] {
+	switch {
+	case jp108PIDs[target.PID], retroKeyboardPIDs[target.PID]:
 		return jp108ConfigUsagePage, vendorConfigUsage
+	case sharedConfigPIDs[target.PID]:
+		return sharedConfigUsagePage, vendorConfigUsage
 	}
 	return vendorConfigUsagePage, vendorConfigUsage
 }
+
+// sharedConfigUsagePage is the usage page of the configuration interface
+// of devices that enumerate under an id several products share, and of a
+// few newer products.
+const sharedConfigUsagePage = 0xff7a
+
+// sharedConfigPIDs are the devices whose configuration interface is on
+// sharedConfigUsagePage: the shared controller id, the Ultimate 2C's id,
+// the Arcade Controller Pro (under either of its ids), the GC Bluetooth
+// gamepad and the 64 2.4G controller.
+var sharedConfigPIDs = map[uint16]bool{0x310b: true, 0x310a: true, 0x2062: true, 0x20aa: true, 0x2084: true, 0x3004: true}
+
+// retroKeyboardPIDs are the other Retro keyboards and receivers whose
+// configuration interface is on the same usage page as the Retro 108's.
+var retroKeyboardPIDs = map[uint16]bool{0x5200: true, 0x5201: true, 0x520a: true, 0x520b: true, 0x520c: true}
 
 // linuxUdevHint is appended to a permission-denied open failure on Linux.
 // OpenBitdo opens the kernel's hidraw node for the device, so the rule has to

@@ -199,3 +199,22 @@ func TestU2MacroStorageEraseWriteCommitRead(t *testing.T) {
 		t.Fatal("a write past the end of macro storage must be refused")
 	}
 }
+
+func TestConfigInterfaceIsChosenPerProduct(t *testing.T) {
+	for pid, wantPage := range map[uint16]uint16{
+		0x6012: 0xffa0, 0x6013: 0xffa0, 0x6009: 0xffa0, 0x2028: 0xffa0, 0x205d: 0xffa0,
+		0x5209: 0x008c, 0x5200: 0x008c, 0x520a: 0x008c,
+		0x310b: 0xff7a, 0x2062: 0xff7a, 0x20aa: 0xff7a,
+	} {
+		if page, usage := configUsageFor(VidPid{VID: 0x2dc8, PID: pid}); page != wantPage || usage != 1 {
+			t.Errorf("pid %#04x: configuration interface %#04x/%d, want %#04x/1", pid, page, usage, wantPage)
+		}
+	}
+	// A controller under the shared id is recognised by that interface, not
+	// by the one an Ultimate 2's own id uses.
+	shared := EnumeratedDevice{VidPid: VidPid{VID: 0x2dc8, PID: 0x310b}, UsagePage: 0xff7a, Usage: 1}
+	wrong := EnumeratedDevice{VidPid: VidPid{VID: 0x2dc8, PID: 0x310b}, UsagePage: 0xffa0, Usage: 1}
+	if !shared.IsVendorConfigInterface() || wrong.IsVendorConfigInterface() {
+		t.Fatal("the shared id's configuration interface is on usage page 0xff7a")
+	}
+}

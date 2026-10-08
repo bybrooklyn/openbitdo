@@ -23,6 +23,8 @@ interface = "the HID interface with usage page 0xffa0, usage 0x0001"
 crc = "CRC-16/MODBUS (reflected polynomial 0xA001, initial value 0xFFFF) over the data bytes; 0 when there are none"
 chunk = "at most 45 data bytes per report"
 pids = "0x6012 is the controller; 0x6013 is its 2.4G receiver, which relays the same commands"
+shared_id_interface = "under the shared id 0x310b (and for 0x310a, 0x2062, 0x20aa, 0x2084, 0x3004) the configuration interface is the one with usage page 0xff7a, usage 0x0001, not 0xffa0"
+retro_keyboard_interface = "0x5200, 0x5201, 0x5209, 0x520a, 0x520b and 0x520c use usage page 0x008c"
 
 [commands.connected]
 request = "cmd 0x0120, no data"

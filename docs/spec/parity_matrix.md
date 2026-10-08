@@ -28,7 +28,7 @@ Everything else it lists is firmware update only.
 
 The application reaches Pro 3, Ultimate 2, Ultimate 2 Bluetooth and the Arcade Controller only
 when they enumerate under the shared ID 0x310b (wired, or the 2.4G receiver in XInput mode) and
-asks the device which product it is. OpenBitdo does the same for the three controllers it has an editor for; whether a controller in that mode exposes a configuration interface on Linux is untested.
+asks the device which product it is. OpenBitdo does the same for the three controllers it has an editor for; it is looked for on the interface the vendor library uses for that ID (usage page 0xff7a). Untested on hardware.
 
 ## Retro 108 Mechanical Keyboard (0x5209)
 

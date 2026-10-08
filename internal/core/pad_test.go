@@ -455,7 +455,7 @@ func TestSiblingControllersUseTheirOwnRecordLayout(t *testing.T) {
 func TestControllerUnderTheSharedIDIsRoutedToItsProduct(t *testing.T) {
 	shared := protocol.VidPid{VID: 0x2dc8, PID: protocol.SharedControllerPID}
 	enumerated := func() []protocol.EnumeratedDevice {
-		return []protocol.EnumeratedDevice{{VidPid: shared, Product: "8BitDo Controller", Serial: "S1", Path: "/dev/hidraw9", UsagePage: 0xffa0, Usage: 0x01}}
+		return []protocol.EnumeratedDevice{{VidPid: shared, Product: "8BitDo Controller", Serial: "S1", Path: "/dev/hidraw9", UsagePage: 0xff7a, Usage: 0x01}}
 	}
 	ctx := context.Background()
 
