@@ -27,6 +27,8 @@ All notable changes to OpenBitdo are tracked here.
 - Retro 87 and Retro 68 keyboards: protocol and core support for their configuration record (keys,
   locks, volume, sleep, lighting, macros). No editor yet; untested on hardware.
 - Retro Mechanical Keyboard (0x5200): its profile can be read.
+- Retro R8 and Riviera mice: protocol and core support (buttons, DPI stages, polling rate, wheel,
+  macros). No editor yet, and both stay detect-only, so nothing is sent to a real mouse.
 - Pro 3 and Ultimate 2 Bluetooth: the controller editor covers them too, using each model's own
   record layout. Untested on hardware.
 - Ultimate 2 macros: each slot's four macros can be built in the editor (a trigger button, then
