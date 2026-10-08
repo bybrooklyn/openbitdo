@@ -516,7 +516,7 @@ func (m Model) handleMappingApplyResult(report core.WriteRecoveryReport, err err
 		m.mapping.statusMsg = "Applied and verified."
 		if m.mapping.kind == core.KindJP108 {
 			// The keyboard stores a mapping whether or not it is using it.
-			m.mapping.statusMsg += " The buttons use it while the keyboard's Profile button is on."
+			m.mapping.statusMsg += " The buttons use it while the profile is on: that's the third small button at the keyboard's top left, lit when on."
 		}
 	case report.RollbackFailed():
 		status = "attention"

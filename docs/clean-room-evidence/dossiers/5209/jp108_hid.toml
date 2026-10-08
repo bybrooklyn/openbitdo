@@ -94,7 +94,9 @@ ordinary_keys = "an ordinary key's id is its HID keyboard usage (letter A is 4, 
 profile_button = "A stored mapping is only used while the keyboard's Profile button is on. With it off, an assigned A or B button sends nothing; with it on, it sends the assigned key."
 value_is_sent_verbatim = "A button assigned 0x76 sent usage 0x76 and one assigned 0x77 sent 0x77. The keyboard does not translate the value."
 f13 = "It follows that F13-F24 must be written as their HID usages, 0x68-0x73. The vendor table's 0x76-0x81 for those keys produce other usages (0x76 is Keyboard Menu, 0x77 Select), not F13-F24."
-where = "The A and B buttons are the two keys between right Alt and right Ctrl."
+where = "The A and B buttons are the two keys between right Alt and right Ctrl; the vendor manual calls them the Super buttons."
+profile_button_location = "Per the vendor manual (Retro-108-Mechanical-Keyboard.pdf, page 02): the control panel at the top left has, left to right, a mode switch, a volume knob, then three small buttons marked only with icons: Pair, Fast key mapping, Profile. Each has an indicator above it. The Profile button is the third and is not labelled with the word."
+fast_key_mapping = "The manual also describes assigning keys to a Super button on the keyboard itself, with no host software: press the Fast key mapping button, then hold up to six keys and press the Super button. This is separate from the profile mapping recorded here."
 
 [open_questions]
 voice = "The commands behind the vendor's volume setting are not identified. The Jp108ReadVoice/WriteVoice rows in command_matrix.csv still carry the old framing and are not sent to this device."
