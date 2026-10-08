@@ -17,7 +17,20 @@ import (
 const (
 	vendorConfigUsagePage uint16 = 0xffa0
 	vendorConfigUsage     uint16 = 0x0001
+
+	// A JP108 keyboard's configuration interface declares usage page 0x8c
+	// (captured from a Retro 108, 0x5209), not the 0xffa0 page controllers use.
+	jp108ConfigUsagePage uint16 = 0x008c
 )
+
+// configUsageFor is the usage page/usage of the HID interface configuration
+// commands travel over for a given device.
+func configUsageFor(target VidPid) (page, usage uint16) {
+	if jp108PIDs[target.PID] {
+		return jp108ConfigUsagePage, vendorConfigUsage
+	}
+	return vendorConfigUsagePage, vendorConfigUsage
+}
 
 // linuxUdevHint is appended to a permission-denied open failure on Linux.
 // OpenBitdo opens the kernel's hidraw node for the device, so the rule has to
@@ -67,7 +80,8 @@ type EnumeratedDevice struct {
 // IsVendorConfigInterface reports whether this logical HID interface is the
 // vendor control channel OpenBitdo may send configuration commands through.
 func (d EnumeratedDevice) IsVendorConfigInterface() bool {
-	return d.UsagePage == vendorConfigUsagePage && d.Usage == vendorConfigUsage
+	page, usage := configUsageFor(d.VidPid)
+	return d.UsagePage == page && d.Usage == usage
 }
 
 // EnumerateHIDDevices lists every connected HID device.
@@ -144,7 +158,8 @@ func newHidTransport(enumerate func(uint16, uint16) []hid.DeviceInfo, open func(
 }
 
 func isVendorConfigInterface(info hid.DeviceInfo) bool {
-	return info.UsagePage == vendorConfigUsagePage && info.Usage == vendorConfigUsage
+	page, usage := configUsageFor(VidPid{VID: info.VendorID, PID: info.ProductID})
+	return info.UsagePage == page && info.Usage == usage
 }
 
 // selectVendorConfigInterface deterministically selects the vendor control
@@ -157,6 +172,7 @@ func selectVendorConfigInterface(target VidPid, infos []hid.DeviceInfo) (hid.Dev
 }
 
 func selectVendorConfigInterfaceForGOOS(target VidPid, infos []hid.DeviceInfo, goos string) (hid.DeviceInfo, error) {
+	wantPage, wantUsage := configUsageFor(target)
 	matches := make([]hid.DeviceInfo, 0, 1)
 	targetInfos := make([]hid.DeviceInfo, 0, len(infos))
 	available := make([]string, 0, len(infos))
@@ -194,13 +210,13 @@ func selectVendorConfigInterfaceForGOOS(target VidPid, infos []hid.DeviceInfo, g
 			if allUnknown {
 				return hid.DeviceInfo{}, errNoConfigInterface(
 					"ambiguous HID interfaces for %s: %d interfaces have unknown usage metadata; vendor configuration interface %#04x:%#04x cannot be selected safely; available: %s",
-					target, len(targetInfos), vendorConfigUsagePage, vendorConfigUsage, detail,
+					target, len(targetInfos), wantPage, wantUsage, detail,
 				)
 			}
 		}
 		return hid.DeviceInfo{}, errNoConfigInterface(
 			"no vendor configuration HID interface (usage page %#04x, usage %#04x) found for %s; available: %s",
-			vendorConfigUsagePage, vendorConfigUsage, target, detail)
+			wantPage, wantUsage, target, detail)
 	}
 	if goos == "darwin" && len(matches) > 1 {
 		// internal/machid re-matches by VID/PID/usage because macOS HID paths

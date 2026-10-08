@@ -1,6 +1,7 @@
 package protocol
 
 import (
+	"context"
 	"strings"
 	"testing"
 )
@@ -45,24 +46,116 @@ func TestCommandRegistryRequestsAreWellFormed(t *testing.T) {
 			t.Errorf("%s: report_id=0x81 but request is %d bytes, not 64", row.ID, len(row.Request))
 		}
 	}
-	if len(seen) != 37 {
-		t.Fatalf("expected 37 distinct command IDs, got %d", len(seen))
+	if len(seen) != 39 {
+		t.Fatalf("expected 39 distinct command IDs, got %d", len(seen))
 	}
 }
 
-func TestParseIndexedU16TableRejectsShortReply(t *testing.T) {
-	full := make([]byte, 64)
-	full[8], full[9] = 0x04, 0x00
-	full[26], full[27] = 0x1d, 0x00
-	table, err := parseIndexedU16Table(CommandJp108ReadDedicatedMappings, full, 10)
-	if err != nil || len(table) != 10 || table[0].Usage != 0x04 || table[9].Usage != 0x1d {
-		t.Fatalf("unexpected table %+v err=%v", table, err)
+func jp108Session(t *testing.T, keyboard *JP108Simulator) *DeviceSession {
+	t.Helper()
+	return openSession(t, keyboard, 0x5209, fastRetryConfig())
+}
+
+// Frames and replies here are the ones a real Retro 108 (0x5209) exchanged.
+func TestJP108ReadsEachButtonByItsKeyID(t *testing.T) {
+	keyboard := &JP108Simulator{Mappings: map[byte][5]byte{
+		233: {0x07, 0x00, 0x76}, // A button -> a key
+		240: {0x07, 0xe1},       // K1 -> a modifier, stored in the first value byte
+	}}
+	table, err := jp108Session(t, keyboard).JP108ReadDedicatedMappings(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(table) != 10 || table[0].Usage != 0x76 || table[1].Usage != 0 || table[2].Usage != 0xe1 {
+		t.Fatalf("unexpected table: %+v", table)
+	}
+	// One 33-byte request per button, on report 0x52, naming the key id.
+	wantKeys := []byte{233, 232, 240, 241, 238, 239, 236, 237, 234, 235}
+	if len(keyboard.Frames) != len(wantKeys) {
+		t.Fatalf("expected %d requests, got %d", len(wantKeys), len(keyboard.Frames))
+	}
+	for i, frame := range keyboard.Frames {
+		if len(frame) != 33 || frame[0] != 0x52 || frame[1] != 0x83 || frame[2] != wantKeys[i] {
+			t.Fatalf("request %d = % x", i, frame[:4])
+		}
+	}
+}
+
+func TestJP108WriteNamesAProfileFirstOnlyWhenThereIsNone(t *testing.T) {
+	keyboard := &JP108Simulator{}
+	session := jp108Session(t, keyboard)
+	if err := session.JP108WriteDedicatedMapping(context.Background(), 0, 0x76); err != nil {
+		t.Fatal(err)
+	}
+	if got := string(keyboard.Name); got != "O\x00p\x00e\x00n\x00B\x00i\x00t\x00d\x00o\x00" {
+		t.Fatalf("expected a UTF-16LE profile name, got %q", got)
+	}
+	if got := keyboard.Mappings[233]; got != [5]byte{0x07, 0x00, 0x76} {
+		t.Fatalf("unexpected stored mapping for the A button: % x", got)
+	}
+	last := keyboard.Frames[len(keyboard.Frames)-1]
+	if want := []byte{0x52, 0xfa, 0x03, 0x0c, 0x00, 0xaa, 0x09, 0x71, 233, 0x07, 0x00, 0x76, 0x00, 0x00}; string(last[:14]) != string(want) {
+		t.Fatalf("mapping frame = % x, want % x", last[:14], want)
 	}
 
-	// 27 bytes holds nine and a half entries. Padding the rest with zeros
-	// would produce a backup that unmaps a key when restored.
-	if _, err := parseIndexedU16Table(CommandJp108ReadDedicatedMappings, full[:27], 10); err == nil {
-		t.Fatal("expected a reply too short for the whole table to be an error")
+	// With a profile in place the name is left alone.
+	keyboard.Name = []byte("M\x00i\x00n\x00e\x00")
+	before := len(keyboard.Frames)
+	if err := session.JP108WriteDedicatedMapping(context.Background(), 1, 0xe0); err != nil {
+		t.Fatal(err)
+	}
+	if string(keyboard.Name) != "M\x00i\x00n\x00e\x00" {
+		t.Fatal("an existing profile name must not be overwritten")
+	}
+	for _, frame := range keyboard.Frames[before:] {
+		if frame[1] == 0x70 {
+			t.Fatal("no name write expected when a profile exists")
+		}
+	}
+	if got := keyboard.Mappings[232]; got != [5]byte{0x07, 0xe0, 0x00} {
+		t.Fatalf("a modifier goes in the first value byte, got % x", got)
+	}
+	if name, err := session.JP108ReadProfileName(context.Background()); err != nil || name != "Mine" {
+		t.Fatalf("read back name %q err=%v", name, err)
+	}
+}
+
+func TestJP108ReadRefusesWhatItCannotRepresent(t *testing.T) {
+	// A media-key assignment (type 0x0c). Reading it as "unassigned" would
+	// make a later restore erase it.
+	keyboard := &JP108Simulator{Mappings: map[byte][5]byte{232: {0x0c, 0xe9}}}
+	if _, err := jp108Session(t, keyboard).JP108ReadDedicatedMappings(context.Background()); err == nil {
+		t.Fatal("expected an error for a mapping type that is not understood")
+	}
+
+	// A reply too short to hold the mapping is an error, not a zero.
+	short := &JP108Simulator{ShortReads: 5}
+	if _, err := jp108Session(t, short).JP108ReadDedicatedMappings(context.Background()); err == nil {
+		t.Fatal("expected a short reply to be rejected")
+	}
+}
+
+// A JP108 has one 32-byte output report. The 64-byte commands every other
+// family shares must never be sent to it.
+func TestJP108IsNeverSentGenericCommands(t *testing.T) {
+	keyboard := &JP108Simulator{}
+	session := jp108Session(t, keyboard)
+	if _, err := session.SendCommand(context.Background(), CommandGetPid, nil); err == nil {
+		t.Fatal("GetPid must be refused for a JP108")
+	}
+	diag := session.DiagProbe(context.Background())
+	if len(diag.CommandChecks) == 0 || !diag.TransportReady {
+		t.Fatalf("expected the keyboard's own checks to run and pass: %+v", diag.CommandChecks)
+	}
+	for _, check := range diag.CommandChecks {
+		if !check.OK {
+			t.Errorf("%s failed against the simulator: %s", check.Command, check.Detail)
+		}
+	}
+	for _, frame := range keyboard.Frames {
+		if len(frame) != 33 || frame[0] != 0x52 {
+			t.Fatalf("a %d-byte frame starting %#02x was sent to the keyboard", len(frame), frame[0])
+		}
 	}
 }
 

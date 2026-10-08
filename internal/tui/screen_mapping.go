@@ -12,6 +12,7 @@ import (
 // jp108Presets is the exact remap-target cycle from the prior Rust editor
 // (reducer.rs JP108_PRESETS) — raw HID keyboard-usage IDs.
 var jp108Presets = []uint16{
+	0x0000, // unassigned: the button does nothing
 	0x0004, 0x0005, 0x0006, 0x0007, 0x0008, 0x0009, 0x000a, 0x000b, 0x0028, 0x0029, 0x002c, 0x003a,
 	0x003b, 0x003c, 0x00e0, 0x00e1,
 }
@@ -28,6 +29,9 @@ var jp108KeyNames = map[uint16]string{
 // jp108TargetLabel shows a target as the key it is, keeping the usage ID
 // beside it; a usage outside the preset list is shown as the ID alone.
 func jp108TargetLabel(usage uint16) string {
+	if usage == 0 {
+		return "(none)"
+	}
 	if name, ok := jp108KeyNames[usage]; ok {
 		return fmt.Sprintf("%s (0x%04x)", name, usage)
 	}

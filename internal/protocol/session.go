@@ -245,7 +245,7 @@ func (s *DeviceSession) diagCommandsToRun() []diagCheckPlan {
 		if !CommandAppliesToPID(row, s.target.PID) {
 			continue
 		}
-		if !isCommandAllowedByFamily(s.profile.ProtocolFamily, row.ID) || !isCommandAllowedByCapability(s.profile.Capability, row.ID) {
+		if !isCommandAllowedForDevice(s.target, s.profile.ProtocolFamily, row.ID) || !isCommandAllowedByCapability(s.profile.Capability, row.ID) {
 			continue
 		}
 		if s.profile.SupportTier == TierCandidateReadOnly &&

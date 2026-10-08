@@ -209,7 +209,9 @@ func checkLabel(command protocol.CommandID) string {
 	case protocol.CommandReadProfile:
 		return "Read profile"
 	case protocol.CommandJp108ReadDedicatedMappings:
-		return "Read key mappings"
+		return "Read a button's mapping"
+	case protocol.CommandJp108ReadProfileName:
+		return "Read profile name"
 	case protocol.CommandJp108ReadFeatureFlags:
 		return "Read feature flags"
 	case protocol.CommandJp108ReadVoice:

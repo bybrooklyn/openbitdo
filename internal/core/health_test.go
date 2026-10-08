@@ -39,13 +39,11 @@ func TestListDevicesReportsNamesAndConfigChannel(t *testing.T) {
 	if got := byPID[0x6013]; got.DisplayName != "Ultimate 2" || got.ConfigChannel != ChannelPresent {
 		t.Fatalf("unexpected controller: %+v", got)
 	}
-	// The vendor prefix the device repeats is dropped, and a device with
-	// no 0xffa0 interface is known to be unreachable before anything is sent.
-	if got := byPID[0x5209]; got.DisplayName != "Retro 108 Keyboard" || got.ConfigChannel != ChannelAbsent {
+	// The vendor prefix the device repeats is dropped. A JP108's
+	// configuration interface is the one on usage page 0x8c, not 0xffa0.
+	if got := byPID[0x5209]; got.DisplayName != "Retro 108 Keyboard" || got.ConfigChannel != ChannelPresent {
 		t.Fatalf("unexpected keyboard: %+v", got)
 	}
-	// It cannot be configured, but it is a working keyboard, and that is
-	// what the user should be told first.
 	if got := byPID[0x5209].WorksAs; got != RoleKeyboard {
 		t.Fatalf("expected the keyboard to be recognised as one, got %v", got)
 	}

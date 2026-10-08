@@ -26,7 +26,7 @@ func (s *DeviceSession) ensureCommandAllowed(command CommandID) (CommandRow, err
 		}
 	}
 
-	if !isCommandAllowedByFamily(s.profile.ProtocolFamily, command) ||
+	if !isCommandAllowedForDevice(s.target, s.profile.ProtocolFamily, command) ||
 		!isCommandAllowedByCapability(s.profile.Capability, command) ||
 		!CommandAppliesToPID(row, s.target.PID) {
 		return CommandRow{}, errUnsupportedForPid(command, s.target.PID)

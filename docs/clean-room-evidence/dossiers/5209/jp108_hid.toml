@@ -1,0 +1,96 @@
+# Sanitized dirty-room dossier, with hardware confirmation
+
+dossier_id = "DOS-5209-JP108-HID"
+pid_hex = "0x5209"
+operation_group = "JP108Dedicated"
+command_id = ["Jp108ReadDedicatedMappings", "Jp108WriteDedicatedMapping", "Jp108ReadFeatureFlags", "Jp108WriteFeatureFlags", "Jp108ReadProfileName", "Jp108WriteProfileName"]
+evidence_source = "static, then hardware"
+confidence = "confirmed"
+supersedes = "DOS-5209-JP108-Dedicated for framing: that dossier's 64-byte frames do not apply to this device"
+
+# How this was obtained. The framing and command bytes below were worked out
+# from static analysis of the vendor's Windows application (V1.37), in a
+# scratch directory outside this repository. No vendor code is reproduced
+# here; this file records wire facts only. Every command marked hardware =
+# "yes" was then sent to a real Retro 108 (0x5209, USB, firmware reporting
+# bcdDevice 1.13) on Linux over hidraw, and the reply recorded.
+
+[transport]
+interface = "the HID interface with usage page 0x008c, usage 0x0001 (USB interface 2)"
+request = "output report 0x52: the report id, then 32 data bytes (33 bytes written)"
+reply = "input report 0x54: the report id, then 32 data bytes"
+reply_shape = "a read is answered with the command byte echoed in data byte 0; a write is acknowledged with data bytes e4 08"
+not_used = "output reports 0xb2 and 0x51 and input report 0xb1 are declared by the interface but play no part in these commands; frames sent on 0xb2 drew no reply"
+timing = "replies arrive within a few milliseconds; the vendor flow waits 5-10 ms and retries up to 20-30 times"
+
+[commands.read_profile_name]
+request = "80"
+reply = "80, length in bytes, a more-flag byte, then the name as UTF-16LE (up to 29 bytes per report)"
+hardware = "yes"
+observed = "empty name (length 0) on a keyboard never configured; 80 12 00 then 'OpenBitdo' after it was written"
+
+[commands.write_profile_name]
+request = "70, length in bytes (at most 29 per report), more-flag, then the name as UTF-16LE"
+reply = "e4 08"
+hardware = "yes"
+notes = "The vendor flow writes length 0 first, which clears the stored profile, then the new name. A profile name is always written before mappings."
+clear_untested = "length 0 as a clear has not been sent to hardware"
+
+[commands.read_mapped_keys]
+request = "81"
+reply = "81, then (key id, type) pairs, zero-terminated; byte 31 non-zero means another report follows"
+hardware = "yes"
+observed = "81 with no pairs on an unconfigured keyboard; 81 e8 07 e9 07 after both buttons were assigned"
+runtime = "not used by OpenBitdo, which reads each button directly"
+
+[commands.read_mapping]
+request = "83, key id"
+reply = "83, key id, type, four value bytes"
+hardware = "yes"
+observed = "type 0 and zero value for every key on an unconfigured keyboard; 83 e9 07 00 76 after assigning the A button"
+
+[commands.write_mapping]
+request = "fa 03 0c 00 aa 09 71, key id, type, four value bytes"
+reply = "e4 08"
+hardware = "yes"
+types = "0x07 keyboard key, 0x0c media/consumer key, 0x01 mouse button"
+keyboard_value = "a modifier (usage 0xe0-0xe7) goes in the first value byte; any other key's usage goes in the second; all zero means no assignment"
+
+[commands.read_feature_flags]
+request = "88"
+reply = "88, then flag bytes"
+hardware = "yes"
+observed = "88 00 on an unconfigured keyboard"
+
+[commands.write_feature_flags]
+request = "78, flags"
+reply = "e4 08"
+hardware = "no"
+
+[commands.report_mode]
+request = "7b, mode"
+reply = "e4 08"
+hardware = "yes"
+notes = "The vendor flow sends 7b 00 when it opens the device. Sent once here and acknowledged. What it changes is not known, and the reads and writes above also worked in a later session without it."
+runtime = "not sent by OpenBitdo"
+
+[key_ids]
+# The ten dedicated buttons. The ids are not in order.
+A = 233
+B = 232
+K1 = 240
+K2 = 241
+K3 = 238
+K4 = 239
+K5 = 236
+K6 = 237
+K7 = 234
+K8 = 235
+ordinary_keys = "an ordinary key's id is its HID keyboard usage (letter A is 4, Enter is 40)"
+
+[open_questions]
+effect = "Both assignments were acknowledged and read back, but whether the A and B buttons then emit the assigned keys has not been observed yet. The keyboard may need its profile switched on."
+f13 = "The vendor table gives 0x76-0x81 for F13-F24, which are not the HID usages for those keys (0x68-0x73). Which the keyboard emits for a button assigned 0x76 is unobserved."
+voice = "The commands behind the vendor's volume setting are not identified. The Jp108ReadVoice/WriteVoice rows in command_matrix.csv still carry the old framing and are not sent to this device."
+adapter = "Nothing is known about the 2.4G adapter (0x520a)."
+long_names = "A name longer than 29 bytes spans several reports; only the single-report case was exercised."

@@ -56,6 +56,15 @@ All notable changes to OpenBitdo are tracked here.
 
 ### Added
 
+- Retro 108 keyboards (`0x5209`) can be read and remapped. The keyboard's configuration interface
+  takes 33-byte commands on report `0x52`, not the 64-byte frames the registry had for it, so
+  until now nothing sent to it was answered. OpenBitdo now reads its profile name, feature flags
+  and the assignment of each of the ten dedicated buttons (A, B, K1-K8), and can assign a button
+  to a key or clear it. A write is checked by reading it back, and a profile name is written
+  first when the keyboard has none. The framing is recorded in
+  `docs/clean-room-evidence/dossiers/5209/jp108_hid.toml`. On a real keyboard the reads, the
+  name write and two assignments were acknowledged and read back; whether the buttons then send
+  the assigned keys has not been observed yet.
 - A Buttons tab: press anything on a controller and its button number lights up. It only reads
   what the controller already sends, and is how to find the number of a back button or extra
   shoulder button, which have no standard one. Decoding is tested against the report
@@ -66,8 +75,8 @@ All notable changes to OpenBitdo are tracked here.
 - First Linux hardware run, recorded in
   `docs/clean-room-evidence/hardware_run_linux_2026-10-08.md`. An Ultimate 2 (`0x6013`) answers 4
   of the 12 safe reads over hidraw; the "wrote 64 bytes, read 0" result below does not reproduce
-  on Linux. A Retro 108 (`0x5209`) over USB exposes no interface that carries the documented
-  protocol.
+  on Linux. A Retro 108 (`0x5209`) over USB did not answer the protocol documented at the time;
+  it does answer its own (see Added).
 
 ## v0.0.3
 

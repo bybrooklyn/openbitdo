@@ -73,10 +73,11 @@ func TestMappingDraft_UndoAndReset(t *testing.T) {
 // TestMappingDraft_JP108PresetsTable guards the JP108 raw-HID-usage-ID
 // preset table (unaffected by the U2 button-map encoding fix).
 func TestMappingDraft_JP108PresetsTable(t *testing.T) {
-	if len(jp108Presets) != 16 {
-		t.Fatalf("expected 16 JP108 presets (reducer.rs JP108_PRESETS), got %d", len(jp108Presets))
+	// "Unassigned" first, then the 16 presets from reducer.rs JP108_PRESETS.
+	if len(jp108Presets) != 17 {
+		t.Fatalf("expected unassigned plus 16 JP108 presets, got %d", len(jp108Presets))
 	}
-	if jp108Presets[0] != 0x0004 || jp108Presets[len(jp108Presets)-1] != 0x00e1 {
+	if jp108Presets[0] != 0x0000 || jp108Presets[1] != 0x0004 || jp108Presets[len(jp108Presets)-1] != 0x00e1 {
 		t.Fatalf("JP108 preset table doesn't match reducer.rs's exact values: %#v", jp108Presets)
 	}
 }

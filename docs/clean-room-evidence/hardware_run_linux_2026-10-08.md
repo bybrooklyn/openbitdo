@@ -101,15 +101,25 @@ Open questions:
   interface.
 - What framing interface 2 expects.
 
+### Follow-up the same day: the keyboard does answer
+
+The paragraphs above were written before the keyboard's own framing was known. It is recorded in
+`dossiers/5209/jp108_hid.toml`: commands travel in output report `0x52`, not `0xb2`, and are
+answered on input report `0x54`. With that framing the same keyboard answered every read, and
+accepted and read back a profile name and an assignment for each of its A and B buttons.
+
+So "no interface carries the documented protocol" stands only for the 64-byte protocol that was
+documented at the time. Interface 2 is the configuration interface.
+
 ## Consequences in the runtime
 
 - A device with no vendor configuration interface is reported as unreachable up front, and no
   diagnostics or mapping are offered for it.
 - A device's displayed state comes from what it answered, not from its tier in `pid_matrix.csv`.
 - `0x5209` and `0x6013` are still listed as tier `full` in `pid_matrix.csv`. That tier was
-  assigned from static evidence. This run is the first hardware evidence for either, and it does
-  not support `full` for `0x5209` over USB. Changing a tier is a registry decision left to a
-  maintainer; the runtime no longer depends on it to be honest.
+  assigned from static evidence. For `0x5209` the follow-up above now supplies hardware evidence
+  for reads and mapping writes. For `0x6013` only four reads are confirmed. Changing a tier is a
+  registry decision left to a maintainer; the runtime no longer depends on it to be honest.
 
 ## Reproducing
 

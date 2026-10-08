@@ -972,67 +972,43 @@ func TestU2PreviewSlotReadsRequestedSlotNotActiveSlot(t *testing.T) {
 	}
 }
 
-// --- JP108 apply driven end to end over a scripted transport.
+// --- JP108 apply driven end to end against a simulated keyboard.
 
-func jp108TableReply(usages map[byte]uint16) []byte {
-	reply := make([]byte, 64)
-	reply[0], reply[1] = 0x02, 0x05
-	for index, usage := range usages {
-		reply[8+int(index)*2] = byte(usage)
-		reply[9+int(index)*2] = byte(usage >> 8)
-	}
-	return reply
-}
+var retro108Target = protocol.VidPid{VID: 0x2dc8, PID: 0x5209}
 
-func jp108Ack() []byte {
-	reply := make([]byte, 64)
-	reply[0] = 0x02
-	return reply
-}
-
-func jp108Core(transport *protocol.MockTransport) *OpenBitdoCore {
-	c := New(Config{AdvancedMode: true})
-	c.transportOverride = transport
+func jp108Core(keyboard *protocol.JP108Simulator) *OpenBitdoCore {
+	c := New(Config{})
+	c.transportOverride = keyboard
 	return c
 }
 
-func TestJP108ApplyAbortsBeforeWritingWhenBackupReadIsShort(t *testing.T) {
-	transport := &protocol.MockTransport{}
-	// 20 bytes cannot hold the 10-entry table. Three attempts, all short.
-	for range 3 {
-		transport.PushReadData(jp108TableReply(nil)[:20])
-		transport.PushReadTimeout()
-		transport.PushReadTimeout()
+func mappingWrites(keyboard *protocol.JP108Simulator) int {
+	writes := 0
+	for _, frame := range keyboard.Frames {
+		if frame[1] == 0xfa {
+			writes++
+		}
 	}
-	c := jp108Core(transport)
-	target := protocol.VidPid{VID: 0x2dc8, PID: 0x5209}
+	return writes
+}
 
-	_, err := c.JP108ApplyDedicatedMappingWithRecovery(context.Background(), target,
+func TestJP108ApplyAbortsBeforeWritingWhenBackupReadIsShort(t *testing.T) {
+	keyboard := &protocol.JP108Simulator{ShortReads: 5}
+	_, err := jp108Core(keyboard).JP108ApplyDedicatedMappingWithRecovery(context.Background(), retro108Target,
 		[]DedicatedButtonMapping{{Button: ButtonA, TargetHIDUsage: 0x2c}}, true)
 	if err == nil {
 		t.Fatal("expected apply to fail when the pre-write backup could not be read in full")
 	}
-	for _, frame := range transport.Writes() {
-		if len(frame) > 2 && frame[2] == 0x31 {
-			t.Fatalf("a mapping write was sent without a usable backup: % x", frame[:8])
-		}
+	if got := mappingWrites(keyboard); got != 0 {
+		t.Fatalf("%d mapping write(s) were sent without a usable backup", got)
 	}
 }
 
 func TestJP108ApplyRollsBackWhenReadbackDoesNotMatch(t *testing.T) {
-	transport := &protocol.MockTransport{}
-	before := map[byte]uint16{ButtonA.WireIndex(): 0x04}
-	transport.PushReadData(jp108TableReply(before)) // backup
-	transport.PushReadData(jp108Ack())              // write acknowledged...
-	transport.PushReadData(jp108TableReply(before)) // ...but the table is unchanged
-	transport.PushReadData(jp108Ack())              // rollback write
-	for range len(AllDedicatedButtons) {
-		transport.PushReadData(jp108Ack())
-	}
-	c := jp108Core(transport)
-	target := protocol.VidPid{VID: 0x2dc8, PID: 0x5209}
-
-	report, err := c.JP108ApplyDedicatedMappingWithRecovery(context.Background(), target,
+	// The keyboard acknowledges the write but does not store it.
+	keyboard := &protocol.JP108Simulator{IgnoreWrites: true, Name: []byte("P\x00"),
+		Mappings: map[byte][5]byte{233: {0x07, 0x00, 0x04}}}
+	report, err := jp108Core(keyboard).JP108ApplyDedicatedMappingWithRecovery(context.Background(), retro108Target,
 		[]DedicatedButtonMapping{{Button: ButtonA, TargetHIDUsage: 0x2c}}, true)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -1046,16 +1022,23 @@ func TestJP108ApplyRollsBackWhenReadbackDoesNotMatch(t *testing.T) {
 }
 
 func TestJP108ApplySucceedsWhenReadbackMatches(t *testing.T) {
-	transport := &protocol.MockTransport{}
-	transport.PushReadData(jp108TableReply(map[byte]uint16{ButtonA.WireIndex(): 0x04}))
-	transport.PushReadData(jp108Ack())
-	transport.PushReadData(jp108TableReply(map[byte]uint16{ButtonA.WireIndex(): 0x2c}))
-	c := jp108Core(transport)
-	target := protocol.VidPid{VID: 0x2dc8, PID: 0x5209}
-
-	report, err := c.JP108ApplyDedicatedMappingWithRecovery(context.Background(), target,
-		[]DedicatedButtonMapping{{Button: ButtonA, TargetHIDUsage: 0x2c}}, true)
+	keyboard := &protocol.JP108Simulator{}
+	c := jp108Core(keyboard)
+	report, err := c.JP108ApplyDedicatedMappingWithRecovery(context.Background(), retro108Target,
+		[]DedicatedButtonMapping{{Button: ButtonA, TargetHIDUsage: 0x76}, {Button: ButtonB, TargetHIDUsage: 0x77}}, true)
 	if err != nil || !report.WriteApplied || !report.HasBackupID {
 		t.Fatalf("expected a verified apply with a backup, got %+v err=%v", report, err)
+	}
+	// A is key 233 and B is key 232 on the wire.
+	if keyboard.Mappings[233] != [5]byte{0x07, 0x00, 0x76} || keyboard.Mappings[232] != [5]byte{0x07, 0x00, 0x77} {
+		t.Fatalf("unexpected stored mappings: %v", keyboard.Mappings)
+	}
+
+	// Restoring the backup puts both buttons back to unassigned.
+	if err := c.RestoreBackup(context.Background(), report.BackupID); err != nil {
+		t.Fatalf("restore: %v", err)
+	}
+	if keyboard.Mappings[233] != [5]byte{0x07} || keyboard.Mappings[232] != [5]byte{0x07} {
+		t.Fatalf("expected both buttons unassigned after restore: %v", keyboard.Mappings)
 	}
 }

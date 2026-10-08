@@ -10,7 +10,7 @@ OpenBitdo is unofficial and not affiliated with 8BitDo. Device writes always car
 - Detect connected 8BitDo devices and give each a plain verdict: working, limited (it can be read but not changed), can't connect, or no access.
 - Check the connection, and view, copy or save the report.
 - Say for every device what you can do with it now, and what you can't do yet and why.
-- Edit supported mappings for the currently confirmed JP108 flow.
+- Read and assign the ten dedicated buttons (A, B, K1-K8) of a Retro 108 keyboard.
 - Preview Ultimate 2 mapping in mock mode only; real Ultimate 2 mapping is blocked with the reason `button-map framing not hardware-confirmed`.
 - Show Firmware Update as disabled and deferred in `v0.0.3`; activating it does not download firmware, preflight firmware, or open a device session.
 - Keep unconfirmed devices in safe read-only or detect-only paths.
@@ -66,7 +66,7 @@ When a device is not fully supported, run diagnostics and share the generated TO
 
 A non-destructive Ultimate 2 qualification was run for `v0.0.3` and did not pass. On the unit tested (`0x2dc8:0x6013`) the controller exposes only its vendor configuration interface and no Generic Desktop Gamepad interface, so controller navigation has nothing to read from, and every safe-read diagnostic writes successfully but reads back no data. Both results were traced to device/protocol behavior rather than defects in this project. The measured results, the reasoning, and how to re-run the qualification are recorded in [docs/RC_CHECKLIST.md](docs/RC_CHECKLIST.md). Keyboard and mouse navigation are unaffected.
 
-A later Linux run against the same controller and a Retro 108 keyboard is recorded in [docs/clean-room-evidence/hardware_run_linux_2026-10-08.md](docs/clean-room-evidence/hardware_run_linux_2026-10-08.md). Over hidraw the Ultimate 2 answers 4 of the 12 safe reads, so the empty reads above do not reproduce on Linux; it still exposes no gamepad interface. The Retro 108, connected over USB, exposes no interface that carries the documented protocol, so OpenBitdo identifies it and reports it as unreachable rather than offering diagnostics or mapping.
+A later Linux run against the same controller and a Retro 108 keyboard is recorded in [docs/clean-room-evidence/hardware_run_linux_2026-10-08.md](docs/clean-room-evidence/hardware_run_linux_2026-10-08.md). Over hidraw the Ultimate 2 answers 4 of the 12 safe reads, so the empty reads above do not reproduce on Linux; it still exposes no gamepad interface. The Retro 108 did not answer the protocol documented at the time. Its own framing has since been worked out and confirmed on that keyboard, so OpenBitdo now reads it and can assign its ten dedicated buttons (A, B, K1-K8). Assignments are acknowledged and read back; whether the buttons then send the assigned keys is the one step not yet observed.
 
 ## Shell Completions
 

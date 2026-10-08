@@ -113,7 +113,8 @@ func isCommandAllowedByCapability(cap PidCapability, command CommandID) bool {
 		CommandU2FirmwareChunk, CommandU2FirmwareCommit:
 		return cap.SupportsFirmware
 	case CommandJp108ReadDedicatedMappings, CommandJp108WriteDedicatedMapping, CommandJp108ReadFeatureFlags,
-		CommandJp108WriteFeatureFlags, CommandJp108ReadVoice, CommandJp108WriteVoice:
+		CommandJp108WriteFeatureFlags, CommandJp108ReadVoice, CommandJp108WriteVoice,
+		CommandJp108ReadProfileName, CommandJp108WriteProfileName:
 		return cap.SupportsJP108DedicatedMap
 	case CommandU2GetCurrentSlot, CommandU2ReadConfigSlot, CommandU2WriteConfigSlot:
 		return cap.SupportsU2SlotConfig
@@ -123,6 +124,19 @@ func isCommandAllowedByCapability(cap PidCapability, command CommandID) bool {
 		return false
 	}
 }
+
+// jp108Commands are the commands a JP108 keyboard's own configuration
+// interface carries: 33-byte reports with ID 0x52, answered on report 0x54.
+// Nothing else is sent to one. The generic 64-byte commands the other
+// families share have no report on that interface to travel in.
+var jp108Commands = map[CommandID]bool{
+	CommandJp108ReadDedicatedMappings: true, CommandJp108WriteDedicatedMapping: true,
+	CommandJp108ReadFeatureFlags: true, CommandJp108WriteFeatureFlags: true,
+	CommandJp108ReadProfileName: true, CommandJp108WriteProfileName: true,
+}
+
+// jp108PIDs are the keyboards hardware evidence exists for.
+var jp108PIDs = map[uint16]bool{0x5209: true}
 
 var jpHandshakeDisallowed = map[CommandID]bool{
 	CommandSetModeDInput: true, CommandReadProfile: true, CommandWriteProfile: true,
@@ -141,6 +155,20 @@ var unknownFamilyAllowed = map[CommandID]bool{
 var ds4BootAllowed = map[CommandID]bool{
 	CommandEnterBootloaderA: true, CommandEnterBootloaderB: true, CommandEnterBootloaderC: true,
 	CommandExitBootloader: true, CommandFirmwareChunk: true, CommandFirmwareCommit: true, CommandGetPid: true,
+}
+
+// isCommandAllowedForDevice is isCommandAllowedByFamily narrowed by what is
+// known about the specific device. A JP108 keyboard only takes its own
+// commands (and, once firmware is enabled, its own boot/firmware ones).
+func isCommandAllowedForDevice(target VidPid, family ProtocolFamily, command CommandID) bool {
+	if jp108PIDs[target.PID] {
+		switch command {
+		case CommandJp108EnterBootloader, CommandJp108ExitBootloader, CommandJp108FirmwareChunk, CommandJp108FirmwareCommit:
+			return true
+		}
+		return jp108Commands[command]
+	}
+	return isCommandAllowedByFamily(family, command)
 }
 
 func isCommandAllowedByFamily(family ProtocolFamily, command CommandID) bool {
@@ -164,6 +192,21 @@ func ValidateResponse(command CommandID, response []byte) ResponseStatus {
 	}
 
 	switch command {
+	case CommandJp108ReadDedicatedMappings:
+		return validateJP108Reply(response, 0x83, 8)
+	case CommandJp108ReadFeatureFlags:
+		return validateJP108Reply(response, 0x88, 3)
+	case CommandJp108ReadProfileName:
+		return validateJP108Reply(response, 0x80, 3)
+	case CommandJp108WriteDedicatedMapping, CommandJp108WriteFeatureFlags, CommandJp108WriteProfileName:
+		// Every JP108 write is acknowledged with the same two bytes.
+		if len(response) < 3 {
+			return StatusMalformed
+		}
+		if response[0] == jp108ReplyReportID && response[1] == 0xe4 && response[2] == 0x08 {
+			return StatusOk
+		}
+		return StatusInvalid
 	case CommandGetPid:
 		if len(response) < 24 {
 			return StatusMalformed
@@ -196,8 +239,7 @@ func ValidateResponse(command CommandID, response []byte) ResponseStatus {
 			return StatusOk
 		}
 		return StatusInvalid
-	case CommandJp108ReadDedicatedMappings, CommandJp108ReadFeatureFlags, CommandJp108ReadVoice,
-		CommandU2ReadConfigSlot, CommandU2ReadButtonMap:
+	case CommandJp108ReadVoice, CommandU2ReadConfigSlot, CommandU2ReadButtonMap:
 		if len(response) < 12 {
 			return StatusMalformed
 		}
@@ -228,8 +270,28 @@ func ValidateResponse(command CommandID, response []byte) ResponseStatus {
 	}
 }
 
+// jp108ReplyReportID is the input report a JP108 answers on.
+const jp108ReplyReportID = 0x54
+
+// validateJP108Reply checks a JP108 read reply: it arrives on report 0x54
+// and echoes the command byte it answers.
+func validateJP108Reply(response []byte, command byte, minLen int) ResponseStatus {
+	if len(response) < minLen {
+		return StatusMalformed
+	}
+	if response[0] == jp108ReplyReportID && response[1] == command {
+		return StatusOk
+	}
+	return StatusInvalid
+}
+
 func minimumResponseLen(command CommandID) int {
 	switch command {
+	case CommandJp108ReadDedicatedMappings:
+		return 8
+	case CommandJp108ReadFeatureFlags, CommandJp108ReadProfileName,
+		CommandJp108WriteDedicatedMapping, CommandJp108WriteFeatureFlags, CommandJp108WriteProfileName:
+		return 3
 	case CommandGetPid:
 		return 24
 	case CommandGetReportRevision:
@@ -238,8 +300,7 @@ func minimumResponseLen(command CommandID) int {
 		return 6
 	case CommandU2GetCurrentSlot:
 		return 6
-	case CommandJp108ReadDedicatedMappings, CommandJp108ReadFeatureFlags, CommandJp108ReadVoice,
-		CommandU2ReadConfigSlot, CommandU2ReadButtonMap:
+	case CommandJp108ReadVoice, CommandU2ReadConfigSlot, CommandU2ReadButtonMap:
 		return 12
 	case CommandGetControllerVersion, CommandVersion:
 		return 5
@@ -265,27 +326,16 @@ func parseFields(command CommandID, response []byte) map[string]uint32 {
 		parsed["beta"] = uint32(response[4])
 	case command == CommandU2GetCurrentSlot && len(response) >= 6:
 		parsed["slot"] = uint32(response[5])
+	case command == CommandJp108ReadDedicatedMappings && len(response) >= 8:
+		parsed["key_id"] = uint32(response[2])
+		parsed["mapping_type"] = uint32(response[3])
+		parsed["usage"] = uint32(jp108Usage(response[4:8]))
+	case command == CommandJp108ReadProfileName && len(response) >= 3:
+		parsed["name_bytes"] = uint32(response[2])
+	case command == CommandJp108ReadFeatureFlags && len(response) >= 3:
+		parsed["flags"] = uint32(response[2])
 	}
 	return parsed
-}
-
-// indexedU16TableOffset is where an indexed u16 table starts in a reply.
-const indexedU16TableOffset = 8
-
-// parseIndexedU16Table decodes expectedItems little-endian u16 entries. A
-// reply too short to hold the whole table is an error, never a table padded
-// with zeros: the result is used as a backup that may later be written back
-// to the device.
-func parseIndexedU16Table(command CommandID, raw []byte, expectedItems int) ([]IndexedUsage, error) {
-	if need := indexedU16TableOffset + expectedItems*2; len(raw) < need {
-		return nil, errMalformedResponse(command, len(raw))
-	}
-	out := make([]IndexedUsage, 0, expectedItems)
-	for idx := 0; idx < expectedItems; idx++ {
-		pos := indexedU16TableOffset + idx*2
-		out = append(out, IndexedUsage{Index: byte(idx), Usage: binary.LittleEndian.Uint16(raw[pos : pos+2])})
-	}
-	return out, nil
 }
 
 func diagSuccessDetail(command CommandID, facts map[string]uint32) string {
@@ -321,6 +371,22 @@ func diagSuccessDetail(command CommandID, facts map[string]uint32) string {
 			return formatSlot(slot)
 		}
 		return "ok"
+	case CommandJp108ReadDedicatedMappings:
+		// The check reads the A button, the first of the ten.
+		if usage, ok := facts["usage"]; ok && usage != 0 {
+			return fmt.Sprintf("A button is assigned key %#02x", usage)
+		}
+		if kind := facts["mapping_type"]; kind != 0 && kind != jp108TypeKeyboard {
+			return fmt.Sprintf("A button holds a mapping of type %#02x", kind)
+		}
+		return "A button is unassigned"
+	case CommandJp108ReadProfileName:
+		if facts["name_bytes"] == 0 {
+			return "no profile stored"
+		}
+		return "a profile is stored"
+	case CommandJp108ReadFeatureFlags:
+		return fmt.Sprintf("flags %#02x", facts["flags"])
 	default:
 		return "ok"
 	}
