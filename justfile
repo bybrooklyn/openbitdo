@@ -2,6 +2,10 @@
 #
 # Run `just` with no arguments to list all recipes.
 
+# Every recipe runs with the release Go toolchain, whatever Go is installed:
+# the go command downloads it on first use. toolchain-check still verifies it.
+export GOTOOLCHAIN := "go1.27.0"
+
 default:
     @just --list
 

@@ -20,8 +20,9 @@ just run-mock  # launch the TUI against mock devices, no hardware needed
 Run `just check` before opening a PR — it's exactly what CI gates on, so a
 clean local run means CI should pass too.
 
-The recipes refuse to run on any other Go release. If your system Go is
-newer, `GOTOOLCHAIN=go1.27.0 just check` downloads and uses the pinned one.
+The recipes set `GOTOOLCHAIN=go1.27.0`, so they use the pinned release even
+if your system Go is a different one; the `go` command downloads it on first
+use. Running `go` directly, outside `just`, uses whatever Go you have.
 
 To look at a screen without a terminal, dump a frame as plain text:
 
