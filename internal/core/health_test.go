@@ -177,3 +177,28 @@ func TestForgetFailedDiagsKeepsResultsAndDropsFailures(t *testing.T) {
 		t.Fatal("only the failed probe should be forgotten")
 	}
 }
+
+func TestReceiverWhoseControllerIsOffIsNotReachable(t *testing.T) {
+	// A real 0x6013 receiver answers for itself while its controller is
+	// switched off; those answers must not read as a working controller.
+	pad := &protocol.U2Simulator{Off: true}
+	c := New(Config{})
+	c.transportOverride = pad
+	device := AppDevice{VidPid: ultimate2, Serial: "A", SupportTier: protocol.TierFull, ConfigChannel: ChannelPresent}
+
+	if _, err := c.DiagProbeFresh(context.Background(), device); err != nil {
+		t.Fatal(err)
+	}
+	health := c.Health(device)
+	if health.State != HealthControllerOff || health.Reachable() || health.Answered == 0 {
+		t.Fatalf("expected a receiver that answers but an unreachable controller, got %+v", health)
+	}
+
+	pad.Off = false
+	if _, err := c.DiagProbeFresh(context.Background(), device); err != nil {
+		t.Fatal(err)
+	}
+	if health := c.Health(device); health.State != HealthResponding {
+		t.Fatalf("with the controller on it should be reachable, got %+v", health)
+	}
+}

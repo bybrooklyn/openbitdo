@@ -1,0 +1,69 @@
+# Sanitized dirty-room dossier, with partial hardware confirmation
+
+dossier_id = "DOS-6012-U2-ADV"
+pid_hex = "0x6012"
+operation_group = "Ultimate2Core"
+command_id = ["U2GetConnected", "U2GetPhysicalMode", "U2SetReportState", "U2SelectPlatform", "U2RecordRead", "U2RecordWrite", "U2Commit"]
+request_shape = "64-byte output report 0x81: 81 04, then a 16-byte header (cmd u16, arg u16, len u16, crc u16, total u32, offset u32), then up to 45 data bytes"
+response_shape = "64-byte input report 0x02: 02 04, then a 16-byte header (04 00, cmd u16 echoed, len u16, crc u16, two u32), then data from byte 18"
+validator_rules = ["byte0 == 0x02", "byte1 == 0x04", "bytes 2-3 == 04 00", "bytes 4-5 echo the request's cmd"]
+retry_behavior = "reads are repeated up to 30 times by the vendor flow; a write chunk is acknowledged with the number of bytes accepted"
+failure_signatures = ["timeout", "reply to a different cmd", "controller not connected to its receiver"]
+evidence_source = "static, then hardware for the receiver queries"
+confidence = "inferred"
+supersedes = "DOS-6012-U2-Core for framing: that dossier's 81 05 4x frames drew no reply from hardware"
+
+# How this was obtained. Framing, command numbers and the record layout were
+# worked out from static analysis of the vendor's Windows application (V1.37)
+# in a scratch directory outside this repository. No vendor code is
+# reproduced here; this file records wire facts only.
+
+[transport]
+interface = "the HID interface with usage page 0xffa0, usage 0x0001"
+crc = "CRC-16/MODBUS (reflected polynomial 0xA001, initial value 0xFFFF) over the data bytes; 0 when there are none"
+chunk = "at most 45 data bytes per report"
+pids = "0x6012 is the controller; 0x6013 is its 2.4G receiver, which relays the same commands"
+
+[commands.connected]
+request = "cmd 0x0120, no data"
+reply = "len 1; data byte 0 is 1 when the controller is connected to the receiver"
+hardware = "yes"
+observed = "0x6013 receiver with the controller switched off: 02 04 04 00 20 01 01 00, data byte 0 = 0. Every other command below drew no reply in that state."
+
+[commands.physical_mode]
+request = "cmd 0x0105, no data"
+reply = "data byte 0: 1 = XInput position, 0 = DInput position"
+hardware = "no"
+
+[commands.report_state]
+request = "cmd 0x0007, arg 0 pauses and arg 1 resumes the input report stream on this interface"
+reply = "none"
+hardware = "no"
+
+[commands.select_platform]
+request = "cmd 0x0014, arg = platform (0 Switch, 1 DInput, 2 Mac, 3 XInput)"
+reply = "cmd echoed"
+notes = "Selects which platform's record cmd 1 and cmd 2 address. Sent before every read by the vendor flow."
+hardware = "no"
+
+[commands.record_read]
+request = "cmd 0x0002, len = bytes wanted (at most 45), total = bytes being read in all, offset"
+reply = "len = bytes returned, data"
+notes = "The whole record is 0x638 bytes. Reading the first 0x14 bytes yields the active slot (u16 at 0x12)."
+hardware = "no"
+
+[commands.record_write]
+request = "cmd 0x0001, len, crc of the data, total = 0x638, offset, data"
+reply = "len = bytes accepted"
+notes = "Any byte range may be written; the vendor flow writes single fields."
+hardware = "no"
+
+[commands.commit]
+request = "cmd 0x0006, arg 0x0123"
+reply = "cmd echoed, within about 4 seconds"
+hardware = "no"
+
+[record]
+size = "0x638 bytes, little-endian, three slots"
+layout = "0x000 flag u32 x3; 0x00c crc u32; 0x010 platform u16; 0x012 active slot u16; 0x014 name 32 bytes x3; 0x074 rumble 12 x3; 0x098 sticks 8 x3; 0x0b0 triggers 8 x3; 0x0c8 feature word 8 x3; 0x0e0 button map 92 x3 (flag u32 + 22 x u32); 0x1f4 macros 216 x3; 0x47c xinput rumble 8 x3; 0x494 motion 12 x3; 0x4b8 dynamic theme 12 x3; 0x4dc wheel theme 16 x3; 0x50c per-LED theme 100 x3"
+valid_flag = "0x20200911 marks a slot or sub-record as in use"

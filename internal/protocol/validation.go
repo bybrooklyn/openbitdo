@@ -67,6 +67,8 @@ var jpCandidatePIDs = jpCandidateDiagPIDs // same set, reused for gate 3
 var standardCandidateReadCommands = map[CommandID]bool{
 	CommandGetMode: true, CommandGetModeAlt: true, CommandReadProfile: true,
 	CommandU2GetCurrentSlot: true, CommandU2ReadConfigSlot: true, CommandU2ReadButtonMap: true,
+	CommandU2GetConnected: true, CommandU2GetPhysicalMode: true, CommandU2SetReportState: true,
+	CommandU2SelectPlatform: true, CommandU2RecordRead: true,
 }
 
 var jpCandidateReadCommands = map[CommandID]bool{
@@ -117,7 +119,9 @@ func isCommandAllowedByCapability(cap PidCapability, command CommandID) bool {
 		CommandJp108ReadProfileName, CommandJp108WriteProfileName,
 		CommandJp108ReadMappedKeys, CommandJp108ReadMacroList:
 		return cap.SupportsJP108DedicatedMap
-	case CommandU2GetCurrentSlot, CommandU2ReadConfigSlot, CommandU2WriteConfigSlot:
+	case CommandU2GetCurrentSlot, CommandU2ReadConfigSlot, CommandU2WriteConfigSlot,
+		CommandU2GetConnected, CommandU2GetPhysicalMode, CommandU2SetReportState, CommandU2SelectPlatform,
+		CommandU2RecordRead, CommandU2RecordWrite, CommandU2Commit:
 		return cap.SupportsU2SlotConfig
 	case CommandU2ReadButtonMap, CommandU2WriteButtonMap, CommandU2SetMode:
 		return cap.SupportsU2ButtonMap
@@ -146,6 +150,8 @@ var jpHandshakeDisallowed = map[CommandID]bool{
 	CommandFirmwareChunk: true, CommandFirmwareCommit: true,
 	CommandU2GetCurrentSlot: true, CommandU2ReadConfigSlot: true, CommandU2WriteConfigSlot: true,
 	CommandU2ReadButtonMap: true, CommandU2WriteButtonMap: true, CommandU2SetMode: true,
+	CommandU2GetConnected: true, CommandU2GetPhysicalMode: true, CommandU2SetReportState: true,
+	CommandU2SelectPlatform: true, CommandU2RecordRead: true, CommandU2RecordWrite: true, CommandU2Commit: true,
 	CommandU2EnterBootloader: true, CommandU2FirmwareChunk: true, CommandU2FirmwareCommit: true,
 	CommandU2ExitBootloader: true,
 }
@@ -240,6 +246,18 @@ func ValidateResponse(command CommandID, response []byte) ResponseStatus {
 			return StatusOk
 		}
 		return StatusInvalid
+	case CommandU2GetConnected, CommandU2GetPhysicalMode, CommandU2SelectPlatform,
+		CommandU2RecordRead, CommandU2RecordWrite, CommandU2Commit:
+		if len(response) < u2DataOffset {
+			return StatusMalformed
+		}
+		// A reply to some other command (or a stray input report) is not
+		// this command's answer, however well-formed.
+		cmd, _ := u2CommandCode(command)
+		if _, _, ok := u2ReplyFor(response, cmd); ok {
+			return StatusOk
+		}
+		return StatusInvalid
 	case CommandU2GetCurrentSlot:
 		if len(response) < 6 {
 			return StatusMalformed
@@ -310,6 +328,9 @@ func minimumResponseLen(command CommandID) int {
 		return 6
 	case CommandU2GetCurrentSlot:
 		return 6
+	case CommandU2GetConnected, CommandU2GetPhysicalMode, CommandU2SelectPlatform,
+		CommandU2RecordRead, CommandU2RecordWrite, CommandU2Commit:
+		return u2DataOffset
 	case CommandU2ReadConfigSlot, CommandU2ReadButtonMap:
 		return 12
 	case CommandGetControllerVersion, CommandVersion:
@@ -344,6 +365,10 @@ func parseFields(command CommandID, response []byte) map[string]uint32 {
 		parsed["name_bytes"] = uint32(response[2])
 	case command == CommandJp108ReadFeatureFlags && len(response) >= 3:
 		parsed["flags"] = uint32(response[2])
+	case command == CommandU2GetConnected && len(response) > u2DataOffset:
+		parsed["connected"] = uint32(response[u2DataOffset])
+	case command == CommandU2GetPhysicalMode && len(response) > u2DataOffset:
+		parsed["xinput"] = uint32(response[u2DataOffset])
 	case command == CommandJp108ReadVoice && len(response) >= 3:
 		parsed["volume"] = uint32(response[2])
 	case command == CommandJp108ReadMappedKeys && len(response) >= 3:
@@ -407,6 +432,16 @@ func diagSuccessDetail(command CommandID, facts map[string]uint32) string {
 		return fmt.Sprintf("flags %#02x", facts["flags"])
 	case CommandJp108ReadVoice:
 		return fmt.Sprintf("volume level %d", facts["volume"])
+	case CommandU2GetConnected:
+		if facts["connected"] == 1 {
+			return "controller connected"
+		}
+		return "controller is off or out of range"
+	case CommandU2GetPhysicalMode:
+		if facts["xinput"] == 1 {
+			return "mode switch on XInput"
+		}
+		return "mode switch on DInput"
 	case CommandJp108ReadMappedKeys:
 		return fmt.Sprintf("%d keys remapped", facts["mapped_keys"])
 	default:

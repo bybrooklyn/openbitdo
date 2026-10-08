@@ -76,6 +76,8 @@ var candidateUnlockableWrites = map[CommandID]bool{
 	CommandU2WriteButtonMap:           true,
 	CommandU2WriteConfigSlot:          true,
 	CommandU2SetMode:                  true,
+	CommandU2RecordWrite:              true,
+	CommandU2Commit:                   true,
 	CommandJp108WriteDedicatedMapping: true,
 	CommandJp108WriteFeatureFlags:     true,
 	CommandJp108WriteVoice:            true,

@@ -230,6 +230,14 @@ func (s *DeviceSession) DiagProbe(ctx context.Context) DiagProbeResult {
 	}
 }
 
+// notAStandaloneCheck are read-class commands that are a step of a larger
+// read rather than a question with an answer of their own: sent bare, as a
+// diagnostic check would, they pause the controller's input reports, switch
+// the addressed record, or ask for zero bytes.
+var notAStandaloneCheck = map[CommandID]bool{
+	CommandU2SetReportState: true, CommandU2SelectPlatform: true, CommandU2RecordRead: true,
+}
+
 type diagCheckPlan struct {
 	command    CommandID
 	policy     RuntimePolicy
@@ -239,7 +247,7 @@ type diagCheckPlan struct {
 func (s *DeviceSession) diagCommandsToRun() []diagCheckPlan {
 	var plans []diagCheckPlan
 	for _, row := range CommandRegistry {
-		if row.SafetyClass != SafeRead {
+		if row.SafetyClass != SafeRead || notAStandaloneCheck[row.ID] {
 			continue
 		}
 		if !CommandAppliesToPID(row, s.target.PID) {

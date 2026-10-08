@@ -93,6 +93,10 @@ const (
 	HealthSilent
 	// HealthNoChannel: no configuration interface to talk through.
 	HealthNoChannel
+	// HealthControllerOff: a wireless receiver is answering, and says its
+	// controller is not connected to it (switched off, asleep, out of
+	// range).
+	HealthControllerOff
 	// HealthNoPermission: the OS refused access to the device.
 	HealthNoPermission
 	// HealthDisconnected: the device went away.
@@ -141,10 +145,19 @@ func (c *OpenBitdoCore) Health(device AppDevice) DeviceHealth {
 		return DeviceHealth{State: HealthUnknown}
 	}
 	health := DeviceHealth{State: HealthSilent, Total: len(entry.Result.CommandChecks)}
+	controllerOff := false
 	for _, check := range entry.Result.CommandChecks {
 		if check.OK {
 			health.Answered++
+			if connected, asked := check.ParsedFacts["connected"]; asked && check.Command == protocol.CommandU2GetConnected {
+				controllerOff = connected == 0
+			}
 		}
+	}
+	if controllerOff {
+		// The receiver's own answers do not make the controller reachable.
+		health.State = HealthControllerOff
+		return health
 	}
 	if health.Answered > 0 {
 		health.State = HealthResponding

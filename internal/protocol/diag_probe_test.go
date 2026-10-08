@@ -22,12 +22,14 @@ func TestDiagProbeExpandsToSafeReadCommandsAndParsedFacts(t *testing.T) {
 	transport.PushReadData(slotResponse(2))
 	transport.PushReadData(okReadResponse())
 	transport.PushReadData(okReadResponse())
+	transport.PushReadData(u2Reply(u2CmdConnected, 1))
+	transport.PushReadData(u2Reply(u2CmdPhysicalMode, 1))
 
 	session := openSession(t, transport, 0x6012, cfgWith(func(c *SessionConfig) { c.Experimental = true }))
 	diag := session.DiagProbe(context.Background())
 
-	if len(diag.CommandChecks) != 12 {
-		t.Fatalf("expected 12 checks, got %d", len(diag.CommandChecks))
+	if len(diag.CommandChecks) != 14 {
+		t.Fatalf("expected 14 checks, got %d", len(diag.CommandChecks))
 	}
 	if !diag.TransportReady {
 		t.Fatal("expected transport ready")
@@ -119,4 +121,14 @@ func TestDiagProbeGetModeFallsBackToGetModeAlt(t *testing.T) {
 	if modeCheck.ResponseStatus != StatusOk {
 		t.Fatalf("expected StatusOk, got %s", modeCheck.ResponseStatus)
 	}
+}
+
+// u2Reply is a controller reply to cmd carrying the given data bytes.
+func u2Reply(cmd uint16, data ...byte) []byte {
+	frame := make([]byte, 64)
+	frame[0], frame[1], frame[2] = 0x02, 0x04, 0x04
+	frame[4], frame[5] = byte(cmd), byte(cmd>>8)
+	frame[6] = byte(len(data))
+	copy(frame[u2DataOffset:], data)
+	return frame
 }

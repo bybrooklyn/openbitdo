@@ -168,6 +168,9 @@ func verdictFor(h core.DeviceHealth, canChange bool, worksAs core.DeviceRole) ve
 	case core.HealthSilent:
 		return verdict{IconTierDetect, styleBadgeDetect, "Not answering",
 			"Connected, but it isn't replying to OpenBitdo."}
+	case core.HealthControllerOff:
+		return verdict{IconTierDetect, styleBadgeDetect, "Controller off",
+			"The receiver is plugged in, but the controller is off or asleep. Turn it on, then press s."}
 	case core.HealthNoChannel:
 		return verdict{IconTierDetect, styleBadgeDetect, "Can't connect",
 			"Plugged in, but not in a mode OpenBitdo can talk to."}
@@ -228,6 +231,8 @@ func unreachableReason(health core.DeviceHealth) string {
 		return "your account can't open the device"
 	case core.HealthSilent:
 		return "the device isn't answering"
+	case core.HealthControllerOff:
+		return "the controller is off"
 	case core.HealthDisconnected:
 		return "the device is unplugged"
 	}
@@ -269,6 +274,8 @@ func (m Model) actionsFor(device core.AppDevice) []actionItem {
 		check.reason = unreachable
 	case core.HealthResponding, core.HealthSilent:
 		check.note = fmt.Sprintf("%d of %d answered", health.Answered, health.Total)
+	case core.HealthControllerOff:
+		check.note = "the receiver answers; the controller doesn't"
 	}
 	items := []actionItem{check}
 
