@@ -141,8 +141,8 @@ hidraw, is recorded in `docs/clean-room-evidence/hardware_run_linux_2026-10-08.m
 
 The keyboard row above is for the 64-byte framing documented at the time. With its own framing
 (`docs/clean-room-evidence/dossiers/5209/jp108_hid.toml`), the same keyboard answered every read
-and accepted and read back a profile name and two button assignments. Not yet observed: the
-buttons sending the assigned keys.
+and accepted and read back a profile name and two button assignments, and its A and B buttons
+then sent the assigned keys once the keyboard's Profile button was on.
 
 ## Distribution Gate
 

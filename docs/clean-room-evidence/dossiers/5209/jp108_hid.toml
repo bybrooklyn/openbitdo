@@ -88,9 +88,16 @@ K7 = 234
 K8 = 235
 ordinary_keys = "an ordinary key's id is its HID keyboard usage (letter A is 4, Enter is 40)"
 
+[effect]
+# Observed on the same keyboard, reading its key reports from hidraw while
+# the buttons were pressed.
+profile_button = "A stored mapping is only used while the keyboard's Profile button is on. With it off, an assigned A or B button sends nothing; with it on, it sends the assigned key."
+value_is_sent_verbatim = "A button assigned 0x76 sent usage 0x76 and one assigned 0x77 sent 0x77. The keyboard does not translate the value."
+f13 = "It follows that F13-F24 must be written as their HID usages, 0x68-0x73. The vendor table's 0x76-0x81 for those keys produce other usages (0x76 is Keyboard Menu, 0x77 Select), not F13-F24."
+where = "The A and B buttons are the two keys between right Alt and right Ctrl."
+
 [open_questions]
-effect = "Both assignments were acknowledged and read back, but whether the A and B buttons then emit the assigned keys has not been observed yet. The keyboard may need its profile switched on."
-f13 = "The vendor table gives 0x76-0x81 for F13-F24, which are not the HID usages for those keys (0x68-0x73). Which the keyboard emits for a button assigned 0x76 is unobserved."
 voice = "The commands behind the vendor's volume setting are not identified. The Jp108ReadVoice/WriteVoice rows in command_matrix.csv still carry the old framing and are not sent to this device."
 adapter = "Nothing is known about the 2.4G adapter (0x520a)."
 long_names = "A name longer than 29 bytes spans several reports; only the single-report case was exercised."
+profile_state = "Whether the Profile button's state can be read or set from the host is not known. One vendor-page input report (id 0x11) was seen when a top-row button was pressed."

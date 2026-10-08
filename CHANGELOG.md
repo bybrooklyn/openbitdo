@@ -63,8 +63,9 @@ All notable changes to OpenBitdo are tracked here.
   to a key or clear it. A write is checked by reading it back, and a profile name is written
   first when the keyboard has none. The framing is recorded in
   `docs/clean-room-evidence/dossiers/5209/jp108_hid.toml`. On a real keyboard the reads, the
-  name write and two assignments were acknowledged and read back; whether the buttons then send
-  the assigned keys has not been observed yet.
+  name write and two assignments were acknowledged and read back, and the A and B buttons were
+  seen sending the assigned keys. A mapping is only used while the keyboard's Profile button is
+  on. F13-F24 are offered as targets by their HID usages (`0x68`-`0x73`).
 - A Buttons tab: press anything on a controller and its button number lights up. It only reads
   what the controller already sends, and is how to find the number of a back button or extra
   shoulder button, which have no standard one. Decoding is tested against the report

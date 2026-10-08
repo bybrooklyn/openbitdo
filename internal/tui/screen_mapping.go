@@ -15,6 +15,11 @@ var jp108Presets = []uint16{
 	0x0000, // unassigned: the button does nothing
 	0x0004, 0x0005, 0x0006, 0x0007, 0x0008, 0x0009, 0x000a, 0x000b, 0x0028, 0x0029, 0x002c, 0x003a,
 	0x003b, 0x003c, 0x00e0, 0x00e1,
+	// F13-F24: keys no keyboard layout has, so a button assigned one never
+	// clashes with typing and can be bound to anything in the desktop's
+	// shortcuts. These are the HID usages; the keyboard sends the value it
+	// is given unchanged (confirmed on a Retro 108).
+	0x0068, 0x0069, 0x006a, 0x006b, 0x006c, 0x006d, 0x006e, 0x006f, 0x0070, 0x0071, 0x0072, 0x0073,
 }
 
 // jp108KeyNames names the preset targets, from the USB HID Usage Tables'
@@ -24,6 +29,8 @@ var jp108KeyNames = map[uint16]string{
 	0x0004: "A", 0x0005: "B", 0x0006: "C", 0x0007: "D", 0x0008: "E", 0x0009: "F", 0x000a: "G", 0x000b: "H",
 	0x0028: "Enter", 0x0029: "Escape", 0x002c: "Space", 0x003a: "F1", 0x003b: "F2", 0x003c: "F3",
 	0x00e0: "Left Ctrl", 0x00e1: "Left Shift",
+	0x0068: "F13", 0x0069: "F14", 0x006a: "F15", 0x006b: "F16", 0x006c: "F17", 0x006d: "F18",
+	0x006e: "F19", 0x006f: "F20", 0x0070: "F21", 0x0071: "F22", 0x0072: "F23", 0x0073: "F24",
 }
 
 // jp108TargetLabel shows a target as the key it is, keeping the usage ID
@@ -507,6 +514,10 @@ func (m Model) handleMappingApplyResult(report core.WriteRecoveryReport, err err
 			m.mapping.u2Loaded = m.mapping.u2Draft
 		}
 		m.mapping.statusMsg = "Applied and verified."
+		if m.mapping.kind == core.KindJP108 {
+			// The keyboard stores a mapping whether or not it is using it.
+			m.mapping.statusMsg += " The buttons use it while the keyboard's Profile button is on."
+		}
 	case report.RollbackFailed():
 		status = "attention"
 		message = "Write failed and rollback also failed — device state is uncertain."

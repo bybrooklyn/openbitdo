@@ -73,11 +73,20 @@ func TestMappingDraft_UndoAndReset(t *testing.T) {
 // TestMappingDraft_JP108PresetsTable guards the JP108 raw-HID-usage-ID
 // preset table (unaffected by the U2 button-map encoding fix).
 func TestMappingDraft_JP108PresetsTable(t *testing.T) {
-	// "Unassigned" first, then the 16 presets from reducer.rs JP108_PRESETS.
-	if len(jp108Presets) != 17 {
-		t.Fatalf("expected unassigned plus 16 JP108 presets, got %d", len(jp108Presets))
+	// "Unassigned" first, the 16 presets from reducer.rs JP108_PRESETS, then
+	// F13-F24 by their HID usages (0x68-0x73).
+	if len(jp108Presets) != 29 {
+		t.Fatalf("expected unassigned, 16 JP108 presets and F13-F24, got %d", len(jp108Presets))
 	}
-	if jp108Presets[0] != 0x0000 || jp108Presets[1] != 0x0004 || jp108Presets[len(jp108Presets)-1] != 0x00e1 {
+	for _, usage := range jp108Presets[1:] {
+		if _, named := jp108KeyNames[usage]; !named {
+			t.Errorf("preset %#04x has no key name", usage)
+		}
+	}
+	if jp108TargetLabel(0x68) != "F13 (0x0068)" || jp108TargetLabel(0x76) != "0x0076" {
+		t.Fatal("F13 is usage 0x68; 0x76 is not F13 and must not be labelled as one")
+	}
+	if jp108Presets[0] != 0x0000 || jp108Presets[1] != 0x0004 || jp108Presets[16] != 0x00e1 || jp108Presets[28] != 0x0073 {
 		t.Fatalf("JP108 preset table doesn't match reducer.rs's exact values: %#v", jp108Presets)
 	}
 }
