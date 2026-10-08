@@ -99,14 +99,7 @@ func responsiveJP108MappingModel(t *testing.T, width, height int) Model {
 	t.Helper()
 	m, _ := responsiveModel(t, width, height)
 	m.screen = screenMapping
-	m.mapping = mappingState{
-		device: core.AppDevice{Name: "JP108", VidPid: protocol.VidPid{VID: 0x2dc8, PID: 0x5203}},
-		kind:   core.KindJP108,
-	}
-	for i := 0; i < 18; i++ {
-		m.mapping.jp108Loaded = append(m.mapping.jp108Loaded, core.DedicatedButtonMapping{Button: core.DedicatedButtonID(i), TargetHIDUsage: 0x0004})
-		m.mapping.jp108Draft = append(m.mapping.jp108Draft, core.DedicatedButtonMapping{Button: core.DedicatedButtonID(i), TargetHIDUsage: 0x0004})
-	}
+	m.mapping = keyboardMapping()
 	return m
 }
 

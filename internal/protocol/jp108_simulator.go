@@ -13,6 +13,9 @@ type JP108Simulator struct {
 	Name []byte
 	// Mappings holds, per key id, the type byte and four value bytes.
 	Mappings map[byte][5]byte
+	// Features and Volume are the stored feature flags and volume level.
+	Features byte
+	Volume   byte
 	// IgnoreWrites makes the keyboard acknowledge a mapping write without
 	// storing it, as a device that silently rejects a value would.
 	IgnoreWrites bool
@@ -57,8 +60,42 @@ func (k *JP108Simulator) Write(data []byte) (int, error) {
 			last := len(k.pending) - 1
 			k.pending[last] = k.pending[last][:k.ShortReads]
 		}
+	case 0x81: // list mapped keys
+		pairs := []byte{0x81}
+		for id := 255; id > 0; id-- {
+			if mapping, ok := k.Mappings[byte(id)]; ok && mapping != [5]byte{} && mapping != [5]byte{JP108TypeKeyboard} {
+				pairs = append(pairs, byte(id), mapping[0])
+			}
+		}
+		// Fifteen pairs fit a report; byte 31 of the data flags another.
+		for first := true; first || len(pairs) > 1; first = false {
+			chunk := pairs
+			if len(chunk) > 31 {
+				chunk = pairs[:31]
+			}
+			frame := append(append([]byte{}, chunk...), make([]byte, 32-len(chunk))...)
+			rest := pairs[len(chunk):]
+			if len(rest) > 0 {
+				frame[31] = 1
+			}
+			k.reply(frame...)
+			pairs = append([]byte{0x81}, rest...)
+			if len(rest) == 0 {
+				break
+			}
+		}
+	case 0x82: // list macros
+		k.reply(0x82)
 	case 0x88: // read feature flags
-		k.reply(0x88)
+		k.reply(0x88, k.Features)
+	case 0x78: // write feature flags
+		k.Features = data[2]
+		k.reply(0xe4, 0x08)
+	case 0x89: // read volume
+		k.reply(0x89, k.Volume)
+	case 0x79: // write volume
+		k.Volume = data[2]
+		k.reply(0xe4, 0x08)
 	case 0x70: // write profile name; length 0 clears the profile
 		length := int(data[2])
 		k.Name = append([]byte(nil), data[4:4+length]...)

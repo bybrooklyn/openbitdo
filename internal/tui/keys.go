@@ -90,6 +90,23 @@ func (m Model) viewHints() []keyHint {
 		if m.mapping.unavailable != "" || m.mapping.loading || m.mapping.err != nil {
 			return shell
 		}
+		if m.mapping.kind == core.KindJP108 {
+			if m.mapping.kb.picking {
+				return []keyHint{
+					{key: "type", label: "to search", help: "narrow the list by name"},
+					{key: move, label: "move"},
+					{key: "tab", label: "modifier", help: "hold a modifier with the key (Ctrl, Shift, Alt, Win)"},
+					{key: "enter", label: "assign"},
+					{key: "esc", label: "cancel"},
+				}
+			}
+			return append([]keyHint{
+				{key: move, label: "move", help: "move through the keys (j/k, pgup/pgdn too)"},
+				{key: choose, label: "assign", help: "choose what the key does; on a setting, change it"},
+				{key: "←→", label: "step", help: "step through the choices without opening the list"},
+				{key: "del", label: "default", help: "put the key back to its normal behaviour"},
+			}, shell...)
+		}
 		if m.mapping.previewing() {
 			return []keyHint{
 				{key: "p", label: "next slot", help: "preview the next slot"},
@@ -140,7 +157,10 @@ func (m Model) viewHints() []keyHint {
 // capturingText reports whether keystrokes are being typed into a text field,
 // in which case they are text first and shortcuts never.
 func (m Model) capturingText() bool {
-	return m.screen == screenDevices && m.devices.filtering && !m.modal.active
+	if m.modal.active {
+		return false
+	}
+	return (m.screen == screenDevices && m.devices.filtering) || (m.keyboardEditing() && m.mapping.kb.picking)
 }
 
 func renderHint(h keyHint) string {

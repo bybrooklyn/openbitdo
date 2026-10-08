@@ -384,7 +384,11 @@ func (m Model) routeMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		case screenDiagnostics:
 			next, cmd = inner.clickDiagnostics(local)
 		case screenMapping:
-			next, cmd = inner.clickMapping(local)
+			if inner.keyboardEditing() {
+				next, cmd = inner.clickKeyboard(local)
+			} else {
+				next, cmd = inner.clickMapping(local)
+			}
 		case screenSettings:
 			next, cmd = inner.clickSettings(local)
 		default:
@@ -409,6 +413,15 @@ func (m Model) routeMouseWheel(delta int) (tea.Model, tea.Cmd) {
 			inner.ensureDiagnosticsCursorVisible()
 		}
 	case screenMapping:
+		if inner.keyboardEditing() {
+			if inner.mapping.kb.picking {
+				inner.mapping.kb.pickCursor = clampInt(inner.mapping.kb.pickCursor+delta, 0, len(inner.pickerChoices())-1)
+			} else {
+				inner.mapping.cursor = clampInt(inner.mapping.cursor+delta, 0, inner.mapping.rowCount()-1)
+				inner.ensureKeyboardCursorVisible()
+			}
+			break
+		}
 		inner.mapping.cursor = clampInt(inner.mapping.cursor+delta, 0, inner.mapping.rowCount()-1)
 		inner.ensureMappingCursorVisible()
 	case screenSettings:

@@ -31,16 +31,6 @@ type autoDiagResultMsg struct {
 	err    error
 }
 
-type jp108MappingLoadedMsg struct {
-	mappings []core.DedicatedButtonMapping
-	err      error
-}
-
-type jp108ApplyResultMsg struct {
-	report core.WriteRecoveryReport
-	err    error
-}
-
 type u2ProfileLoadedMsg struct {
 	profile core.U2CoreProfile
 	err     error

@@ -183,13 +183,14 @@ func TestViewMapping_IncludesControllerDiagram(t *testing.T) {
 	t.Setenv("TERM_PROGRAM", "")
 
 	m, _ := newTestModel(t, filepath.Join(t.TempDir(), "config.toml"))
+	profile := core.U2CoreProfile{Mappings: []core.U2ButtonMapping{
+		{Button: core.AllU2Buttons[0], Target: core.U2FuncA},
+		{Button: core.AllU2Buttons[1], Target: core.U2FuncB},
+	}}
 	m.mapping = mappingState{
-		device: core.AppDevice{Name: "JP108"},
-		kind:   core.KindJP108,
-		jp108Draft: []core.DedicatedButtonMapping{
-			{Button: core.ButtonA, TargetHIDUsage: 0x0004},
-			{Button: core.ButtonB, TargetHIDUsage: 0x0005},
-		},
+		device:   core.AppDevice{Name: "Ultimate2"},
+		kind:     core.KindUltimate2,
+		u2Loaded: profile, u2Draft: profile,
 		cursor: 1,
 	}
 	view := m.viewMapping(30)

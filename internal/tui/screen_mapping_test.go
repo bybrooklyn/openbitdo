@@ -9,88 +9,6 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-// TestMappingDraft_UndoAndReset ports Rust's mapping_draft_undo_and_reset:
-// adjusting a mapping marks the draft dirty; Undo restores the prior value;
-// adjusting again and Reset also restores to the loaded baseline.
-func TestMappingDraft_UndoAndReset(t *testing.T) {
-	loaded := []core.DedicatedButtonMapping{{Button: core.ButtonA, TargetHIDUsage: 0x0004}}
-	m := Model{mapping: mappingState{
-		kind:        core.KindJP108,
-		jp108Loaded: append([]core.DedicatedButtonMapping(nil), loaded...),
-		jp108Draft:  append([]core.DedicatedButtonMapping(nil), loaded...),
-	}}
-	m.screen = screenMapping
-
-	if m.mapping.dirty() {
-		t.Fatal("fresh draft must not be dirty")
-	}
-
-	next, _ := m.updateMapping(tea.KeyMsg{Type: tea.KeyRight})
-	m = next.(Model)
-	if !m.mapping.dirty() {
-		t.Fatal("expected draft dirty after adjusting a mapping")
-	}
-	if m.mapping.jp108Draft[0].TargetHIDUsage == loaded[0].TargetHIDUsage {
-		t.Fatal("expected the target HID usage to actually change")
-	}
-
-	// Undo (virtual row buttonRows+1) restores the single edit.
-	m.mapping.cursor = m.mapping.rowCount() - 2
-	next, _ = m.updateMapping(tea.KeyMsg{Type: tea.KeyEnter})
-	m = next.(Model)
-	if m.mapping.dirty() {
-		t.Fatal("expected draft clean after undoing the only edit")
-	}
-	if !equalJP108(m.mapping.jp108Draft, loaded) {
-		t.Fatal("expected undo to restore the exact loaded mapping")
-	}
-
-	// Adjust again, then Reset (virtual row buttonRows+2) — also restores.
-	m.mapping.cursor = 0
-	next, _ = m.updateMapping(tea.KeyMsg{Type: tea.KeyRight})
-	m = next.(Model)
-	if !m.mapping.dirty() {
-		t.Fatal("expected draft dirty after a second adjustment")
-	}
-
-	m.mapping.cursor = m.mapping.rowCount() - 1
-	next, _ = m.updateMapping(tea.KeyMsg{Type: tea.KeyEnter})
-	m = next.(Model)
-	if m.mapping.dirty() {
-		t.Fatal("expected draft clean after Reset")
-	}
-	if !equalJP108(m.mapping.jp108Draft, loaded) {
-		t.Fatal("expected reset to restore the exact loaded mapping")
-	}
-
-	// Reset itself pushed a snapshot, so it must be undoable too (mirrors
-	// Rust's mapping_reset, which pushes before overwriting current).
-	if !m.mapping.canUndo() {
-		t.Fatal("expected Reset to be undoable, matching Rust's mapping_reset semantics")
-	}
-}
-
-// TestMappingDraft_JP108PresetsTable guards the JP108 raw-HID-usage-ID
-// preset table (unaffected by the U2 button-map encoding fix).
-func TestMappingDraft_JP108PresetsTable(t *testing.T) {
-	// "Unassigned" first, the 16 presets from reducer.rs JP108_PRESETS, then
-	// F13-F24 by their HID usages (0x68-0x73).
-	if len(jp108Presets) != 29 {
-		t.Fatalf("expected unassigned, 16 JP108 presets and F13-F24, got %d", len(jp108Presets))
-	}
-	for _, usage := range jp108Presets[1:] {
-		if _, named := jp108KeyNames[usage]; !named {
-			t.Errorf("preset %#04x has no key name", usage)
-		}
-	}
-	if jp108TargetLabel(0x68) != "F13 (0x0068)" || jp108TargetLabel(0x76) != "0x0076" {
-		t.Fatal("F13 is usage 0x68; 0x76 is not F13 and must not be labelled as one")
-	}
-	if jp108Presets[0] != 0x0000 || jp108Presets[1] != 0x0004 || jp108Presets[16] != 0x00e1 || jp108Presets[28] != 0x0073 {
-		t.Fatalf("JP108 preset table doesn't match reducer.rs's exact values: %#v", jp108Presets)
-	}
-}
-
 // TestMappingDraft_U2FunctionCycleCoversWholeCatalog guards the U2 function
 // cycle table against drifting out of sync with core.U2Function's catalog —
 // JP108 targets are raw HID usage IDs, U2 targets are single-bit function
@@ -130,22 +48,6 @@ func TestMappingDraft_CycleU2FunctionWrapsAndFallsBackToStart(t *testing.T) {
 	}
 	if got := cycleU2Function(u2FunctionCycle[0], -1); got != last {
 		t.Fatalf("expected wraparound past the start, got %v", got)
-	}
-}
-
-// TestMappingDraft_CycleWrapsAndFallsBackToStart mirrors reducer.rs's
-// cycle_from_table: an unrecognized current value falls back to index 0
-// before applying delta, and cycling wraps around both ends of the table.
-func TestMappingDraft_CycleWrapsAndFallsBackToStart(t *testing.T) {
-	if got := cycleFromTable(jp108Presets, 0xffff, 0); got != jp108Presets[0] {
-		t.Fatalf("expected fallback to index 0 for an unrecognized value, got 0x%04x", got)
-	}
-	last := jp108Presets[len(jp108Presets)-1]
-	if got := cycleFromTable(jp108Presets, last, 1); got != jp108Presets[0] {
-		t.Fatalf("expected wraparound past the end, got 0x%04x", got)
-	}
-	if got := cycleFromTable(jp108Presets, jp108Presets[0], -1); got != last {
-		t.Fatalf("expected wraparound past the start, got 0x%04x", got)
 	}
 }
 

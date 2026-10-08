@@ -60,20 +60,6 @@ func cmdAutoDiagnose(ctx context.Context, c *core.OpenBitdoCore, device core.App
 	}
 }
 
-func cmdJP108ReadMapping(ctx context.Context, c *core.OpenBitdoCore, target protocol.VidPid) tea.Cmd {
-	return func() tea.Msg {
-		mappings, err := c.JP108ReadDedicatedMapping(ctx, target)
-		return jp108MappingLoadedMsg{mappings: mappings, err: err}
-	}
-}
-
-func cmdJP108Apply(ctx context.Context, c *core.OpenBitdoCore, target protocol.VidPid, changes []core.DedicatedButtonMapping) tea.Cmd {
-	return func() tea.Msg {
-		report, err := c.JP108ApplyDedicatedMappingWithRecovery(ctx, target, changes, true)
-		return jp108ApplyResultMsg{report: report, err: err}
-	}
-}
-
 func cmdU2ReadProfile(ctx context.Context, c *core.OpenBitdoCore, target protocol.VidPid, slot core.U2SlotID) tea.Cmd {
 	return func() tea.Msg {
 		profile, err := c.U2ReadCoreProfile(ctx, target, slot)

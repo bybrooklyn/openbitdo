@@ -114,7 +114,8 @@ func isCommandAllowedByCapability(cap PidCapability, command CommandID) bool {
 		return cap.SupportsFirmware
 	case CommandJp108ReadDedicatedMappings, CommandJp108WriteDedicatedMapping, CommandJp108ReadFeatureFlags,
 		CommandJp108WriteFeatureFlags, CommandJp108ReadVoice, CommandJp108WriteVoice,
-		CommandJp108ReadProfileName, CommandJp108WriteProfileName:
+		CommandJp108ReadProfileName, CommandJp108WriteProfileName,
+		CommandJp108ReadMappedKeys, CommandJp108ReadMacroList:
 		return cap.SupportsJP108DedicatedMap
 	case CommandU2GetCurrentSlot, CommandU2ReadConfigSlot, CommandU2WriteConfigSlot:
 		return cap.SupportsU2SlotConfig
@@ -133,6 +134,8 @@ var jp108Commands = map[CommandID]bool{
 	CommandJp108ReadDedicatedMappings: true, CommandJp108WriteDedicatedMapping: true,
 	CommandJp108ReadFeatureFlags: true, CommandJp108WriteFeatureFlags: true,
 	CommandJp108ReadProfileName: true, CommandJp108WriteProfileName: true,
+	CommandJp108ReadMappedKeys: true, CommandJp108ReadMacroList: true,
+	CommandJp108ReadVoice: true, CommandJp108WriteVoice: true,
 }
 
 // jp108PIDs are the keyboards hardware evidence exists for.
@@ -198,7 +201,13 @@ func ValidateResponse(command CommandID, response []byte) ResponseStatus {
 		return validateJP108Reply(response, 0x88, 3)
 	case CommandJp108ReadProfileName:
 		return validateJP108Reply(response, 0x80, 3)
-	case CommandJp108WriteDedicatedMapping, CommandJp108WriteFeatureFlags, CommandJp108WriteProfileName:
+	case CommandJp108ReadMappedKeys:
+		return validateJP108Reply(response, 0x81, 3)
+	case CommandJp108ReadMacroList:
+		return validateJP108Reply(response, 0x82, 3)
+	case CommandJp108ReadVoice:
+		return validateJP108Reply(response, 0x89, 3)
+	case CommandJp108WriteDedicatedMapping, CommandJp108WriteFeatureFlags, CommandJp108WriteProfileName, CommandJp108WriteVoice:
 		// Every JP108 write is acknowledged with the same two bytes.
 		if len(response) < 3 {
 			return StatusMalformed
@@ -239,7 +248,7 @@ func ValidateResponse(command CommandID, response []byte) ResponseStatus {
 			return StatusOk
 		}
 		return StatusInvalid
-	case CommandJp108ReadVoice, CommandU2ReadConfigSlot, CommandU2ReadButtonMap:
+	case CommandU2ReadConfigSlot, CommandU2ReadButtonMap:
 		if len(response) < 12 {
 			return StatusMalformed
 		}
@@ -289,8 +298,9 @@ func minimumResponseLen(command CommandID) int {
 	switch command {
 	case CommandJp108ReadDedicatedMappings:
 		return 8
-	case CommandJp108ReadFeatureFlags, CommandJp108ReadProfileName,
-		CommandJp108WriteDedicatedMapping, CommandJp108WriteFeatureFlags, CommandJp108WriteProfileName:
+	case CommandJp108ReadFeatureFlags, CommandJp108ReadProfileName, CommandJp108ReadMappedKeys,
+		CommandJp108ReadMacroList, CommandJp108ReadVoice,
+		CommandJp108WriteDedicatedMapping, CommandJp108WriteFeatureFlags, CommandJp108WriteProfileName, CommandJp108WriteVoice:
 		return 3
 	case CommandGetPid:
 		return 24
@@ -300,7 +310,7 @@ func minimumResponseLen(command CommandID) int {
 		return 6
 	case CommandU2GetCurrentSlot:
 		return 6
-	case CommandJp108ReadVoice, CommandU2ReadConfigSlot, CommandU2ReadButtonMap:
+	case CommandU2ReadConfigSlot, CommandU2ReadButtonMap:
 		return 12
 	case CommandGetControllerVersion, CommandVersion:
 		return 5
@@ -334,6 +344,14 @@ func parseFields(command CommandID, response []byte) map[string]uint32 {
 		parsed["name_bytes"] = uint32(response[2])
 	case command == CommandJp108ReadFeatureFlags && len(response) >= 3:
 		parsed["flags"] = uint32(response[2])
+	case command == CommandJp108ReadVoice && len(response) >= 3:
+		parsed["volume"] = uint32(response[2])
+	case command == CommandJp108ReadMappedKeys && len(response) >= 3:
+		count := uint32(0)
+		for i := 2; i+1 < len(response)-1 && response[i] != 0; i += 2 {
+			count++
+		}
+		parsed["mapped_keys"] = count
 	}
 	return parsed
 }
@@ -376,7 +394,7 @@ func diagSuccessDetail(command CommandID, facts map[string]uint32) string {
 		if usage, ok := facts["usage"]; ok && usage != 0 {
 			return fmt.Sprintf("A button is assigned key %#02x", usage)
 		}
-		if kind := facts["mapping_type"]; kind != 0 && kind != jp108TypeKeyboard {
+		if kind := facts["mapping_type"]; kind != 0 && kind != uint32(JP108TypeKeyboard) {
 			return fmt.Sprintf("A button holds a mapping of type %#02x", kind)
 		}
 		return "A button is unassigned"
@@ -387,6 +405,10 @@ func diagSuccessDetail(command CommandID, facts map[string]uint32) string {
 		return "a profile is stored"
 	case CommandJp108ReadFeatureFlags:
 		return fmt.Sprintf("flags %#02x", facts["flags"])
+	case CommandJp108ReadVoice:
+		return fmt.Sprintf("volume level %d", facts["volume"])
+	case CommandJp108ReadMappedKeys:
+		return fmt.Sprintf("%d keys remapped", facts["mapped_keys"])
 	default:
 		return "ok"
 	}

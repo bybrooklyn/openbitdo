@@ -40,12 +40,20 @@ type OpenBitdoCore struct {
 	// of real HID access, without needing physical hardware. Unset in normal
 	// use, where transport() falls back to protocol.NewHidTransport().
 	transportOverride protocol.Transport
+
+	// mockKeyboard is the simulated keyboard mock mode talks to.
+	mockKeyboard *protocol.JP108Simulator
 }
 
 func (c *OpenBitdoCore) transport() protocol.Transport {
 	var t protocol.Transport
 	if c.transportOverride != nil {
 		t = c.transportOverride
+	} else if c.config.MockMode {
+		// Mock mode has no hardware, but a keyboard's profile is worth
+		// exploring: a simulated Retro 108 stands in, so the real protocol
+		// code runs against it and edits persist for the session.
+		t = c.mockKeyboard
 	} else {
 		t = protocol.NewHidTransport()
 	}
@@ -74,6 +82,7 @@ func New(config Config) *OpenBitdoCore {
 		diagCache:        make(map[diagCacheKey]DiagCacheEntry),
 		http:             &http.Client{},
 		enumerateDevices: protocol.EnumerateHIDDevices,
+		mockKeyboard:     &protocol.JP108Simulator{Volume: 3},
 	}
 	c.advancedMode.Store(config.AdvancedMode)
 	return c

@@ -248,16 +248,13 @@ func TestMouse_DiagnosticsSettingsMappingAndModalContracts(t *testing.T) {
 	}
 
 	m.screen = screenMapping
-	m.mapping = mappingState{kind: core.KindJP108}
-	for i := 0; i < 24; i++ {
-		m.mapping.jp108Draft = append(m.mapping.jp108Draft, core.DedicatedButtonMapping{Button: core.DedicatedButtonID(i), TargetHIDUsage: 0x0004})
-	}
-	for i := 0; i < 5; i++ {
+	m.mapping = keyboardMapping()
+	for i := 0; i < 15; i++ {
 		next, _ = m.Update(tea.MouseMsg{Button: tea.MouseButtonWheelDown})
 		m = next.(Model)
 	}
-	if m.mapping.cursor != 15 || m.mapping.rowOffset == 0 {
-		t.Fatalf("mapping wheel cursor=%d rowOffset=%d, want cursor=15 and scrolled viewport", m.mapping.cursor, m.mapping.rowOffset)
+	if m.mapping.cursor != 45 || m.mapping.rowOffset == 0 {
+		t.Fatalf("mapping wheel cursor=%d rowOffset=%d, want cursor=45 and scrolled viewport", m.mapping.cursor, m.mapping.rowOffset)
 	}
 
 	m.modal = discardMappingModal(discardMappingMsg{action: discardActionBack})
@@ -271,44 +268,6 @@ func TestMouse_DiagnosticsSettingsMappingAndModalContracts(t *testing.T) {
 	m = next.(Model)
 	if m.modal.active {
 		t.Fatal("cancel button click should close the modal")
-	}
-}
-
-func TestMouse_MappingUsesActualRenderedRowsAndIgnoresIndicators(t *testing.T) {
-	m, _ := newTestModel(t, filepath.Join(t.TempDir(), "config.toml"))
-	m.screen = screenMapping
-	m.mapping.kind = core.KindJP108
-	m.mapping.device = core.AppDevice{Name: "JP108", VidPid: protocol.VidPid{VID: 0x2dc8, PID: 0x5209}}
-	for i := 0; i < 18; i++ {
-		row := core.DedicatedButtonMapping{Button: core.DedicatedButtonID(i), TargetHIDUsage: 0x0004 + uint16(i)}
-		m.mapping.jp108Loaded = append(m.mapping.jp108Loaded, row)
-		m.mapping.jp108Draft = append(m.mapping.jp108Draft, row)
-	}
-	m.mapping.jp108Draft[0].TargetHIDUsage = 0x0005
-	m.mapping.cursor = 17
-	m.ensureMappingCursorVisible()
-
-	view := m.View()
-	indicatorRow := renderedRowContaining(t, view, "more above")
-	beforeCursor := m.mapping.cursor
-	next, cmd := m.Update(tea.MouseMsg{Button: tea.MouseButtonLeft, Action: tea.MouseActionPress, X: m.width - 20, Y: indicatorRow})
-	m = next.(Model)
-	if cmd != nil || m.mapping.cursor != beforeCursor || m.mapping.applying {
-		t.Fatal("clicking a mapping scroll indicator must not select or execute an action")
-	}
-
-	visibleRow := renderedRowContaining(t, m.View(), m.mappingRowText(17))
-	next, cmd = m.Update(tea.MouseMsg{Button: tea.MouseButtonLeft, Action: tea.MouseActionPress, X: m.width - 20, Y: visibleRow})
-	m = next.(Model)
-	if cmd != nil || m.mapping.cursor != 17 {
-		t.Fatalf("visible mapping row click selected cursor=%d cmd=%v, want cursor=17 and no command", m.mapping.cursor, cmd != nil)
-	}
-
-	applyRow := renderedRowContaining(t, m.View(), "Apply Changes")
-	next, cmd = m.Update(tea.MouseMsg{Button: tea.MouseButtonLeft, Action: tea.MouseActionPress, X: m.width - 20, Y: applyRow})
-	m = next.(Model)
-	if cmd == nil || !m.mapping.applying {
-		t.Fatal("clicking the rendered Apply Changes row must start the explicit mock apply")
 	}
 }
 
@@ -331,34 +290,6 @@ func TestNoticeExpiryDismissalAndReportSaveFailure(t *testing.T) {
 	m = next.(Model)
 	if m.err != nil || m.notice.message != "" {
 		t.Fatalf("persistent notice should dismiss with x, err=%v notice=%+v", m.err, m.notice)
-	}
-}
-
-func TestMappingDirtyBackRequiresDiscardConfirm(t *testing.T) {
-	loaded := []core.DedicatedButtonMapping{{Button: core.ButtonA, TargetHIDUsage: 0x0004}}
-	m := Model{width: 100, height: 30, mapping: mappingState{
-		kind:        core.KindJP108,
-		jp108Loaded: append([]core.DedicatedButtonMapping(nil), loaded...),
-		jp108Draft:  append([]core.DedicatedButtonMapping(nil), loaded...),
-	}}
-	m.screen = screenMapping
-	m.cycleMappingCursor(1)
-
-	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
-	m = next.(Model)
-	if !m.modal.active || m.screen != screenMapping {
-		t.Fatal("dirty mapping back should open a discard modal and keep the editor active")
-	}
-	box, confirm, _ := modalGeometry(m.modal, m.width, m.height)
-	next, _ = m.Update(tea.MouseMsg{Button: tea.MouseButtonLeft, Action: tea.MouseActionPress, X: box.x - 1, Y: box.y - 1})
-	m = next.(Model)
-	if !m.modal.active {
-		t.Fatal("outside modal click dismissed a safety prompt")
-	}
-	next, _ = m.Update(tea.MouseMsg{Button: tea.MouseButtonLeft, Action: tea.MouseActionPress, X: confirm.x, Y: confirm.y})
-	m = next.(Model)
-	if m.modal.active || m.screen != screenDevices {
-		t.Fatal("confirm click should discard the draft and return to Devices")
 	}
 }
 
@@ -782,49 +713,6 @@ func TestTheme_AdaptiveAndNoColorReadableDistinctions(t *testing.T) {
 	}
 	if !strings.Contains(row, "›") || !strings.Contains(row, "Deferred in 0.0.3") {
 		t.Fatalf("NO_COLOR/ascii rendering must retain glyph/text distinctions, got %q", row)
-	}
-}
-
-// TestMappingEditorSelectionIsDistinctFromHeading renders a real Mapping
-// Editor frame and checks that the selected row's styling is NOT the same
-// escape sequence as the panel heading's — i.e. the fix actually reaches the
-// screen that prompted it, not just the theme.go definitions in isolation.
-func TestMappingEditorSelectionIsDistinctFromHeading(t *testing.T) {
-	prevProfile := lipgloss.ColorProfile()
-	lipgloss.SetColorProfile(termenv.ANSI256)
-	t.Cleanup(func() { lipgloss.SetColorProfile(prevProfile) })
-
-	m, _ := newTestModel(t, filepath.Join(t.TempDir(), "config.toml"))
-	m.width = 100
-	m.mapping = mappingState{
-		device: core.AppDevice{Name: "JP108", DisplayName: "JP108", VidPid: protocol.VidPid{VID: 0x2dc8, PID: 0x5203}},
-		kind:   core.KindJP108,
-		jp108Draft: []core.DedicatedButtonMapping{
-			{Button: core.DedicatedButtonID(0), TargetHIDUsage: 0x0004},
-			{Button: core.DedicatedButtonID(1), TargetHIDUsage: 0x0005},
-		},
-		cursor: 0,
-	}
-
-	view := m.viewMapping(30)
-
-	headingRendered := stylePanelTitle.Render("Key mapping")
-	if !strings.Contains(view, headingRendered) {
-		t.Fatalf("expected the panel heading to use stylePanelTitle, got:\n%s", view)
-	}
-
-	selectedRowRendered := styleSelectedRow.Render("› " + fmt.Sprintf("%-14s → %s", fmt.Sprintf("%v", core.DedicatedButtonID(0)), jp108TargetLabel(0x0004)) + "  (←/→ to change)")
-	if !strings.Contains(view, selectedRowRendered) {
-		t.Fatalf("expected the selected row to use styleSelectedRow, got:\n%s", view)
-	}
-
-	// The actual regression: the selected row's rendered bytes must not be
-	// producible by stylePanelTitle on the same visible text (they no
-	// longer share a definition, but this checks it end to end on the real
-	// screen, not just the two style variables in isolation).
-	headingStyleOnRowText := stylePanelTitle.Render("› " + fmt.Sprintf("%-14s → %s", fmt.Sprintf("%v", core.DedicatedButtonID(0)), jp108TargetLabel(0x0004)) + "  (←/→ to change)")
-	if strings.Contains(view, headingStyleOnRowText) {
-		t.Fatal("selected row must not render with heading styling")
 	}
 }
 

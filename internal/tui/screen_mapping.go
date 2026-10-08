@@ -9,59 +9,10 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-// jp108Presets is the exact remap-target cycle from the prior Rust editor
-// (reducer.rs JP108_PRESETS) — raw HID keyboard-usage IDs.
-var jp108Presets = []uint16{
-	0x0000, // unassigned: the button does nothing
-	0x0004, 0x0005, 0x0006, 0x0007, 0x0008, 0x0009, 0x000a, 0x000b, 0x0028, 0x0029, 0x002c, 0x003a,
-	0x003b, 0x003c, 0x00e0, 0x00e1,
-	// F13-F24: keys no keyboard layout has, so a button assigned one never
-	// clashes with typing and can be bound to anything in the desktop's
-	// shortcuts. These are the HID usages; the keyboard sends the value it
-	// is given unchanged (confirmed on a Retro 108).
-	0x0068, 0x0069, 0x006a, 0x006b, 0x006c, 0x006d, 0x006e, 0x006f, 0x0070, 0x0071, 0x0072, 0x0073,
-}
-
-// jp108KeyNames names the preset targets, from the USB HID Usage Tables'
-// Keyboard/Keypad page (public USB-IF document), which is what these usage
-// IDs are.
-var jp108KeyNames = map[uint16]string{
-	0x0004: "A", 0x0005: "B", 0x0006: "C", 0x0007: "D", 0x0008: "E", 0x0009: "F", 0x000a: "G", 0x000b: "H",
-	0x0028: "Enter", 0x0029: "Escape", 0x002c: "Space", 0x003a: "F1", 0x003b: "F2", 0x003c: "F3",
-	0x00e0: "Left Ctrl", 0x00e1: "Left Shift",
-	0x0068: "F13", 0x0069: "F14", 0x006a: "F15", 0x006b: "F16", 0x006c: "F17", 0x006d: "F18",
-	0x006e: "F19", 0x006f: "F20", 0x0070: "F21", 0x0071: "F22", 0x0072: "F23", 0x0073: "F24",
-}
-
-// jp108TargetLabel shows a target as the key it is, keeping the usage ID
-// beside it; a usage outside the preset list is shown as the ID alone.
-func jp108TargetLabel(usage uint16) string {
-	if usage == 0 {
-		return "(none)"
-	}
-	if name, ok := jp108KeyNames[usage]; ok {
-		return fmt.Sprintf("%s (0x%04x)", name, usage)
-	}
-	return fmt.Sprintf("0x%04x", usage)
-}
-
-func cycleFromTable(table []uint16, current uint16, delta int) uint16 {
-	idx := 0
-	for i, u := range table {
-		if u == current {
-			idx = i
-			break
-		}
-	}
-	idx = ((idx+delta)%len(table) + len(table)) % len(table)
-	return table[idx]
-}
-
 // u2FunctionLabels names every catalog value core.U2Function defines — see
 // paddles.go. Ultimate2 targets are single-bit function-catalog bitmasks
 // (confirmed wire encoding), a completely different value space from
-// JP108's raw HID usage IDs, so this and jp108Presets/jp108TargetLabel stay
-// separate rather than sharing one generic table.
+// a keyboard's HID usages, so the two editors keep separate target lists.
 var u2FunctionLabels = map[core.U2Function]string{
 	core.U2FuncNone: "(none)",
 	core.U2FuncA:    "A", core.U2FuncB: "B", core.U2FuncX: "X", core.U2FuncY: "Y",
@@ -125,9 +76,8 @@ type mappingState struct {
 	loading bool
 	err     error
 
-	jp108Loaded []core.DedicatedButtonMapping
-	jp108Draft  []core.DedicatedButtonMapping
-	jp108Undo   [][]core.DedicatedButtonMapping
+	// kb is the keyboard editor's state, used when kind is KindJP108.
+	kb keyboardState
 
 	u2Loaded core.U2CoreProfile
 	u2Draft  core.U2CoreProfile
@@ -169,7 +119,7 @@ func (s mappingState) previewing() bool {
 func (s mappingState) rowCount() int {
 	switch s.kind {
 	case core.KindJP108:
-		return len(s.jp108Draft) + 3
+		return len(keyboardRows) + 3
 	default:
 		return len(s.u2Draft.Mappings) + len(s.u2Draft.PaddleMappings) + 3
 	}
@@ -180,29 +130,17 @@ func (s mappingState) rowCount() int {
 // pushes a snapshot, so a Reset itself is undoable).
 func (s mappingState) canUndo() bool {
 	if s.kind == core.KindJP108 {
-		return len(s.jp108Undo) > 0
+		return len(s.kb.undo) > 0
 	}
 	return len(s.u2Undo) > 0
 }
 
 func (s mappingState) dirty() bool {
 	if s.kind == core.KindJP108 {
-		return !equalJP108(s.jp108Loaded, s.jp108Draft)
+		return s.kb.dirty()
 	}
 	return !equalU2(s.u2Loaded.Mappings, s.u2Draft.Mappings) ||
 		!equalU2Paddles(s.u2Loaded.PaddleMappings, s.u2Draft.PaddleMappings)
-}
-
-func equalJP108(a, b []core.DedicatedButtonMapping) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i] != b[i] {
-			return false
-		}
-	}
-	return true
 }
 
 // cloneU2Profile makes a deep copy of a U2CoreProfile's Mappings and
@@ -238,14 +176,10 @@ func equalU2Paddles(a, b []core.U2PaddleMapping) bool {
 }
 
 func (m Model) updateMapping(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if m.mapping.kind == core.KindJP108 && m.mapping.unavailable == "" {
+		return m.updateKeyboard(msg)
+	}
 	switch msg := msg.(type) {
-	case jp108MappingLoadedMsg:
-		m.mapping.loading = false
-		m.mapping.err = msg.err
-		m.mapping.jp108Loaded = msg.mappings
-		m.mapping.jp108Draft = append([]core.DedicatedButtonMapping(nil), msg.mappings...)
-		return m, nil
-
 	case u2ProfileLoadedMsg:
 		m.mapping.loading = false
 		m.mapping.err = msg.err
@@ -254,9 +188,6 @@ func (m Model) updateMapping(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.mapping.u2Draft.Mappings = append([]core.U2ButtonMapping(nil), msg.profile.Mappings...)
 		m.mapping.u2Draft.PaddleMappings = append([]core.U2PaddleMapping(nil), msg.profile.PaddleMappings...)
 		return m, nil
-
-	case jp108ApplyResultMsg:
-		return m.handleMappingApplyResult(msg.report, msg.err)
 
 	case u2ApplyResultMsg:
 		return m.handleMappingApplyResult(msg.report, msg.err)
@@ -392,10 +323,6 @@ func (m Model) mappingRowText(i int) string {
 	buttonCount := len(m.mapping.u2Draft.Mappings)
 	var label, value string
 	switch {
-	case m.mapping.kind == core.KindJP108:
-		row := m.mapping.jp108Draft[i]
-		label = fmt.Sprintf("%v", row.Button)
-		value = jp108TargetLabel(row.TargetHIDUsage)
 	case i < buttonCount:
 		row := m.mapping.u2Draft.Mappings[i]
 		label = fmt.Sprintf("%v", row.Button)
@@ -415,12 +342,6 @@ func (m *Model) cycleMappingCursor(delta int) {
 	}
 	// Push a snapshot before mutating, mirroring Rust's adjust_mapping
 	// (reducer.rs) — every single-row edit is individually undoable.
-	if m.mapping.kind == core.KindJP108 {
-		m.mapping.jp108Undo = append(m.mapping.jp108Undo, append([]core.DedicatedButtonMapping(nil), m.mapping.jp108Draft...))
-		mapping := &m.mapping.jp108Draft[m.mapping.cursor]
-		mapping.TargetHIDUsage = cycleFromTable(jp108Presets, mapping.TargetHIDUsage, delta)
-		return
-	}
 	m.mapping.u2Undo = append(m.mapping.u2Undo, cloneU2Profile(m.mapping.u2Draft))
 	buttonCount := len(m.mapping.u2Draft.Mappings)
 	if m.mapping.cursor < buttonCount {
@@ -435,15 +356,6 @@ func (m *Model) cycleMappingCursor(delta int) {
 func (m *Model) undoMapping() {
 	// Mirrors Rust's mapping_undo: pop the last snapshot and restore it as
 	// the draft. A no-op when the undo stack is empty.
-	if m.mapping.kind == core.KindJP108 {
-		n := len(m.mapping.jp108Undo)
-		if n == 0 {
-			return
-		}
-		m.mapping.jp108Draft = m.mapping.jp108Undo[n-1]
-		m.mapping.jp108Undo = m.mapping.jp108Undo[:n-1]
-		return
-	}
 	n := len(m.mapping.u2Undo)
 	if n == 0 {
 		return
@@ -460,9 +372,6 @@ func (m Model) triggerMappingRow() (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.mapping.applying = true
-		if m.mapping.kind == core.KindJP108 {
-			return m, cmdJP108Apply(m.ctx, m.core, m.mapping.device.VidPid, m.mapping.jp108Draft)
-		}
 		p := m.mapping.u2Draft
 		// cmdU2Apply only forwards p.Mappings (button targets), not
 		// p.PaddleMappings — internal/core's real (non-mock) button-map
@@ -483,15 +392,10 @@ func (m Model) triggerMappingRow() (tea.Model, tea.Cmd) {
 	case editableRows + 2: // Reset
 		// Rust's mapping_reset pushes the current draft onto the undo stack
 		// before resetting, so a Reset is itself undoable — match that.
-		if m.mapping.kind == core.KindJP108 {
-			m.mapping.jp108Undo = append(m.mapping.jp108Undo, append([]core.DedicatedButtonMapping(nil), m.mapping.jp108Draft...))
-			m.mapping.jp108Draft = append([]core.DedicatedButtonMapping(nil), m.mapping.jp108Loaded...)
-		} else {
-			m.mapping.u2Undo = append(m.mapping.u2Undo, cloneU2Profile(m.mapping.u2Draft))
-			m.mapping.u2Draft = m.mapping.u2Loaded
-			m.mapping.u2Draft.Mappings = append([]core.U2ButtonMapping(nil), m.mapping.u2Loaded.Mappings...)
-			m.mapping.u2Draft.PaddleMappings = append([]core.U2PaddleMapping(nil), m.mapping.u2Loaded.PaddleMappings...)
-		}
+		m.mapping.u2Undo = append(m.mapping.u2Undo, cloneU2Profile(m.mapping.u2Draft))
+		m.mapping.u2Draft = m.mapping.u2Loaded
+		m.mapping.u2Draft.Mappings = append([]core.U2ButtonMapping(nil), m.mapping.u2Loaded.Mappings...)
+		m.mapping.u2Draft.PaddleMappings = append([]core.U2PaddleMapping(nil), m.mapping.u2Loaded.PaddleMappings...)
 		m.mapping.statusMsg = "Draft reset."
 	}
 	return m, nil
@@ -509,7 +413,12 @@ func (m Model) handleMappingApplyResult(report core.WriteRecoveryReport, err err
 	switch {
 	case report.WriteApplied:
 		if m.mapping.kind == core.KindJP108 {
-			m.mapping.jp108Loaded = append([]core.DedicatedButtonMapping(nil), m.mapping.jp108Draft...)
+			m.mapping.kb.loaded = cloneKeyboardProfile(m.mapping.kb.draft)
+			if m.mapping.kb.loaded.Name == "" {
+				m.mapping.kb.loaded.Name = "OpenBitdo" // created by the first write
+				m.mapping.kb.draft.Name = m.mapping.kb.loaded.Name
+			}
+			m.mapping.kb.undo = nil
 		} else {
 			m.mapping.u2Loaded = m.mapping.u2Draft
 		}
@@ -550,6 +459,9 @@ func mappingUnavailableAdvice(reason string) string {
 }
 
 func (m Model) viewMapping(height int) string {
+	if m.mapping.kind == core.KindJP108 && m.mapping.unavailable == "" {
+		return m.viewKeyboard(height)
+	}
 	var b strings.Builder
 	text := max(1, m.width-4)
 	kindLabel := "Key mapping"
@@ -620,9 +532,7 @@ func (m Model) viewMapping(height int) string {
 
 	diagramSelectedIdx := -1
 	if m.mapping.cursor < editableRows {
-		if m.mapping.kind == core.KindJP108 {
-			diagramSelectedIdx = int(m.mapping.jp108Draft[m.mapping.cursor].Button.WireIndex())
-		} else if m.mapping.cursor < buttonCount {
+		if m.mapping.cursor < buttonCount {
 			// Paddle rows (cursor >= buttonCount) have no diagram position —
 			// leave nothing highlighted rather than guess one.
 			diagramSelectedIdx = int(m.mapping.u2Draft.Mappings[m.mapping.cursor].Button.WireIndex())

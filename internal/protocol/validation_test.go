@@ -46,8 +46,8 @@ func TestCommandRegistryRequestsAreWellFormed(t *testing.T) {
 			t.Errorf("%s: report_id=0x81 but request is %d bytes, not 64", row.ID, len(row.Request))
 		}
 	}
-	if len(seen) != 39 {
-		t.Fatalf("expected 39 distinct command IDs, got %d", len(seen))
+	if len(seen) != 41 {
+		t.Fatalf("expected 41 distinct command IDs, got %d", len(seen))
 	}
 }
 

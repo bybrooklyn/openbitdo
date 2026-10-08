@@ -118,21 +118,25 @@ func TestTeatest_GamepadNavDrivesSameNavigationAsKeyboard(t *testing.T) {
 	waitForOutput(t, tm, "All checks") // only the Checks tab renders this
 }
 
-// TestTeatest_MappingEditorPresetCycling: preset cycling in the mapping
-// editor actually changes the rendered target value, using the real ported
-// preset data. The assertion checks the exact selected-row line ("...
-// (←/→ to change)" is only ever appended to the currently-selected row),
-// not a bare value — button B's mock-initial target is already 0x0005, so a
-// bare-substring check would spuriously pass without cycling ever happening.
-func TestTeatest_MappingEditorPresetCycling(t *testing.T) {
+// TestTeatest_KeyboardEditorAssignsThroughThePicker: on the keyboard's
+// Mapping tab, enter on a key opens the target picker, typing narrows it,
+// and enter assigns. The row then shows the new target with the change mark
+// ("*"), which only an actual draft change produces.
+func TestTeatest_KeyboardEditorAssignsThroughThePicker(t *testing.T) {
 	tm, _, _ := newTeatestModel(t, filepath.Join(t.TempDir(), "config.toml"), 100, 30)
 	waitForOutput(t, tm, "Retro 108 Mechanical")
 
-	pressRune(tm, '3')                                  // the Mapping tab, for the JP108 selected by default
-	waitForOutput(t, tm, "A (0x0004)  (←/→ to change)") // button A's mock-initial target, row 0 selected
+	pressRune(tm, '3') // the Mapping tab, for the keyboard selected by default
+	waitForAllOutputs(t, tm, "Key mapping", "A button")
 
-	tm.Send(tea.KeyMsg{Type: tea.KeyRight})
-	waitForOutput(t, tm, "B (0x0005)  (←/→ to change)")
+	tm.Send(tea.KeyMsg{Type: tea.KeyEnter}) // the A button row is selected first
+	waitForOutput(t, tm, "Assign A button")
+	for _, r := range "f13" {
+		pressRune(tm, r)
+	}
+	waitForOutput(t, tm, "› F13")
+	tm.Send(tea.KeyMsg{Type: tea.KeyEnter})
+	waitForOutput(t, tm, "*A button      → F13")
 }
 
 // TestTeatest_FirmwareIsNotOfferedIn010: firmware cannot run in v0.0.3, so

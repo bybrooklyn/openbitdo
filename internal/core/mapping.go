@@ -390,6 +390,8 @@ func (c *OpenBitdoCore) RestoreBackup(ctx context.Context, backupID ConfigBackup
 	defer func() { _ = session.Close() }()
 
 	switch backup.payload.kind {
+	case backupKeyboard:
+		return restoreKeyboardBackup(ctx, session, backup.payload.keyboard)
 	case backupJP108:
 		for _, entry := range backup.payload.jp108Mappings {
 			if err := session.JP108WriteDedicatedMapping(ctx, entry.Button.WireIndex(), entry.TargetHIDUsage); err != nil {
