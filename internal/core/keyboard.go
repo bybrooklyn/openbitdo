@@ -117,6 +117,9 @@ type KeyboardProfile struct {
 	Locks    KeyboardLocks
 	// Volume is the keyboard's volume level, 1 (quietest) to 5.
 	Volume int
+	// Macros are the macros the keyboard holds, by the key that plays
+	// each. A key that plays a macro does that instead of its mapping.
+	Macros map[byte]KeyMacro
 }
 
 // Target returns what key is assigned to, and whether that is an explicit
@@ -136,11 +139,14 @@ type KeyboardChanges struct {
 	Locks    *KeyboardLocks
 	Volume   *int
 	Name     *string
+	// Macros sets the macro a key plays; a nil entry removes the key's
+	// macro.
+	Macros map[byte]*KeyMacro
 }
 
 // Empty reports whether there is nothing to apply.
 func (c KeyboardChanges) Empty() bool {
-	return len(c.Mappings) == 0 && c.Locks == nil && c.Volume == nil && c.Name == nil
+	return len(c.Mappings) == 0 && len(c.Macros) == 0 && c.Locks == nil && c.Volume == nil && c.Name == nil
 }
 
 func supportsKeyboardProfile(vidPid protocol.VidPid) bool {
@@ -161,7 +167,7 @@ func (c *OpenBitdoCore) KeyboardReadProfile(ctx context.Context, vidPid protocol
 }
 
 func readKeyboardProfile(ctx context.Context, session *protocol.DeviceSession) (KeyboardProfile, error) {
-	profile := KeyboardProfile{Mappings: map[byte]KeyTarget{}}
+	profile := KeyboardProfile{Mappings: map[byte]KeyTarget{}, Macros: map[byte]KeyMacro{}}
 	var err error
 	if profile.Name, err = session.JP108ReadProfileName(ctx); err != nil {
 		return KeyboardProfile{}, errProtocol(err)
@@ -183,6 +189,17 @@ func readKeyboardProfile(ctx context.Context, session *protocol.DeviceSession) (
 		}
 		profile.Mappings[id] = target
 	}
+	macroKeys, err := session.JP108ReadMacroKeys(ctx)
+	if err != nil {
+		return KeyboardProfile{}, errProtocol(err)
+	}
+	for _, id := range macroKeys {
+		macro, err := readKeyMacro(ctx, session, id)
+		if err != nil {
+			return KeyboardProfile{}, errProtocol(fmt.Errorf("macro on key %d: %w", id, err))
+		}
+		profile.Macros[id] = macro
+	}
 	flags, err := session.JP108ReadFeatures(ctx)
 	if err != nil {
 		return KeyboardProfile{}, errProtocol(err)
@@ -203,6 +220,23 @@ func readKeyboardProfile(ctx context.Context, session *protocol.DeviceSession) (
 func (c *OpenBitdoCore) KeyboardApply(ctx context.Context, vidPid protocol.VidPid, changes KeyboardChanges) (WriteRecoveryReport, error) {
 	if !supportsKeyboardProfile(vidPid) {
 		return WriteRecoveryReport{}, errPolicyDenied(ReasonUnsupportedPid, "keyboard profiles are not supported for %s", vidPid)
+	}
+	// No macro has been written to a real keyboard yet, so real macro
+	// writes stay behind advanced mode.
+	if len(changes.Macros) > 0 && !c.MacrosWritable() {
+		return WriteRecoveryReport{}, errPolicyDenied(ReasonUnsupportedPid,
+			"writing macros is not hardware-confirmed yet; turn on advanced mode to try it")
+	}
+	for id, macro := range changes.Macros {
+		if macro == nil {
+			continue
+		}
+		if err := macro.Validate(); err != nil {
+			return WriteRecoveryReport{}, errInvalidState("macro on key %d: %v", id, err)
+		}
+		if n := len([]rune(macro.Name)); n < 1 || n > 14 {
+			return WriteRecoveryReport{}, errInvalidState("macro on key %d: a macro name is 1-14 characters", id)
+		}
 	}
 	if changes.Volume != nil && (*changes.Volume < 1 || *changes.Volume > 5) {
 		return WriteRecoveryReport{}, errInvalidState("volume level %d is out of range 1-5", *changes.Volume)
@@ -234,6 +268,15 @@ func (c *OpenBitdoCore) KeyboardApply(ctx context.Context, vidPid protocol.VidPi
 			merged[id] = target
 		}
 		changes.Mappings = merged
+		macros := make(map[byte]*KeyMacro, len(before.Macros)+len(changes.Macros))
+		for id, macro := range before.Macros {
+			macro := macro
+			macros[id] = &macro
+		}
+		for id, macro := range changes.Macros {
+			macros[id] = macro
+		}
+		changes.Macros = macros
 	}
 
 	applyErr := writeKeyboardChanges(ctx, session, changes)
@@ -264,6 +307,16 @@ func undoOf(changes KeyboardChanges, before KeyboardProfile) KeyboardChanges {
 			undo.Mappings[id] = key.Default()
 		} else {
 			undo.Mappings[id] = KeyTarget{}
+		}
+	}
+	if len(changes.Macros) > 0 {
+		undo.Macros = map[byte]*KeyMacro{}
+		for id := range changes.Macros {
+			if macro, had := before.Macros[id]; had {
+				undo.Macros[id] = &macro
+			} else {
+				undo.Macros[id] = nil
+			}
 		}
 	}
 	if changes.Locks != nil {
@@ -306,6 +359,16 @@ func writeKeyboardChanges(ctx context.Context, session *protocol.DeviceSession, 
 		if got != want && (!got.Unassigned() || !want.Unassigned()) {
 			return fmt.Errorf("readback mismatch for key %d: wrote type %#02x value % x, keyboard holds type %#02x value % x",
 				id, want.Type, want.Value, got.Type, got.Value)
+		}
+	}
+	macroIDs := make([]int, 0, len(changes.Macros))
+	for id := range changes.Macros {
+		macroIDs = append(macroIDs, int(id))
+	}
+	sort.Ints(macroIDs)
+	for _, id := range macroIDs {
+		if err := writeKeyMacro(ctx, session, byte(id), changes.Macros[byte(id)]); err != nil {
+			return fmt.Errorf("macro on key %d: %w", id, err)
 		}
 	}
 	if changes.Locks != nil {
@@ -369,6 +432,14 @@ func restoreKeyboardBackup(ctx context.Context, session *protocol.DeviceSession,
 	for id, target := range backup.Mappings {
 		changes.Mappings[id] = target
 	}
+	changes.Macros = map[byte]*KeyMacro{}
+	for id := range current.Macros {
+		changes.Macros[id] = nil
+	}
+	for id, macro := range backup.Macros {
+		macro := macro
+		changes.Macros[id] = &macro
+	}
 	locks := backup.Locks
 	changes.Locks = &locks
 	if backup.Volume >= 1 && backup.Volume <= 5 {
@@ -383,4 +454,62 @@ func restoreKeyboardBackup(ctx context.Context, session *protocol.DeviceSession,
 		return errProtocol(err)
 	}
 	return nil
+}
+
+func readKeyMacro(ctx context.Context, session *protocol.DeviceSession, key byte) (KeyMacro, error) {
+	value, err := session.JP108ReadMacroValue(ctx, key)
+	if err != nil {
+		return KeyMacro{}, err
+	}
+	macro, err := decodeKeyMacroValue(value)
+	if err != nil {
+		return KeyMacro{}, err
+	}
+	if macro.Name, err = session.JP108ReadMacroName(ctx, key); err != nil {
+		return KeyMacro{}, err
+	}
+	macro.Key = key
+	return macro, nil
+}
+
+// writeKeyMacro stores (or, for nil, removes) the macro on key and reads it
+// back.
+func writeKeyMacro(ctx context.Context, session *protocol.DeviceSession, key byte, macro *KeyMacro) error {
+	if macro == nil {
+		if err := session.JP108ClearMacro(ctx, key); err != nil {
+			return err
+		}
+		keys, err := session.JP108ReadMacroKeys(ctx)
+		if err != nil {
+			return fmt.Errorf("readback failed: %w", err)
+		}
+		for _, k := range keys {
+			if k == key {
+				return fmt.Errorf("readback mismatch: the keyboard still holds the macro")
+			}
+		}
+		return nil
+	}
+	value, err := macro.encodeValue()
+	if err != nil {
+		return err
+	}
+	if err := session.JP108WriteMacro(ctx, key, macro.Name, value); err != nil {
+		return err
+	}
+	got, err := session.JP108ReadMacroValue(ctx, key)
+	if err != nil {
+		return fmt.Errorf("readback failed: %w", err)
+	}
+	if string(got) != string(value) {
+		return fmt.Errorf("readback mismatch: wrote %d bytes, the keyboard holds %d that differ", len(value), len(got))
+	}
+	return nil
+}
+
+// MacrosWritable reports whether macro changes can be applied: always
+// against a simulated keyboard, and on a real one only in advanced mode
+// until the exchange has been confirmed on hardware.
+func (c *OpenBitdoCore) MacrosWritable() bool {
+	return c.config.MockMode || c.transportOverride != nil || c.AdvancedMode()
 }

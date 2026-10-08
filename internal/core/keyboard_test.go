@@ -114,7 +114,7 @@ func TestKeyboardClearProfileKeepsABackup(t *testing.T) {
 	if err := c.RestoreBackup(context.Background(), backupID); err != nil {
 		t.Fatal(err)
 	}
-	if keyboard.Mappings[233] != [5]byte{0x07, 0x00, 0x68} || string(keyboard.Name) != "P\x00" {
+	if keyboard.Mappings[233] != [5]byte{0x07, 0x00, 0x68} || string(keyboard.Name) != "\x00P" { // rewritten in the vendor's byte order
 		t.Fatalf("restore did not bring the profile back: name=%q mappings=%v", keyboard.Name, keyboard.Mappings)
 	}
 }
@@ -164,5 +164,81 @@ func TestMockModeHasAWorkingKeyboard(t *testing.T) {
 	profile, err := c.KeyboardReadProfile(ctx, retro108Target)
 	if err != nil || profile.Mappings[233] != KeyTargetKeyOf(0x68) {
 		t.Fatalf("mock keyboard did not keep the edit: %+v err=%v", profile, err)
+	}
+}
+
+func TestKeyboardMacrosApplyReadBackAndRestore(t *testing.T) {
+	keyboard := &protocol.JP108Simulator{}
+	c := keyboardCore(keyboard)
+	ctx := context.Background()
+
+	paste := KeyMacro{Name: "Paste twice", Repeat: 2, IntervalMillis: 250, Steps: []KeyMacroStep{
+		{Kind: StepPress, Usage: 0xe0}, {Kind: StepPress, Usage: 0x19},
+		{Kind: StepRelease, Usage: 0x19}, {Kind: StepRelease, Usage: 0xe0},
+	}}
+	long := KeyMacro{Name: "Long", Repeat: 1}
+	for i := 0; i < 40; i++ {
+		long.Steps = append(long.Steps, TypeKeys(15, byte(0x04+i%26))...)
+	}
+	report, err := c.KeyboardApply(ctx, retro108Target, KeyboardChanges{Macros: map[byte]*KeyMacro{240: &paste, 0x46: &long}})
+	if err != nil || !report.WriteApplied {
+		t.Fatalf("apply: %+v err=%v", report, err)
+	}
+
+	profile, err := c.KeyboardReadProfile(ctx, retro108Target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := profile.Macros[240]
+	if got.Name != "Paste twice" || got.Repeat != 2 || got.IntervalMillis != 250 || len(got.Steps) != 4 || got.Key != 240 {
+		t.Fatalf("K1 macro read back as %+v", got)
+	}
+	if got := profile.Macros[0x46]; len(got.Steps) != 120 || got.Summary() != long.Summary() {
+		t.Fatalf("a 120-step macro read back with %d steps", len(got.Steps))
+	}
+
+	// Removing one and renaming the profile keeps the other.
+	name := "Work"
+	if report, err := c.KeyboardApply(ctx, retro108Target, KeyboardChanges{Name: &name, Macros: map[byte]*KeyMacro{240: nil}}); err != nil || !report.WriteApplied {
+		t.Fatalf("second apply: %+v err=%v", report, err)
+	}
+	profile, _ = c.KeyboardReadProfile(ctx, retro108Target)
+	if _, still := profile.Macros[240]; still || len(profile.Macros[0x46].Steps) != 120 || profile.Name != "Work" {
+		t.Fatalf("after removing K1's macro: name=%q macros=%d", profile.Name, len(profile.Macros))
+	}
+
+	// The first backup predates both macros.
+	if err := c.RestoreBackup(ctx, report.BackupID); err != nil {
+		t.Fatal(err)
+	}
+	if len(keyboard.MacroValues) != 0 {
+		t.Fatalf("restore should remove macros that were not in the backup, left %d", len(keyboard.MacroValues))
+	}
+}
+
+func TestKeyboardMacroThatWouldMisbehaveIsNeverSent(t *testing.T) {
+	keyboard := &protocol.JP108Simulator{}
+	c := keyboardCore(keyboard)
+	stuck := KeyMacro{Name: "Stuck", Repeat: 1, Steps: []KeyMacroStep{{Kind: StepPress, Usage: 0x04}}}
+	unnamed := KeyMacro{Repeat: 1, Steps: TypeKeys(0, 0x04)}
+	for name, macro := range map[string]*KeyMacro{"a held key": &stuck, "no name": &unnamed} {
+		before := len(keyboard.Frames)
+		if _, err := c.KeyboardApply(context.Background(), retro108Target, KeyboardChanges{Macros: map[byte]*KeyMacro{240: macro}}); err == nil {
+			t.Errorf("a macro with %s must be refused", name)
+		}
+		if len(keyboard.Frames) != before {
+			t.Errorf("a macro with %s must be refused before anything is sent", name)
+		}
+	}
+}
+
+func TestRealKeyboardMacroWritesNeedAdvancedMode(t *testing.T) {
+	c := New(Config{})
+	if c.MacrosWritable() {
+		t.Fatal("macro writes to a real keyboard are unconfirmed and must be gated by default")
+	}
+	c.SetAdvancedMode(true)
+	if !c.MacrosWritable() {
+		t.Fatal("advanced mode should allow them")
 	}
 }

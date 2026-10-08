@@ -233,9 +233,12 @@ func (s *DeviceSession) DiagProbe(ctx context.Context) DiagProbeResult {
 // notAStandaloneCheck are read-class commands that are a step of a larger
 // read rather than a question with an answer of their own: sent bare, as a
 // diagnostic check would, they pause the controller's input reports, switch
-// the addressed record, or ask for zero bytes.
+// the addressed record, or ask for zero bytes, or name no key.
 var notAStandaloneCheck = map[CommandID]bool{
 	CommandU2SetReportState: true, CommandU2SelectPlatform: true, CommandU2RecordRead: true,
+	// These ask about one key's macro; with no key named there is nothing
+	// to ask.
+	CommandJp108ReadMacroName: true, CommandJp108ReadMacroValue: true,
 }
 
 type diagCheckPlan struct {

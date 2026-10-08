@@ -103,3 +103,47 @@ voice = "The commands behind the vendor's volume setting are not identified. The
 adapter = "Nothing is known about the 2.4G adapter (0x520a)."
 long_names = "A name longer than 29 bytes spans several reports; only the single-report case was exercised."
 profile_state = "Whether the Profile button's state can be read or set from the host is not known. One vendor-page input report (id 0x11) was seen when a top-row button was pressed."
+
+# Macros. Static evidence only: none of the writes below has been sent to
+# hardware. The macro list read has, on a keyboard holding no macros.
+
+[names]
+encoding = "UTF-16, high byte first, as the vendor application writes profile and macro names; the keyboard stores the bytes as given"
+compatibility = "OpenBitdo wrote profile names low byte first before this was known; a stored name whose units all have a zero second byte is read that way"
+
+[commands.read_macro_list]
+request = "82"
+reply = "82, then seven four-byte entries (key id first, zero ends the list), then a byte that is non-zero when a second report carries the eighth entry"
+hardware = "yes"
+observed = "an empty list"
+
+[commands.read_macro_name]
+request = "84, key id"
+reply = "84, key id, length, more-flag, up to 28 name bytes per report"
+hardware = "no"
+
+[commands.read_macro_value]
+request = "86, key id"
+reply = "86, key id, more-flag, offset (two bytes), length, up to 26 value bytes per report"
+hardware = "no"
+
+[commands.write_macro_name]
+request = "74, key id, length, more-flag, name bytes (28 per report)"
+reply = "e4 08"
+hardware = "no"
+
+[commands.write_macro_value]
+request = "76, key id, more-flag, offset (two bytes), length, value bytes. A value of at most 25 bytes goes in one report declaring length 26; a longer one sends 25 bytes first, then 24 per report"
+reply = "e4 08, once, after the last report"
+hardware = "no"
+
+[commands.clear_macro]
+request = "77, key id, step count"
+reply = "e4 08"
+hardware = "no"
+
+[macro_value]
+header = "01, repeat count (1-99), 0x20 when the macro repeats until stopped (repeat count then 0), step count"
+steps = "three bytes each: 0f lo hi = wait in ms; 81 usage 00 = key down; 01 usage 00 = key up; 83 usage 00 = modifier down; 03 usage 00 = modifier up"
+interval = "the pause between repeats is stored as a final wait step"
+limits = "8 macros, one per key; 200 steps; waits and intervals up to 60000 ms"

@@ -78,6 +78,9 @@ var candidateUnlockableWrites = map[CommandID]bool{
 	CommandJp108WriteDedicatedMapping: true,
 	CommandJp108WriteFeatureFlags:     true,
 	CommandJp108WriteVoice:            true,
+	CommandJp108WriteMacroName:        true,
+	CommandJp108WriteMacroValue:       true,
+	CommandJp108ClearMacro:            true,
 }
 
 func (s *DeviceSession) allowCandidateRuntimeWritePath(command CommandID, safety SafetyClass) bool {

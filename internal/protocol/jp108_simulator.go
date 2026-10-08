@@ -9,8 +9,11 @@ import "context"
 // MockTransport's fixed queue of replies, its reply depends on the request,
 // which the per-key protocol needs.
 type JP108Simulator struct {
-	// Name is the stored profile name, as UTF-16LE bytes.
+	// Name is the stored profile name, as the bytes written.
 	Name []byte
+	// MacroNames and MacroValues hold the stored macros by key id.
+	MacroNames  map[byte][]byte
+	MacroValues map[byte][]byte
 	// Mappings holds, per key id, the type byte and four value bytes.
 	Mappings map[byte][5]byte
 	// Features and Volume are the stored feature flags and volume level.
@@ -29,6 +32,8 @@ type JP108Simulator struct {
 
 	opened  bool
 	pending [][]byte
+	// staging gathers a macro value that arrives over several reports.
+	staging []byte
 }
 
 func (k *JP108Simulator) Open(context.Context, VidPid) error { k.opened = true; return nil }
@@ -84,8 +89,85 @@ func (k *JP108Simulator) Write(data []byte) (int, error) {
 				break
 			}
 		}
-	case 0x82: // list macros
-		k.reply(0x82)
+	case 0x82: // list macros: seven four-byte entries, a more-flag, then the eighth
+		var keys []byte
+		for id := 255; id > 0; id-- {
+			if _, ok := k.MacroValues[byte(id)]; ok {
+				keys = append(keys, byte(id))
+			}
+		}
+		first := make([]byte, 30)
+		first[0] = 0x82
+		for i, key := range keys {
+			if i < 7 {
+				first[1+i*4] = key
+			}
+		}
+		if len(keys) > 7 {
+			first[29] = 1
+		}
+		k.reply(first...)
+		if len(keys) > 7 {
+			k.reply(0x82, keys[7])
+		}
+	case 0x84: // read a macro's name, 28 bytes per report
+		name := k.MacroNames[data[2]]
+		for first := true; first || len(name) > 0; first = false {
+			chunk := name[:min(len(name), 28)]
+			name = name[len(chunk):]
+			more := byte(0)
+			if len(name) > 0 {
+				more = 1
+			}
+			k.reply(append([]byte{0x84, data[2], byte(len(chunk)), more}, chunk...)...)
+		}
+	case 0x86: // read a macro's value, 26 bytes per report
+		value := k.MacroValues[data[2]]
+		for offset, first := 0, true; first || offset < len(value); first = false {
+			end := min(len(value), offset+26)
+			more := byte(0)
+			if end < len(value) {
+				more = 1
+			}
+			k.reply(append([]byte{0x86, data[2], more, byte(offset), byte(offset >> 8), byte(end - offset)}, value[offset:end]...)...)
+			offset = end
+		}
+	case 0x74: // write a macro's name
+		if k.MacroNames == nil {
+			k.MacroNames = map[byte][]byte{}
+		}
+		if !k.IgnoreWrites {
+			k.MacroNames[data[2]] = append([]byte(nil), data[5:5+int(data[3])]...)
+		}
+		k.reply(0xe4, 0x08)
+	case 0x76: // write a macro's value: key, more, offset, length, bytes
+		offset := int(data[4]) | int(data[5])<<8
+		if offset == 0 {
+			k.staging = nil
+		}
+		if offset != len(k.staging) {
+			break // a chunk out of place: no acknowledgement
+		}
+		k.staging = append(k.staging, data[7:7+min(int(data[6]), 26)]...)
+		if data[3] != 0 {
+			break // more to come; acknowledged after the last report
+		}
+		value := k.staging
+		k.staging = nil
+		if len(value) >= 4 {
+			value = value[:min(len(value), 4+int(value[3])*3)]
+		}
+		if k.MacroValues == nil {
+			k.MacroValues = map[byte][]byte{}
+		}
+		if !k.IgnoreWrites {
+			k.MacroValues[data[2]] = value
+		}
+		k.reply(0xe4, 0x08)
+	case 0x77: // clear a macro
+		delete(k.MacroNames, data[2])
+		delete(k.MacroValues, data[2])
+		k.reply(0xe4, 0x08)
 	case 0x88: // read feature flags
 		k.reply(0x88, k.Features)
 	case 0x78: // write feature flags
@@ -100,7 +182,7 @@ func (k *JP108Simulator) Write(data []byte) (int, error) {
 		length := int(data[2])
 		k.Name = append([]byte(nil), data[4:4+length]...)
 		if length == 0 {
-			k.Mappings = nil
+			k.Mappings, k.MacroNames, k.MacroValues = nil, nil, nil
 		}
 		k.reply(0xe4, 0x08)
 	case 0xfa: // assign a key

@@ -115,7 +115,9 @@ func isCommandAllowedByCapability(cap PidCapability, command CommandID) bool {
 	case CommandJp108ReadDedicatedMappings, CommandJp108WriteDedicatedMapping, CommandJp108ReadFeatureFlags,
 		CommandJp108WriteFeatureFlags, CommandJp108ReadVoice, CommandJp108WriteVoice,
 		CommandJp108ReadProfileName, CommandJp108WriteProfileName,
-		CommandJp108ReadMappedKeys, CommandJp108ReadMacroList:
+		CommandJp108ReadMappedKeys, CommandJp108ReadMacroList,
+		CommandJp108ReadMacroName, CommandJp108ReadMacroValue,
+		CommandJp108WriteMacroName, CommandJp108WriteMacroValue, CommandJp108ClearMacro:
 		return cap.SupportsJP108DedicatedMap
 	case CommandU2GetConnected, CommandU2GetPhysicalMode, CommandU2SetReportState, CommandU2SelectPlatform,
 		CommandU2RecordRead, CommandU2RecordWrite, CommandU2Commit:
@@ -135,6 +137,8 @@ var jp108Commands = map[CommandID]bool{
 	CommandJp108ReadProfileName: true, CommandJp108WriteProfileName: true,
 	CommandJp108ReadMappedKeys: true, CommandJp108ReadMacroList: true,
 	CommandJp108ReadVoice: true, CommandJp108WriteVoice: true,
+	CommandJp108ReadMacroName: true, CommandJp108ReadMacroValue: true,
+	CommandJp108WriteMacroName: true, CommandJp108WriteMacroValue: true, CommandJp108ClearMacro: true,
 }
 
 // jp108PIDs are the keyboards hardware evidence exists for.
@@ -206,7 +210,12 @@ func ValidateResponse(command CommandID, response []byte) ResponseStatus {
 		return validateJP108Reply(response, 0x82, 3)
 	case CommandJp108ReadVoice:
 		return validateJP108Reply(response, 0x89, 3)
-	case CommandJp108WriteDedicatedMapping, CommandJp108WriteFeatureFlags, CommandJp108WriteProfileName, CommandJp108WriteVoice:
+	case CommandJp108ReadMacroName:
+		return validateJP108Reply(response, 0x84, 3)
+	case CommandJp108ReadMacroValue:
+		return validateJP108Reply(response, 0x86, 3)
+	case CommandJp108WriteDedicatedMapping, CommandJp108WriteFeatureFlags, CommandJp108WriteProfileName, CommandJp108WriteVoice,
+		CommandJp108WriteMacroName, CommandJp108WriteMacroValue, CommandJp108ClearMacro:
 		// Every JP108 write is acknowledged with the same two bytes.
 		if len(response) < 3 {
 			return StatusMalformed
@@ -294,7 +303,8 @@ func minimumResponseLen(command CommandID) int {
 	case CommandJp108ReadDedicatedMappings:
 		return 8
 	case CommandJp108ReadFeatureFlags, CommandJp108ReadProfileName, CommandJp108ReadMappedKeys,
-		CommandJp108ReadMacroList, CommandJp108ReadVoice,
+		CommandJp108ReadMacroList, CommandJp108ReadVoice, CommandJp108ReadMacroName, CommandJp108ReadMacroValue,
+		CommandJp108WriteMacroName, CommandJp108WriteMacroValue, CommandJp108ClearMacro,
 		CommandJp108WriteDedicatedMapping, CommandJp108WriteFeatureFlags, CommandJp108WriteProfileName, CommandJp108WriteVoice:
 		return 3
 	case CommandGetPid:

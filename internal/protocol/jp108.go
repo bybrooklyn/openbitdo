@@ -3,7 +3,6 @@ package protocol
 import (
 	"context"
 	"fmt"
-	"unicode/utf16"
 )
 
 // A JP108 keyboard (Retro 108, 0x5209) is configured over its own HID
@@ -191,7 +190,7 @@ func (s *DeviceSession) JP108ReadProfileName(ctx context.Context) (string, error
 	if err != nil {
 		return "", err
 	}
-	// Reply: report id, 0x80, length in bytes, a flag byte, then UTF-16LE.
+	// Reply: report id, 0x80, length in bytes, a flag byte, then the name.
 	raw := resp.Raw
 	length := int(raw[2])
 	if length == 0 {
@@ -201,11 +200,7 @@ func (s *DeviceSession) JP108ReadProfileName(ctx context.Context) (string, error
 	if length <= 0 {
 		return "", errMalformedResponse(CommandJp108ReadProfileName, len(raw))
 	}
-	units := make([]uint16, 0, length/2)
-	for i := 0; i < length; i += 2 {
-		units = append(units, uint16(raw[4+i])|uint16(raw[5+i])<<8)
-	}
-	return string(utf16.Decode(units)), nil
+	return jp108DecodeName(raw[4 : 4+length]), nil
 }
 
 // JP108WriteProfileName names the keyboard's profile. The name is cut to
@@ -216,18 +211,16 @@ func (s *DeviceSession) JP108WriteProfileName(ctx context.Context, name string) 
 	if err != nil {
 		return err
 	}
-	encoded := utf16.Encode([]rune(name))
+	encoded := jp108EncodeName(name)
 	if len(encoded) == 0 {
 		return errInvalidInput("a profile name cannot be empty; use JP108ClearProfile to remove the profile")
 	}
-	if len(encoded)*2 > jp108NameChunk {
-		encoded = encoded[:jp108NameChunk/2]
+	if len(encoded) > jp108NameChunk {
+		encoded = encoded[:jp108NameChunk&^1]
 	}
 	payload := append([]byte(nil), row.Request...)
-	payload[2] = byte(len(encoded) * 2)
-	for i, unit := range encoded {
-		payload[4+i*2], payload[5+i*2] = byte(unit), byte(unit>>8)
-	}
+	payload[2] = byte(len(encoded))
+	copy(payload[4:], encoded)
 	_, err = s.sendRow(ctx, row, payload)
 	return err
 }

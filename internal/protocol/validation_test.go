@@ -46,8 +46,8 @@ func TestCommandRegistryRequestsAreWellFormed(t *testing.T) {
 			t.Errorf("%s: report_id=0x81 but request is %d bytes, not 64", row.ID, len(row.Request))
 		}
 	}
-	if len(seen) != 42 {
-		t.Fatalf("expected 42 distinct command IDs, got %d", len(seen))
+	if len(seen) != 47 {
+		t.Fatalf("expected 47 distinct command IDs, got %d", len(seen))
 	}
 }
 
@@ -87,8 +87,10 @@ func TestJP108WriteNamesAProfileFirstOnlyWhenThereIsNone(t *testing.T) {
 	if err := session.JP108WriteDedicatedMapping(context.Background(), 0, 0x76); err != nil {
 		t.Fatal(err)
 	}
-	if got := string(keyboard.Name); got != "O\x00p\x00e\x00n\x00B\x00i\x00t\x00d\x00o\x00" {
-		t.Fatalf("expected a UTF-16LE profile name, got %q", got)
+	// High byte first, as the vendor's application writes names, so each
+	// program can read a name the other wrote.
+	if got := string(keyboard.Name); got != "\x00O\x00p\x00e\x00n\x00B\x00i\x00t\x00d\x00o" {
+		t.Fatalf("expected a big-endian UTF-16 profile name, got %q", got)
 	}
 	if got := keyboard.Mappings[233]; got != [5]byte{0x07, 0x00, 0x76} {
 		t.Fatalf("unexpected stored mapping for the A button: % x", got)
@@ -174,5 +176,114 @@ func TestDiagDetailOnlyClaimsAPIDThatMatchesTheDevice(t *testing.T) {
 	}
 	if got := session.diagIdentityDetail(CommandGetReportRevision, map[string]uint32{"revision": 1, "reported_pid": 0}); got != "report revision 1" {
 		t.Fatalf("a non-matching PID must be left out: %q", got)
+	}
+}
+
+func TestJP108NamesReadInEitherByteOrder(t *testing.T) {
+	for stored, want := range map[string]string{
+		"\x00M\x00i\x00n\x00e":     "Mine", // the vendor's order
+		"M\x00i\x00n\x00e\x00":     "Mine", // what OpenBitdo wrote before
+		"\x91\x4d\x7f\x6e\x00\x31": "配置1",
+		"":                         "",
+	} {
+		keyboard := &JP108Simulator{Name: []byte(stored)}
+		got, err := jp108Session(t, keyboard).JP108ReadProfileName(context.Background())
+		if err != nil || got != want {
+			t.Errorf("stored % x read as %q (err %v), want %q", stored, got, err, want)
+		}
+	}
+}
+
+func TestJP108MacroRoundTripsShortAndLong(t *testing.T) {
+	macroSession := func(keyboard *JP108Simulator) *DeviceSession {
+		config := fastRetryConfig()
+		config.Experimental = true
+		return openSession(t, keyboard, 0x5209, config)
+	}
+	value := func(steps int) []byte {
+		v := []byte{0x01, 1, 0, byte(steps)}
+		for i := 0; i < steps; i++ {
+			v = append(v, 0x81-byte(i%2)*0x80, 0x04+byte(i/2%20), 0)
+		}
+		return v
+	}
+	ctx := context.Background()
+	for _, steps := range []int{1, 7, 8, 15, 16, 200} {
+		keyboard := &JP108Simulator{}
+		session := macroSession(keyboard)
+		want := value(steps)
+		if err := session.JP108WriteMacro(ctx, 240, "Burst", want); err != nil {
+			t.Fatalf("%d steps: write: %v", steps, err)
+		}
+		if got := keyboard.MacroValues[240]; string(got) != string(want) {
+			t.Fatalf("%d steps: keyboard stored %d bytes, want %d", steps, len(got), len(want))
+		}
+		keys, err := session.JP108ReadMacroKeys(ctx)
+		if err != nil || len(keys) != 1 || keys[0] != 240 {
+			t.Fatalf("%d steps: macro keys = %v err=%v", steps, keys, err)
+		}
+		name, err := session.JP108ReadMacroName(ctx, 240)
+		if err != nil || name != "Burst" {
+			t.Fatalf("%d steps: name = %q err=%v", steps, name, err)
+		}
+		got, err := session.JP108ReadMacroValue(ctx, 240)
+		if err != nil || string(got) != string(want) {
+			t.Fatalf("%d steps: read back %d bytes (err %v), want %d", steps, len(got), err, len(want))
+		}
+		if keyboard.Name == nil {
+			t.Fatal("a macro is held in a profile; one must be created first")
+		}
+	}
+
+	// A single-report value: 0x76, key, no more, offset 0, length 26.
+	keyboard := &JP108Simulator{Name: []byte("\x00P")}
+	session := macroSession(keyboard)
+	if err := session.JP108WriteMacro(ctx, 233, "One", value(2)); err != nil {
+		t.Fatal(err)
+	}
+	last := keyboard.Frames[len(keyboard.Frames)-1]
+	if want := []byte{0x52, 0x76, 233, 0, 0, 0, 26, 0x01, 1, 0, 2, 0x81, 0x04, 0}; string(last[:14]) != string(want) {
+		t.Fatalf("value frame = % x, want % x", last[:14], want)
+	}
+
+	// Replacing a macro clears the old one first; clearing removes it.
+	if err := session.JP108WriteMacro(ctx, 233, "Two", value(1)); err != nil {
+		t.Fatal(err)
+	}
+	if string(keyboard.MacroNames[233]) != "\x00T\x00w\x00o" || len(keyboard.MacroValues[233]) != 7 {
+		t.Fatalf("replacement stored as %q / % x", keyboard.MacroNames[233], keyboard.MacroValues[233])
+	}
+	if err := session.JP108ClearMacro(ctx, 233); err != nil {
+		t.Fatal(err)
+	}
+	if keys, _ := session.JP108ReadMacroKeys(ctx); len(keys) != 0 {
+		t.Fatalf("after clear the keyboard still lists %v", keys)
+	}
+}
+
+func TestJP108MacroLimits(t *testing.T) {
+	config := fastRetryConfig()
+	config.Experimental = true
+	keyboard := &JP108Simulator{MacroValues: map[byte][]byte{}}
+	for id := byte(10); id < 18; id++ {
+		keyboard.MacroValues[id] = []byte{1, 1, 0, 1, 0x81, 4, 0}
+	}
+	session := openSession(t, keyboard, 0x5209, config)
+	ctx := context.Background()
+	one := []byte{1, 1, 0, 1, 0x81, 4, 0}
+	if keys, err := session.JP108ReadMacroKeys(ctx); err != nil || len(keys) != 8 {
+		t.Fatalf("expected eight macro keys across two reports, got %v err=%v", keys, err)
+	}
+	if err := session.JP108WriteMacro(ctx, 99, "Ninth", one); err == nil {
+		t.Fatal("a ninth macro must be refused")
+	}
+	if err := session.JP108WriteMacro(ctx, 10, "Again", one); err != nil {
+		t.Fatalf("replacing one of the eight must work: %v", err)
+	}
+	if err := session.JP108WriteMacro(ctx, 10, "", one); err == nil {
+		t.Fatal("a macro needs a name")
+	}
+	if err := session.JP108WriteMacro(ctx, 10, "Bad", []byte{1, 1, 0, 2, 0x81, 4, 0}); err == nil {
+		t.Fatal("a value whose step count disagrees with its length must be refused")
 	}
 }
