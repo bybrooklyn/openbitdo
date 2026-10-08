@@ -53,11 +53,13 @@ func friendlyDeviceName(product string, profile protocol.DeviceProfile) string {
 	return strings.TrimPrefix(profile.Name, "PID_")
 }
 
-// cleanProductName tidies an OS-reported product string. Some 8BitDo devices
-// repeat the vendor ("8BitDo 8BitDo Retro 108 Keyboard").
+// cleanProductName tidies an OS-reported product string by dropping the
+// vendor prefix, which some devices even repeat ("8BitDo 8BitDo Retro 108
+// Keyboard"). Every device listed is an 8BitDo one, so the prefix only
+// costs room; this also matches how the catalog names devices.
 func cleanProductName(product string) string {
 	fields := strings.Fields(product)
-	for len(fields) > 1 && strings.EqualFold(fields[0], fields[1]) {
+	for len(fields) > 1 && strings.EqualFold(fields[0], "8BitDo") {
 		fields = fields[1:]
 	}
 	return strings.Join(fields, " ")

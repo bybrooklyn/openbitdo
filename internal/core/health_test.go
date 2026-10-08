@@ -27,7 +27,8 @@ func attachedHardware() []protocol.EnumeratedDevice {
 func TestListDevicesReportsNamesAndConfigChannel(t *testing.T) {
 	c := New(Config{})
 	c.enumerateDevices = attachedHardware
-	devices, err := c.ListDevices(context.Background())
+	listDevices := c.ListDevices
+	devices, err := listDevices(context.Background())
 	if err != nil || len(devices) != 2 {
 		t.Fatalf("expected two devices, got %+v err=%v", devices, err)
 	}
@@ -35,12 +36,12 @@ func TestListDevicesReportsNamesAndConfigChannel(t *testing.T) {
 	for _, d := range devices {
 		byPID[d.VidPid.PID] = d
 	}
-	if got := byPID[0x6013]; got.DisplayName != "8BitDo Ultimate 2" || got.ConfigChannel != ChannelPresent {
+	if got := byPID[0x6013]; got.DisplayName != "Ultimate 2" || got.ConfigChannel != ChannelPresent {
 		t.Fatalf("unexpected controller: %+v", got)
 	}
-	// The vendor name repeated by the device is collapsed, and a device with
+	// The vendor prefix the device repeats is dropped, and a device with
 	// no 0xffa0 interface is known to be unreachable before anything is sent.
-	if got := byPID[0x5209]; got.DisplayName != "8BitDo Retro 108 Keyboard" || got.ConfigChannel != ChannelAbsent {
+	if got := byPID[0x5209]; got.DisplayName != "Retro 108 Keyboard" || got.ConfigChannel != ChannelAbsent {
 		t.Fatalf("unexpected keyboard: %+v", got)
 	}
 }
@@ -114,18 +115,26 @@ func TestHealthReflectsTheLastProbeNotTheSupportTier(t *testing.T) {
 func TestProbeFailureIsCachedSoItIsNotRetriedEveryRescan(t *testing.T) {
 	c := New(Config{})
 	c.transportOverride = &failingOpenTransport{}
+	c.enumerateDevices = attachedHardware // still plugged in: a failure, not a disconnect
 	device := AppDevice{VidPid: ultimate2, Serial: "A"}
 
 	_, err := c.DiagProbeCached(context.Background(), device)
 	var coreErr *Error
-	if !errors.As(err, &coreErr) {
-		t.Fatalf("expected a core error, got %v", err)
+	if !errors.As(err, &coreErr) || coreErr.Kind != KindProtocol {
+		t.Fatalf("expected a protocol error for a device that is still present, got %v", err)
 	}
 	if !c.HasDiagnosed(device) {
 		t.Fatal("a failed probe must be remembered, or every device reload re-opens the device")
 	}
 	if _, again := c.DiagProbeCached(context.Background(), device); again == nil {
 		t.Fatal("the cached entry must return the cached failure")
+	}
+
+	// Unplugged, the same failure is a disconnect.
+	c.ForgetFailedDiags()
+	c.enumerateDevices = func() []protocol.EnumeratedDevice { return nil }
+	if _, err := c.DiagProbeCached(context.Background(), device); !errors.As(err, &coreErr) || coreErr.Kind != KindDeviceDisconnected {
+		t.Fatalf("expected a disconnect once the device is no longer enumerated, got %v", err)
 	}
 }
 

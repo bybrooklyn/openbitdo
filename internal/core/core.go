@@ -153,6 +153,18 @@ func configChannelStates(devices []protocol.EnumeratedDevice) map[protocol.VidPi
 	return states
 }
 
+// devicePresent re-enumerates to tell a device that was unplugged apart from
+// one that is still there but failed. It goes through enumerateDevices, the
+// same seam ListDevices uses, so a test's device set answers this too.
+func (c *OpenBitdoCore) devicePresent(target protocol.VidPid) bool {
+	for _, device := range c.enumerateDevices() {
+		if device.VidPid == target {
+			return true
+		}
+	}
+	return false
+}
+
 func stablePhysicalDeviceKey(device protocol.EnumeratedDevice) (string, bool) {
 	serial := strings.TrimSpace(device.Serial)
 	if serial != "" {
@@ -272,7 +284,7 @@ func (c *OpenBitdoCore) DiagProbe(ctx context.Context, target protocol.VidPid) (
 	session, err := protocol.NewDeviceSession(ctx, c.transport(), target,
 		protocol.SessionConfig{Experimental: true, RetryPolicy: protocol.DefaultRetryPolicy(), TimeoutProfile: protocol.DefaultTimeoutProfile(), TraceEnabled: true})
 	if err != nil {
-		if !protocol.IsDevicePresent(target) {
+		if !c.devicePresent(target) {
 			return protocol.DiagProbeResult{}, errDeviceDisconnected(target)
 		}
 		return protocol.DiagProbeResult{}, errProtocol(err)
