@@ -21,6 +21,11 @@ const (
 	// A JP108 keyboard's configuration interface declares usage page 0x8c
 	// (captured from a Retro 108, 0x5209), not the 0xffa0 page controllers use.
 	jp108ConfigUsagePage uint16 = 0x008c
+
+	// A Retro R8 mouse and its receiver are configured on usage page
+	// 0xff00, by the vendor library's choice of interface; not seen on a
+	// real one.
+	retroMouseConfigUsagePage uint16 = 0xff00
 )
 
 // configUsageFor is the usage page/usage of the HID interface configuration
@@ -31,6 +36,8 @@ func configUsageFor(target VidPid) (page, usage uint16) {
 		return jp108ConfigUsagePage, vendorConfigUsage
 	case sharedConfigPIDs[target.PID]:
 		return sharedConfigUsagePage, vendorConfigUsage
+	case retroMousePIDs[target.PID]:
+		return retroMouseConfigUsagePage, vendorConfigUsage
 	}
 	return vendorConfigUsagePage, vendorConfigUsage
 }

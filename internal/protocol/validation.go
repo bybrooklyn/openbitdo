@@ -87,6 +87,11 @@ var recordKeyboardReadCommands = map[CommandID]bool{
 // candidate-readonly devices: a fixed read whitelist, plus writes only
 // through the write-unlock ceremony.
 func isCommandAllowedForCandidatePID(pid uint16, command CommandID, safety SafetyClass, writeUnlocked bool) bool {
+	// A mouse is asked nothing but the mouse commands, the identity
+	// queries included: the vendor library never sends it one.
+	if mousePIDs[pid] {
+		return isMouseCommand(command) && (safety == SafeRead || (safety == SafeWrite && writeUnlocked && candidateUnlockableWrites[command]))
+	}
 	if safety == SafeWrite {
 		return writeUnlocked &&
 			(standardCandidatePIDs[pid] || jpCandidatePIDs[pid] || pidWithSlotConfigCandidate[pid]) &&
@@ -141,7 +146,7 @@ func isCommandAllowedByCapability(cap PidCapability, command CommandID) bool {
 		CommandKbRecordLightsRead, CommandKbRecordLightsBegin, CommandKbRecordLightsWrite:
 		return cap.SupportsRecordKeyboard
 	default:
-		return false
+		return isMouseCommand(command) && cap.SupportsMouse
 	}
 }
 
@@ -192,6 +197,9 @@ var ds4BootAllowed = map[CommandID]bool{
 // known about the specific device. A JP108 keyboard only takes its own
 // commands (and, once firmware is enabled, its own boot/firmware ones).
 func isCommandAllowedForDevice(target VidPid, family ProtocolFamily, command CommandID) bool {
+	if mousePIDs[target.PID] {
+		return isMouseCommand(command)
+	}
 	if jp108FramedPIDs[target.PID] {
 		switch command {
 		case CommandJp108EnterBootloader, CommandJp108ExitBootloader, CommandJp108FirmwareChunk, CommandJp108FirmwareCommit:
@@ -299,6 +307,24 @@ func ValidateResponse(command CommandID, response []byte) ResponseStatus {
 			return StatusOk
 		}
 		return StatusInvalid
+	case CommandMouseRecordRead, CommandMouseRecordWrite:
+		// A Riviera mouse answers as a record keyboard does.
+		if len(response) < kbRecordDataOffset {
+			return StatusMalformed
+		}
+		cmd, _ := kbRecordCommandCode(command)
+		if _, _, ok := kbRecordReplyFor(response, cmd); ok {
+			return StatusOk
+		}
+		return StatusInvalid
+	case CommandMouseReceiverLinked:
+		if len(response) <= mouseReplyData {
+			return StatusMalformed
+		}
+		if mouseReceiverReplyOK(response) {
+			return StatusOk
+		}
+		return StatusInvalid
 	case CommandGetControllerVersion, CommandVersion:
 		if len(response) < 5 {
 			return StatusMalformed
@@ -315,6 +341,17 @@ func ValidateResponse(command CommandID, response []byte) ResponseStatus {
 	case CommandEnterBootloaderA, CommandEnterBootloaderB, CommandEnterBootloaderC, CommandExitBootloader:
 		return StatusOk
 	default:
+		// A Retro R8 mouse's reply repeats the request's group and
+		// command; anything else is a stray report or another reply.
+		if group, cmd, op, ok := mouseCommandCode(command); ok {
+			if len(response) < mouseReplyData {
+				return StatusMalformed
+			}
+			if _, answers := mouseReplyFor(response, group, cmd, op); answers {
+				return StatusOk
+			}
+			return StatusInvalid
+		}
 		if response[0] == 0x02 {
 			return StatusOk
 		}
@@ -360,9 +397,16 @@ func minimumResponseLen(command CommandID) int {
 		CommandKbRecordMacroRead, CommandKbRecordMacroErase, CommandKbRecordMacroWrite,
 		CommandKbRecordLightsRead, CommandKbRecordLightsBegin, CommandKbRecordLightsWrite:
 		return kbRecordDataOffset
+	case CommandMouseRecordRead, CommandMouseRecordWrite:
+		return kbRecordDataOffset
+	case CommandMouseReceiverLinked:
+		return mouseReplyData + 1
 	case CommandGetControllerVersion, CommandVersion:
 		return 5
 	default:
+		if isMouseCommand(command) {
+			return mouseReplyData
+		}
 		return 2
 	}
 }

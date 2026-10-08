@@ -1,0 +1,125 @@
+# Sanitized static dirty-room dossier
+
+dossier_id = "DOS-5205-MOUSE"
+pid_hex = "0x5205"
+operation_group = "Mouse"
+command_id = ["MouseReadProfileName", "MouseWriteProfileName", "MouseClearProfile", "MouseReadButtons", "MouseWriteButton", "MouseReadLeftHanded", "MouseWriteLeftHanded", "MouseReadLiftOff", "MouseWriteLiftOff", "MouseReadWheelSpeed", "MouseWriteWheelSpeed", "MouseReadWheelDirection", "MouseWriteWheelDirection", "MouseReadDpi", "MouseWriteDpi", "MouseReadDpiStage", "MouseWriteDpiStage", "MouseReadPollingRate", "MouseWritePollingRate", "MouseReadMacro", "MouseWriteMacro", "MouseReceiverLinked", "MouseRecordRead", "MouseRecordWrite"]
+request_shape = "Retro R8: 64-byte output report with no report id: 01, group u8, command u8, op u8 (1 read, 4 write), then data. Riviera mouse: a record keyboard's 64-byte report 0x81 (81 04, cmd, sub, len, sum, offset u32, up to 53 data bytes)"
+response_shape = "Retro R8: 64-byte input report with no report id: mark u8 (0x21 by cable, 0x01 through the receiver), group, command, flags u8, then data from byte 4. Riviera mouse: 02 04 03, the cmd echoed, len, five more bytes, data from byte 10"
+validator_rules = ["Retro R8: byte0 == 0x21 for 0x5205, 0x01 for 0x5206", "byte1 == the request's group", "byte2 == the request's command", "byte3 has the request's op bit set", "receiver link: byte0 has bit 1 or 2 set, byte1 == 0x03, byte2 == 0x0a, byte3 == 0x11", "Riviera mouse: as DOS-2028-KB-RECORD"]
+retry_behavior = "the vendor flow repeats an exchange, reads and writes alike, up to 30 times, polling for the reply up to 10 times each, and waits 10 ms between sending and reading; its profile read waits 100 ms before each setting. This implementation repeats reads only"
+failure_signatures = ["timeout", "reply to a different command", "reply with the other connection's mark"]
+evidence_source = "static"
+confidence = "inferred"
+requirement_ids = ["REQ-DR-001", "REQ-DR-002", "REQ-PROM-001", "REQ-PROM-002"]
+class_family = "Mice: Retro R8 mouse (0x5205) and its 2.4G receiver (0x5206); Riviera mouse (0x205d)"
+notes = "Static only. Nothing here has been exchanged with hardware; every command below is hardware = no. 0x5205 and 0x5206 are detect-only in pid_matrix.csv and 0x205d has no row there, so nothing is sent to any of them."
+
+# How this was obtained. Framing, command numbers and layouts were worked
+# out from static analysis of the vendor's Windows application (V1.37) in a
+# scratch directory outside this repository. No vendor code is reproduced
+# here; this file records wire facts only.
+
+[transport]
+interface = "Retro R8 and its receiver: the HID interface with usage page 0xff00, usage 0x0001. Riviera mouse: usage page 0xffa0, usage 0x0001"
+report_id = "Retro R8: none. The vendor flow writes 65 bytes starting with a zero and discards the first byte of what it reads"
+ops = "1 read, 4 write. A reply is accepted when its flags byte has the op's bit; the full value a mouse sends is not known (the receiver's own reply to a read is 0x11)"
+commit = "none: no start, commit or save command exists; each write stands alone"
+third_mouse = "the SN30 Pro mouse (0x2076, receiver 0x2075) is driven by a different library with a command table that could not be established; not covered"
+riviera_adapter = "a Riviera mouse reached through the 0x2060 adapter is sent 0x44 as the second request byte instead of 0x04; not implemented"
+
+[commands.profile_name]
+read = "group 6, command 0x1c, op 1; data: 00 00, then u16 = block << 5 | 10. Reply data: two bytes, the same kind of word (its low byte taken as the length sent), then ten bytes. Blocks 0 and 1 give the 20-byte name; reading stops after a block whose length byte is under 10"
+write = "group 6, command 0x1c, op 4; data: 00 00, u16 = block << 5 | length (at most 10), then the bytes"
+encoding = "20 bytes, UTF-16 big-endian, zero padded (ten characters). A name whose first two bytes are zero means the mouse holds no profile: the vendor flow then reads nothing else and shows defaults"
+hardware = "no"
+
+[commands.clear_profile]
+request = "group 1, command 0x33, op 4, no data"
+notes = "Sent by the vendor flow's reset. What it does to each setting is not known."
+hardware = "no"
+
+[commands.buttons]
+read = "group 6, command 0x14, op 1; data: 09, first button, 02. Reply data: three bytes, then two entries of six: macro switch u8, a byte the vendor flow ignores, function u32. Asked for buttons 1, 3 and 5"
+write = "group 6, command 0x10, op 4; data: macro switch u8, button u8 (1-6), function u32"
+buttons = "1 right, 2 wheel click, 3 to 6 the four further buttons; the left button is not assignable. Which physical button is 3, 4, 5 or 6 is not established: the vendor's own names for them disagree"
+function = "a plain number from the mouse's function table, not packed: 0 nothing, 1 left, 2 right, 3 middle, 4 and 5 the side buttons, 7 play/pause, 8 next, 9 previous, 11 mute, 12 volume up, 13 volume down, 14 mail, 15 calculator, 16 explorer, 32 to 35 wheel steps, 36 double click, 71 to 78 shifted symbols, 83 browser, 88 and 89 brightness, 109 to 125 number pad, 127 menu, 128 to 163 letters and digits (N before M, X where S would be), 164 to 175 F1-F12, 176 to 207 editing keys, punctuation and modifiers, 209 grave, 211 to 215 home, end, print screen, scroll lock, pause, 230 tilde, 241 to 252 F13-F24. Others exist (DPI and polling rate switches among them) that the vendor flow never assigns"
+defaults = "buttons 1 to 6: 2, 3, 5, 4, 0, 0"
+macro_switch = "1 makes button 3 to 6 play its macro; the function sent with it is the button's default"
+hardware = "no"
+
+[commands.one_byte_settings]
+left_handed = "group 6, command 0x27; 0 right-handed, 1 left-handed"
+lift_off = "group 6, command 0x26; 1 for 1.0 mm, 2 for 2.0 mm"
+wheel_speed = "group 6, command 0x24; 0 to 14. The vendor flow shows a larger value read as 14"
+wheel_direction = "group 6, command 0x23; 0 standard, 1 natural"
+shape = "op 1 with no data reads the value as the first data byte; op 4 with one data byte writes it"
+hardware = "no"
+
+[commands.dpi]
+read = "group 6, command 0x28, op 1; data: axis (0 X, 1 Y). Reply data: a byte, the mask, six u16 values"
+write = "group 6, command 0x28, op 4; data: axis, mask, six u16 values; always all six"
+x_mask = "bit n set: stage n+1 is switched on. 0x3f in a new profile; the vendor flow keeps at least one on"
+y_mask = "bit n set: stage n+1 has a vertical value of its own. 0 in a new profile. The Y values are stored either way"
+values = "DPI as a plain u16; the vendor flow offers 50 to 26000 in steps of 50; 800, 1200, 1600, 2400, 3200, 6400 in a new profile"
+hardware = "no"
+
+[commands.dpi_stage]
+read = "group 6, command 0x12, op 1, no data; the stage in use (from 0) is the second data byte"
+write = "group 6, command 0x12, op 4; data: 06, stage (0-5), that stage's X value u16"
+notes = "The vendor flow sends it when a stage is picked, switched on or off, or given a Y value of its own. This implementation also sends it when the X value of the stage in use changes, since the command carries that value (inferred)."
+hardware = "no"
+
+[commands.polling_rate]
+read = "group 6, command 0x0d, op 1, no data. Reply data: rate count u8, rate in use u8 (from 0), two bytes the vendor flow ignores, six u16 rates from byte 4"
+write = "group 6, command 0x0d, op 4; 18 data bytes: rate count, rate in use, four zero bytes, six u16 rates from byte 6; the sixth is left zero unless the rate count is 6"
+inconsistency = "the table is read at byte 4 and written at byte 6. Whether the mouse lays the two out differently, or the vendor flow shifts the table by one rate every time it writes, cannot be told without hardware. Both are reproduced as they are, and the table is compared on readback"
+rates = "the vendor screen names the rate in use by its place (0 to 5: 250, 500, 1000, 2000, 4000, 8000 Hz) and passes the count and the table back as read. 6 rates, the second in use, in a new profile"
+count = "never interpreted by the vendor screen. Taken here as how many rates the mouse has (inferred from the sixth rate being written only when it is 6): a rate beyond it is refused"
+hardware = "no"
+
+[commands.macro]
+slots = "four, one for each of buttons 3 to 6, numbered 1 to 4 in that order"
+header_read = "group 6, command 0x0f, op 1; data: 01, 00, button. Reply data: a byte, record count u8, a byte, cycles u16, three bytes, a byte, interval ms u16 (at bytes 1, 3 and 9)"
+header_write = "op 4; data: 01, record count, button, cycles u16, the macro's number, two zero bytes, 0x20, interval ms u16"
+name_read = "op 1; data: 04, button, block x 8. Reply data: three bytes, then ten bytes. The vendor flow reads blocks 0 and 1 only: 20 of the 30 bytes"
+name_write = "op 4; data: 04, button, block x 8, ten bytes; blocks 0, 1 and 2"
+records_read = "op 1; data: 02, 00, 00, first record, how many (at most 2). Reply data: five bytes, then the records. No button is named: the request follows the header read"
+records_write = "op 4; data: 02, 00, 00, first record, how many (at most 2), the records. The last report starts 03 and carries the u16 sum of every record byte in place of the two zero bytes"
+record = "five bytes: state u8 (10 key down, 2 key up, 15 mouse button down, 7 mouse button up), code u16 (a HID keyboard usage, 0x20e1 for #, or mouse button 0 to 4), delay ms u16 (10 stored for none; up to 60000)"
+limits = "80 records; the vendor flow records at most 79. Cycles 1 to 99, or 0xffff for as long as the button is held; interval up to 60000 ms"
+name = "30 bytes, UTF-16 big-endian. Since only 20 can be read back, this implementation accepts ten characters"
+erase = "none: taking a macro off a button rewrites only the button's assignment"
+hardware = "no"
+
+[commands.receiver_link]
+request = "sent to the receiver itself: 06 03 0a 01, the rest zero"
+reply = "byte 0 with bit 1 or 2 set, 03, 0a, 11, then 1 when a mouse is linked"
+notes = "The vendor flow asks before it offers the mouse behind a receiver at all. What a receiver answers to the mouse's commands while the mouse is off is not known."
+hardware = "no"
+
+[retro_profile]
+read_order = "name; then, only when there is one: left-handed, buttons 1-2, 3-4, 5-6, lift-off, wheel speed, wheel direction, X stages, Y stages, polling rate, then for each of buttons 3 to 6 that plays a macro its header, name and records. The stage in use is read separately"
+write_order = "a whole profile: name, left-handed, buttons 1 to 6, lift-off, wheel speed, wheel direction, X stages, Y stages, polling rate, then the macro of each button that plays one"
+single_settings = "a change to one setting sends that setting's write alone"
+
+[riviera]
+record = "140 bytes, little-endian, one profile, read with cmd 2 and written with cmd 1 by byte range as in DOS-2028-KB-RECORD"
+layout = "0x00 mark u32; 0x04 name 32 bytes (UTF-16 big-endian); 0x24 a byte never used; 0x25 DPI stage in use u8; 0x26 six stages of five bytes (on u8, X u16, Y u16); 0x44 wheel direction u8; 0x45 wheel speed u8; 0x46 polling rate u16 in Hz; 0x48 lift-off u8; 0x49 left-handed u8; 0x4a six spare bytes; 0x50 five button entries of twelve bytes"
+valid_flag = "0x20200902 marks the record as holding a profile; the vendor flow shows defaults for any other value and creates a profile by writing the whole record"
+ranges_written = "the whole record; the name (32 at 0x04); the stage in use (1 at 0x25); one stage (5 at 0x26 + 5 x stage) or all six (30 at 0x26); 1 byte at 0x44, 0x45, 0x48, 0x49; 2 bytes at 0x46; one button entry (12 at 0x50 + 12 x button)"
+stages = "on is 0 or 1 for each stage; Y is always written equal to X. 50 upwards in steps of 50; the vendor slider stops at 12000 and its text box at 26000, and 12000 is used here"
+polling_rate = "250, 500 or 1000; 500 in a new profile"
+lift_off = "the vendor screen hides this setting for the Riviera mouse; 1 in a new profile; kept as stored here"
+buttons = "entries in the order left (own code 232), right (234), wheel click (233), button 4 (236), button 5 (235); each is a record keyboard key entry: own code u8, three unused bytes, target u32, kind u32. The vendor screen lets only right and wheel click be reassigned, to the keyboard, media and mouse targets of DOS-2028-KB-RECORD; no macros"
+does_nothing = "written as target 243 with kind 1. The vendor screen shows kind 6 as doing nothing when it reads; whether the mouse rewrites the kind is not known. An entry of kind 6 is kept as stored here"
+new_profile = "mark; name; every stage on at 800, 1200, 1600, 2400, 3200, 6400; polling rate 500; lift-off 1; every button as itself; everything else zero"
+
+[not_modelled]
+retro_stage_dpi = "the DPI value a Retro R8 returns with its stage in use is not read"
+retro_rate_spare = "the two bytes of the polling rate reply after the rate in use are not kept; the vendor flow writes zeros there"
+retro_macro_name = "the last ten bytes of a macro's name cannot be read back and are written as zero"
+retro_stale_macros = "a macro stored for a button that does not play it is not read"
+riviera_adapter = "the 0x2060 adapter, which reports a linked keyboard and mouse in its version reply and in a status report, is not implemented"
+left_handed_effect = "which buttons either mouse swaps when left-handed is not established"
+hardware = "no"

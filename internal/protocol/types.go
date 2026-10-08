@@ -98,11 +98,13 @@ type PidCapability struct {
 	// SupportsRecordKeyboard: the keyboard keeps its profile in one
 	// record, exchanged with the commands in kbrecord.go.
 	SupportsRecordKeyboard bool
+	// SupportsMouse: a mouse, configured with the commands in mouse.go.
+	SupportsMouse bool
 }
 
 // FullCapability returns every capability flag enabled.
 func FullCapability() PidCapability {
-	return PidCapability{true, true, true, true, true, true, true, true}
+	return PidCapability{true, true, true, true, true, true, true, true, true}
 }
 
 // IdentifyOnlyCapability returns every capability flag disabled.

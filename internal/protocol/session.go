@@ -279,6 +279,11 @@ var notAStandaloneCheck = map[CommandID]bool{
 	// ask for nothing. The first only turns key reports off.
 	CommandKbRecordSetReportMode: true, CommandKbRecordRead: true,
 	CommandKbRecordMacroRead: true, CommandKbRecordLightsRead: true,
+	// A mouse's name, buttons and macros are asked for a part at a time,
+	// and a Riviera mouse's record by length and offset. The one-byte
+	// settings, DPI stages and polling rate are whole questions.
+	CommandMouseReadProfileName: true, CommandMouseReadButtons: true,
+	CommandMouseReadMacro: true, CommandMouseRecordRead: true,
 }
 
 type diagCheckPlan struct {

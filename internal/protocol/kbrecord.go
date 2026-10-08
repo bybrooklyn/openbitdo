@@ -106,9 +106,10 @@ func kbRecordReplyFor(response []byte, cmd byte) (length int, data []byte, ok bo
 // kbRecordCommandCode maps a command to the protocol's command number.
 func kbRecordCommandCode(command CommandID) (byte, bool) {
 	switch command {
-	case CommandKbRecordWrite:
+	// A Riviera mouse's record is read and written the same way.
+	case CommandKbRecordWrite, CommandMouseRecordWrite:
 		return kbRecordCmdWrite, true
-	case CommandKbRecordRead:
+	case CommandKbRecordRead, CommandMouseRecordRead:
 		return kbRecordCmdRead, true
 	case CommandKbRecordMacroErase:
 		return kbRecordCmdMacroErase, true
@@ -204,8 +205,8 @@ func (s *DeviceSession) kbRecordWriteChunks(ctx context.Context, command Command
 		accepted, _, _ := kbRecordReplyFor(resp.Raw, cmd)
 		if accepted != len(chunk) {
 			// A partly accepted chunk would leave the caller's idea of
-			// what is stored and the keyboard's out of step.
-			return errInvalidResponse(row.ID, fmt.Sprintf("keyboard accepted %d of %d bytes at offset %d", accepted, len(chunk), offset+sent))
+			// what is stored and the device's out of step.
+			return errInvalidResponse(row.ID, fmt.Sprintf("the device accepted %d of %d bytes at offset %d", accepted, len(chunk), offset+sent))
 		}
 		sent += accepted
 	}

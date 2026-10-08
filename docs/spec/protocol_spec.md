@@ -39,6 +39,7 @@ This document summarizes the sanitized protocol model used by the clean-room run
 - `JP108Dedicated`
 - `Ultimate2Core`
 - `RecordKeyboard`
+- `Mouse`
 - `Firmware`
 - `CoreDiag`
 - `ModeProfileRead`
