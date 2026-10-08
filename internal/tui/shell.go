@@ -306,7 +306,7 @@ func (m Model) inSubView() bool {
 	case screenDiagnostics:
 		return m.diag.showSupportRequest
 	case screenMapping:
-		return m.mapping.previewing() || m.mapping.applying || m.mapping.kb.picking
+		return m.mapping.previewing() || m.mapping.applying || m.mapping.kb.picking || m.mapping.kb.naming
 	}
 	return false
 }

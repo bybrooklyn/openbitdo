@@ -176,6 +176,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m.routeMouse(msg)
 
+	case eraseKeyboardMsg, keyboardErasedMsg:
+		return m.updateKeyboard(msg)
+
 	case discardMappingMsg:
 		m.modal = modal{}
 		switch msg.action {

@@ -60,8 +60,8 @@ func press(t *testing.T, m Model, keys ...string) Model {
 }
 
 func TestKeyboardEditorListsEveryKeyAndSetting(t *testing.T) {
-	if len(keyboardRows) != 108 {
-		t.Fatalf("expected 104 keys and 4 settings, got %d rows", len(keyboardRows))
+	if len(keyboardRows) != 109 {
+		t.Fatalf("expected 104 keys and 5 settings, got %d rows", len(keyboardRows))
 	}
 	// The dedicated buttons come first, then the settings, then the rest.
 	if keyboardRows[0].key.Name != "A button" || keyboardRows[10].kind != kbRowLockWin || keyboardRows[13].kind != kbRowVolume {
@@ -137,9 +137,9 @@ func TestKeyboardSettingsRowsAndDefaults(t *testing.T) {
 
 	// An ordinary key reads "itself" until assigned, and delete puts it back
 	// without leaving a change behind.
-	m.mapping.cursor = 14
-	key := keyboardRows[14].key
-	if _, value, _ := m.keyboardRowText(keyboardRows[14]); value != "itself" {
+	m.mapping.cursor = 15
+	key := keyboardRows[15].key
+	if _, value, _ := m.keyboardRowText(keyboardRows[15]); value != "itself" {
 		t.Fatalf("an unassigned ordinary key should read \"itself\", got %q", value)
 	}
 	m = press(t, m, "right")
@@ -230,5 +230,47 @@ func TestKeyboardRowsAreClickable(t *testing.T) {
 	next, cmd = m.Update(tea.MouseMsg{Button: tea.MouseButtonLeft, Action: tea.MouseActionPress, X: m.width - 30, Y: apply})
 	if cmd == nil || !next.(Model).mapping.applying {
 		t.Fatal("clicking Apply Changes should start the apply")
+	}
+}
+
+func TestKeyboardRenameAndErase(t *testing.T) {
+	m, c := newTestModel(t, filepath.Join(t.TempDir(), "config.toml"))
+	m = loadDevicesAndDrain(t, m, c)
+	next, cmd := m.navigate(screenMapping, 0)
+	m = drainCmds(t, next, cmd)
+
+	// Assign a key and name the profile; q while typing is a letter.
+	m = press(t, m, "enter", "f13", "enter")
+	m.mapping.cursor = 14 // Profile name
+	m = press(t, m, "enter", "quiet", "enter")
+	if m.mapping.kb.draft.Name != "quiet" || m.mapping.kb.naming {
+		t.Fatalf("expected the draft name to be set, got %q", m.mapping.kb.draft.Name)
+	}
+	m.mapping.cursor = len(keyboardRows)
+	nextModel, cmd := m.Update(*keyMsg("enter"))
+	m = drainCmds(t, nextModel.(Model), cmd)
+	profile, err := c.KeyboardReadProfile(m.ctx, m.mapping.device.VidPid)
+	if err != nil || profile.Name != "quiet" || profile.Mappings[233] != core.KeyTargetKeyOf(0x68) {
+		t.Fatalf("expected a renamed profile that kept its mapping: %+v err=%v", profile, err)
+	}
+
+	// Erase asks first, then empties the keyboard and reloads the editor.
+	m = press(t, m, "X")
+	if !m.modal.active {
+		t.Fatal("erase must ask first")
+	}
+	// Cancel is focused: a stray enter erases nothing.
+	if !m.modal.focusCancel {
+		t.Fatal("the erase prompt should start on Cancel")
+	}
+	m = press(t, m, "left")
+	nextModel, cmd = m.Update(*keyMsg("enter"))
+	m = drainCmds(t, nextModel.(Model), cmd)
+	profile, err = c.KeyboardReadProfile(m.ctx, m.mapping.device.VidPid)
+	if err != nil || profile.Name != "" || len(profile.Mappings) != 0 {
+		t.Fatalf("expected an empty keyboard after erase: %+v err=%v", profile, err)
+	}
+	if len(m.mapping.kb.loaded.Mappings) != 0 || m.mapping.dirty() {
+		t.Fatal("the editor should show the erased keyboard")
 	}
 }

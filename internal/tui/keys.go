@@ -105,6 +105,7 @@ func (m Model) viewHints() []keyHint {
 				{key: choose, label: "assign", help: "choose what the key does; on a setting, change it"},
 				{key: "←→", label: "step", help: "step through the choices without opening the list"},
 				{key: "del", label: "default", help: "put the key back to its normal behaviour"},
+				{key: "X", label: "erase", help: "erase the keyboard's profile (asks first)"},
 			}, shell...)
 		}
 		if m.mapping.previewing() {
@@ -160,7 +161,7 @@ func (m Model) capturingText() bool {
 	if m.modal.active {
 		return false
 	}
-	return (m.screen == screenDevices && m.devices.filtering) || (m.keyboardEditing() && m.mapping.kb.picking)
+	return (m.screen == screenDevices && m.devices.filtering) || (m.keyboardEditing() && (m.mapping.kb.picking || m.mapping.kb.naming))
 }
 
 func renderHint(h keyHint) string {

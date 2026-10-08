@@ -219,6 +219,23 @@ func (c *OpenBitdoCore) KeyboardApply(ctx context.Context, vidPid protocol.VidPi
 	}
 	backupID := c.storeBackup(vidPid, configBackupPayload{kind: backupKeyboard, keyboard: before})
 
+	if changes.Name != nil {
+		if *changes.Name == "" {
+			return WriteRecoveryReport{}, errInvalidState("a profile name cannot be empty")
+		}
+		// Whether renaming keeps the stored mappings is the keyboard's
+		// business; writing every existing mapping again after the name
+		// makes the result the same either way.
+		merged := make(map[byte]KeyTarget, len(before.Mappings)+len(changes.Mappings))
+		for id, target := range before.Mappings {
+			merged[id] = target
+		}
+		for id, target := range changes.Mappings {
+			merged[id] = target
+		}
+		changes.Mappings = merged
+	}
+
 	applyErr := writeKeyboardChanges(ctx, session, changes)
 	if applyErr == nil {
 		return WriteRecoveryReport{BackupID: backupID, HasBackupID: true, WriteApplied: true}, nil

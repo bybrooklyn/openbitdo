@@ -47,6 +47,7 @@ const (
 	kbRowLockAltTab
 	kbRowLockAltF4
 	kbRowVolume
+	kbRowName
 )
 
 type kbRow struct {
@@ -65,7 +66,7 @@ func buildKeyboardRows() []kbRow {
 			rows = append(rows, kbRow{kind: kbRowKey, key: key})
 		}
 	}
-	rows = append(rows, kbRow{kind: kbRowLockWin}, kbRow{kind: kbRowLockAltTab}, kbRow{kind: kbRowLockAltF4}, kbRow{kind: kbRowVolume})
+	rows = append(rows, kbRow{kind: kbRowLockWin}, kbRow{kind: kbRowLockAltTab}, kbRow{kind: kbRowLockAltF4}, kbRow{kind: kbRowVolume}, kbRow{kind: kbRowName})
 	for _, key := range core.Retro108Keys {
 		if !key.Dedicated {
 			rows = append(rows, kbRow{kind: kbRowKey, key: key})
@@ -85,6 +86,38 @@ type keyboardState struct {
 	pickFilter   string
 	pickCursor   int
 	pickModifier int // index into core.ModifierChoices
+
+	// naming is true while the profile name is being typed; nameInput is
+	// the text so far.
+	naming    bool
+	nameInput string
+}
+
+// kbNameMax is the longest profile name one report carries, in characters.
+const kbNameMax = 14
+
+type eraseKeyboardMsg struct{}
+
+type keyboardErasedMsg struct{ err error }
+
+func cmdKeyboardErase(ctx context.Context, c *core.OpenBitdoCore, target protocol.VidPid) tea.Cmd {
+	return func() tea.Msg {
+		_, err := c.KeyboardClearProfile(ctx, target)
+		return keyboardErasedMsg{err: err}
+	}
+}
+
+func eraseKeyboardModal() modal {
+	return newModal(
+		"Erase the keyboard's profile?",
+		[]string{
+			"This removes the profile name and every key assignment",
+			"stored on the keyboard. Lock options and volume stay.",
+			"",
+			"A backup is kept until OpenBitdo closes.",
+		},
+		true, "Erase", eraseKeyboardMsg{},
+	)
 }
 
 func cloneKeyboardProfile(p core.KeyboardProfile) core.KeyboardProfile {
@@ -113,6 +146,10 @@ func (s keyboardState) changes() core.KeyboardChanges {
 	if s.draft.Volume != s.loaded.Volume {
 		volume := s.draft.Volume
 		changes.Volume = &volume
+	}
+	if s.draft.Name != s.loaded.Name && s.draft.Name != "" {
+		name := s.draft.Name
+		changes.Name = &name
 	}
 	return changes
 }
@@ -159,6 +196,21 @@ func (m Model) updateKeyboard(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case keyboardApplyResultMsg:
 		return m.handleMappingApplyResult(msg.report, msg.err)
 
+	case eraseKeyboardMsg:
+		m.modal = modal{}
+		m.mapping.applying = true
+		return m, cmdKeyboardErase(m.ctx, m.core, m.mapping.device.VidPid)
+
+	case keyboardErasedMsg:
+		m.mapping.applying = false
+		if msg.err != nil {
+			m.mapping.statusMsg = "The profile could not be erased: " + msg.err.Error()
+			return m, nil
+		}
+		m.mapping.statusMsg = "Profile erased."
+		m.mapping.loading = true
+		return m, cmdKeyboardRead(m.ctx, m.core, m.mapping.device.VidPid)
+
 	case tea.KeyMsg:
 		if m.mapping.loading || m.mapping.err != nil {
 			if msg.String() == "esc" {
@@ -169,8 +221,15 @@ func (m Model) updateKeyboard(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.mapping.kb.picking {
 			return m.updateKeyboardPicker(msg)
 		}
+		if m.mapping.kb.naming {
+			return m.updateKeyboardName(msg)
+		}
 		rows := len(keyboardRows)
 		switch msg.String() {
+		case "X":
+			if !m.mapping.applying {
+				m.modal = eraseKeyboardModal()
+			}
 		case "esc":
 			if m.mapping.dirty() {
 				m.modal = discardMappingModal(discardMappingMsg{action: discardActionBack})
@@ -252,6 +311,11 @@ func (m Model) triggerKeyboardRow() (tea.Model, tea.Cmd) {
 	switch {
 	case m.mapping.cursor < rows:
 		row := keyboardRows[m.mapping.cursor]
+		if row.kind == kbRowName {
+			m.mapping.kb.naming = true
+			m.mapping.kb.nameInput = m.mapping.kb.draft.Name
+			return m, nil
+		}
 		if row.kind != kbRowKey {
 			m.kbAdjustRow(row, 1)
 			return m, nil
@@ -278,6 +342,30 @@ func (m Model) triggerKeyboardRow() (tea.Model, tea.Cmd) {
 		m.kbSnapshot()
 		m.mapping.kb.draft = cloneKeyboardProfile(m.mapping.kb.loaded)
 		m.mapping.statusMsg = "Draft reset."
+	}
+	return m, nil
+}
+
+// updateKeyboardName handles typing the profile name in place.
+func (m Model) updateKeyboardName(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	kb := &m.mapping.kb
+	switch msg.Type {
+	case tea.KeyEsc:
+		kb.naming = false
+	case tea.KeyEnter:
+		kb.naming = false
+		if name := strings.TrimSpace(kb.nameInput); name != "" && name != kb.draft.Name {
+			m.kbSnapshot()
+			m.mapping.kb.draft.Name = name
+		}
+	case tea.KeyBackspace:
+		if runes := []rune(kb.nameInput); len(runes) > 0 {
+			kb.nameInput = string(runes[:len(runes)-1])
+		}
+	case tea.KeyRunes, tea.KeySpace:
+		if runes := []rune(kb.nameInput + string(msg.Runes)); len(runes) <= kbNameMax {
+			kb.nameInput = string(runes)
+		}
 	}
 	return m, nil
 }
@@ -392,6 +480,14 @@ func (m Model) keyboardRowText(row kbRow) (label, value string, changed bool) {
 		return "Lock Alt+F4", onOff(kb.draft.Locks.AltF4), kb.draft.Locks.AltF4 != kb.loaded.Locks.AltF4
 	case kbRowVolume:
 		return "Volume", fmt.Sprintf("%d of 5", kb.draft.Volume), kb.draft.Volume != kb.loaded.Volume
+	case kbRowName:
+		if kb.naming {
+			return "Profile name", kb.nameInput + "▏", true
+		}
+		if kb.draft.Name == "" {
+			return "Profile name", "(set when you apply)", false
+		}
+		return "Profile name", kb.draft.Name, kb.draft.Name != kb.loaded.Name
 	}
 	now, explicit := kb.draft.Target(row.key)
 	was, _ := kb.loaded.Target(row.key)
