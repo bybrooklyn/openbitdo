@@ -6,7 +6,7 @@ All notable changes to OpenBitdo are tracked here.
 
 ### Added
 
-- Retro 108: the Mapping tab edits the whole profile. Any of the 104 assignable keys can be set to
+- Retro 108: the Mapping tab edits the whole profile. Any of the 111 assignable keys can be set to
   a key (with an optional modifier), a media key or a mouse action through a searchable list; the
   Win, Alt+Tab and Alt+F4 locks and the volume level are settings; the profile can be renamed or
   erased. Each write is read back, and what was written is put back if the keyboard did not keep

@@ -10,7 +10,7 @@ OpenBitdo is unofficial and not affiliated with 8BitDo. Device writes always car
 - Detect connected 8BitDo devices and give each a plain verdict: working, limited (it can be read but not changed), can't connect, or no access.
 - Check the connection, and view, copy or save the report.
 - Say for every device what you can do with it now, and what you can't do yet and why.
-- Retro 108 keyboard: assign any of its 104 keys and buttons (A, B, K1-K8 included) to a key with an optional modifier, a media key or a mouse action; set the Win / Alt+Tab / Alt+F4 locks and the volume level; rename or erase the profile.
+- Retro 108 keyboard: assign any of its 111 keys and buttons (A, B, K1-K8 included) to a key with an optional modifier, a media key or a mouse action; set the Win / Alt+Tab / Alt+F4 locks and the volume level; rename or erase the profile.
 - Ultimate 2 controller: a full profile editor (three slots, button map with back paddles and extra buttons, stick and trigger ranges, vibration, option switches) runs against a simulated controller in mock mode. On a real controller it is blocked with the reason `button-map framing not hardware-confirmed` unless advanced mode is on, because that exchange has not been confirmed on hardware yet.
 - Tell a plugged-in 2.4G receiver whose controller is switched off from a working controller.
 - Show Firmware Update as disabled and deferred in `v0.0.3`; activating it does not download firmware, preflight firmware, or open a device session.

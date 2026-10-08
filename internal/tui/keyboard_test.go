@@ -60,8 +60,8 @@ func press(t *testing.T, m Model, keys ...string) Model {
 }
 
 func TestKeyboardEditorListsEveryKeyAndSetting(t *testing.T) {
-	if len(keyboardRows) != 109 {
-		t.Fatalf("expected 104 keys and 5 settings, got %d rows", len(keyboardRows))
+	if len(keyboardRows) != 116 {
+		t.Fatalf("expected 111 keys and 5 settings, got %d rows", len(keyboardRows))
 	}
 	// The dedicated buttons come first, then the settings, then the rest.
 	if keyboardRows[0].key.Name != "A button" || keyboardRows[10].kind != kbRowLockWin || keyboardRows[13].kind != kbRowVolume {

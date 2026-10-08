@@ -130,8 +130,8 @@ func TestRetro108KeyTableIsConsistent(t *testing.T) {
 		}
 		seen[key.ID] = true
 	}
-	if len(Retro108Keys) != 104 {
-		t.Fatalf("expected 10 dedicated buttons and 94 remappable keys, got %d", len(Retro108Keys))
+	if len(Retro108Keys) != 111 {
+		t.Fatalf("expected 10 dedicated buttons and 101 remappable keys, got %d", len(Retro108Keys))
 	}
 	// The A and B buttons are ids 233 and 232, in that order.
 	if Retro108Keys[0].ID != 233 || Retro108Keys[1].ID != 232 {
