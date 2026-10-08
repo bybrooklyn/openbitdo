@@ -89,6 +89,18 @@ var candidateUnlockableWrites = map[CommandID]bool{
 	CommandKbRecordMacroWrite:         true,
 	CommandKbRecordLightsBegin:        true,
 	CommandKbRecordLightsWrite:        true,
+	CommandMouseWriteProfileName:      true,
+	CommandMouseClearProfile:          true,
+	CommandMouseWriteButton:           true,
+	CommandMouseWriteLeftHanded:       true,
+	CommandMouseWriteLiftOff:          true,
+	CommandMouseWriteWheelSpeed:       true,
+	CommandMouseWriteWheelDirection:   true,
+	CommandMouseWriteDpi:              true,
+	CommandMouseWriteDpiStage:         true,
+	CommandMouseWritePollingRate:      true,
+	CommandMouseWriteMacro:            true,
+	CommandMouseRecordWrite:           true,
 }
 
 func (s *DeviceSession) allowCandidateRuntimeWritePath(command CommandID, safety SafetyClass) bool {

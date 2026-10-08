@@ -168,6 +168,9 @@ func (c *OpenBitdoCore) RestoreBackup(ctx context.Context, backupID ConfigBackup
 	if backup.payload.kind == backupRecordKeyboard {
 		return c.restoreKbRecordBackup(ctx, backup.target, backup.payload.recordKeyboard)
 	}
+	if backup.payload.kind == backupMouse {
+		return c.restoreMouseBackup(ctx, backup.target, backup.payload.mouse)
+	}
 
 	session, err := c.openSessionForOps(ctx, backup.target)
 	if err != nil {

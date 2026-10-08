@@ -85,6 +85,7 @@ type reportDiagCapability struct {
 	SupportsU2SlotConfig      bool `toml:"supports_u2_slot_config"`
 	SupportsU2ButtonMap       bool `toml:"supports_u2_button_map"`
 	SupportsRecordKeyboard    bool `toml:"supports_record_keyboard"`
+	SupportsMouse             bool `toml:"supports_mouse"`
 }
 
 type reportCommandCheck struct {

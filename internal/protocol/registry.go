@@ -135,6 +135,13 @@ func DefaultCapabilityFor(pid uint16, tier SupportTier, family ProtocolFamily) P
 		return IdentifyOnlyCapability()
 	}
 
+	// A mouse takes the mouse commands and nothing else: the vendor library
+	// sends it none of the other families'. While its tier is detect-only
+	// it is granted nothing, like everything else.
+	if mousePIDs[pid] {
+		return PidCapability{SupportsMouse: true}
+	}
+
 	if tier == TierCandidateReadOnly {
 		record := recordKeyboardPIDs[pid]
 		switch {
@@ -175,6 +182,7 @@ func DefaultCapabilityFor(pid uint16, tier SupportTier, family ProtocolFamily) P
 	cap.SupportsU2SlotConfig = pid == 0x6009 || pid == 0x600b
 	cap.SupportsU2ButtonMap = false
 	cap.SupportsRecordKeyboard = false
+	cap.SupportsMouse = false
 	return cap
 }
 

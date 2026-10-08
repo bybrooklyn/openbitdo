@@ -205,6 +205,8 @@ func TestConfigInterfaceIsChosenPerProduct(t *testing.T) {
 		0x6012: 0xffa0, 0x6013: 0xffa0, 0x6009: 0xffa0, 0x2028: 0xffa0, 0x205d: 0xffa0,
 		0x5209: 0x008c, 0x5200: 0x008c, 0x520a: 0x008c,
 		0x310b: 0xff7a, 0x2062: 0xff7a, 0x20aa: 0xff7a,
+		// A Retro R8 mouse and its receiver, by the vendor library's choice.
+		0x5205: 0xff00, 0x5206: 0xff00,
 	} {
 		if page, usage := configUsageFor(VidPid{VID: 0x2dc8, PID: pid}); page != wantPage || usage != 1 {
 			t.Errorf("pid %#04x: configuration interface %#04x/%d, want %#04x/1", pid, page, usage, wantPage)

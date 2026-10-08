@@ -19,6 +19,9 @@ type KbRecordSimulator struct {
 	// Off makes every request go unanswered, as with the keyboard switched
 	// off behind its receiver.
 	Off bool
+	// RecordSize is the size of the configuration record; zero means a
+	// keyboard's KbRecordSize. A Riviera mouse's is MouseRecordSize.
+	RecordSize int
 	// MacroSlotSize and MacroSlots give the macro storage's shape; zero
 	// means a Retro 87's ten slots of 4096 bytes.
 	MacroSlotSize, MacroSlots int
@@ -65,7 +68,11 @@ func (k *KbRecordSimulator) Unpaced() bool { return true }
 // use.
 func (k *KbRecordSimulator) Record() []byte {
 	if k.record == nil {
-		k.record = make([]byte, KbRecordSize)
+		size := k.RecordSize
+		if size == 0 {
+			size = KbRecordSize
+		}
+		k.record = make([]byte, size)
 	}
 	return k.record
 }

@@ -159,6 +159,8 @@ type configBackupPayload struct {
 	padProduct    protocol.VidPid
 	// recordKeyboard is a record keyboard's profile as it was read.
 	recordKeyboard RecordKeyboardProfile
+	// mouse is a mouse's profile as it was read.
+	mouse MouseProfile
 }
 
 type deviceKind int
@@ -168,6 +170,7 @@ const (
 	backupKeyboard
 	backupPad
 	backupRecordKeyboard
+	backupMouse
 )
 
 // WriteRecoveryReport describes the outcome of a backup-then-write-then-
