@@ -971,3 +971,91 @@ func TestU2PreviewSlotReadsRequestedSlotNotActiveSlot(t *testing.T) {
 		t.Fatalf("expected slot byte (index 4) = %#02x, got %v", U2Slot3.WireValue(), writes[0])
 	}
 }
+
+// --- JP108 apply driven end to end over a scripted transport.
+
+func jp108TableReply(usages map[byte]uint16) []byte {
+	reply := make([]byte, 64)
+	reply[0], reply[1] = 0x02, 0x05
+	for index, usage := range usages {
+		reply[8+int(index)*2] = byte(usage)
+		reply[9+int(index)*2] = byte(usage >> 8)
+	}
+	return reply
+}
+
+func jp108Ack() []byte {
+	reply := make([]byte, 64)
+	reply[0] = 0x02
+	return reply
+}
+
+func jp108Core(transport *protocol.MockTransport) *OpenBitdoCore {
+	c := New(Config{AdvancedMode: true})
+	c.transportOverride = transport
+	return c
+}
+
+func TestJP108ApplyAbortsBeforeWritingWhenBackupReadIsShort(t *testing.T) {
+	transport := &protocol.MockTransport{}
+	// 20 bytes cannot hold the 10-entry table. Three attempts, all short.
+	for range 3 {
+		transport.PushReadData(jp108TableReply(nil)[:20])
+		transport.PushReadTimeout()
+		transport.PushReadTimeout()
+	}
+	c := jp108Core(transport)
+	target := protocol.VidPid{VID: 0x2dc8, PID: 0x5209}
+
+	_, err := c.JP108ApplyDedicatedMappingWithRecovery(context.Background(), target,
+		[]DedicatedButtonMapping{{Button: ButtonA, TargetHIDUsage: 0x2c}}, true)
+	if err == nil {
+		t.Fatal("expected apply to fail when the pre-write backup could not be read in full")
+	}
+	for _, frame := range transport.Writes() {
+		if len(frame) > 2 && frame[2] == 0x31 {
+			t.Fatalf("a mapping write was sent without a usable backup: % x", frame[:8])
+		}
+	}
+}
+
+func TestJP108ApplyRollsBackWhenReadbackDoesNotMatch(t *testing.T) {
+	transport := &protocol.MockTransport{}
+	before := map[byte]uint16{ButtonA.WireIndex(): 0x04}
+	transport.PushReadData(jp108TableReply(before)) // backup
+	transport.PushReadData(jp108Ack())              // write acknowledged...
+	transport.PushReadData(jp108TableReply(before)) // ...but the table is unchanged
+	transport.PushReadData(jp108Ack())              // rollback write
+	for range len(AllDedicatedButtons) {
+		transport.PushReadData(jp108Ack())
+	}
+	c := jp108Core(transport)
+	target := protocol.VidPid{VID: 0x2dc8, PID: 0x5209}
+
+	report, err := c.JP108ApplyDedicatedMappingWithRecovery(context.Background(), target,
+		[]DedicatedButtonMapping{{Button: ButtonA, TargetHIDUsage: 0x2c}}, true)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if report.WriteApplied {
+		t.Fatal("an acknowledged write the device did not store must not be reported as applied")
+	}
+	if !report.RollbackAttempted || !strings.Contains(report.WriteError, "readback mismatch") {
+		t.Fatalf("expected a readback mismatch followed by a rollback, got %+v", report)
+	}
+}
+
+func TestJP108ApplySucceedsWhenReadbackMatches(t *testing.T) {
+	transport := &protocol.MockTransport{}
+	transport.PushReadData(jp108TableReply(map[byte]uint16{ButtonA.WireIndex(): 0x04}))
+	transport.PushReadData(jp108Ack())
+	transport.PushReadData(jp108TableReply(map[byte]uint16{ButtonA.WireIndex(): 0x2c}))
+	c := jp108Core(transport)
+	target := protocol.VidPid{VID: 0x2dc8, PID: 0x5209}
+
+	report, err := c.JP108ApplyDedicatedMappingWithRecovery(context.Background(), target,
+		[]DedicatedButtonMapping{{Button: ButtonA, TargetHIDUsage: 0x2c}}, true)
+	if err != nil || !report.WriteApplied || !report.HasBackupID {
+		t.Fatalf("expected a verified apply with a backup, got %+v err=%v", report, err)
+	}
+}

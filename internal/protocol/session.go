@@ -2,6 +2,7 @@ package protocol
 
 import (
 	"context"
+	"errors"
 	"fmt"
 )
 
@@ -278,9 +279,30 @@ func (s *DeviceSession) runDiagCheck(ctx context.Context, command CommandID, pol
 
 	resp, err := s.SendCommand(ctx, command, nil)
 	if err == nil {
-		return s.diagSuccessStatus(command, policy, confidence, resp.ParsedFields, s.lastExecution, diagSuccessDetail(command, resp.ParsedFields))
+		return s.diagSuccessStatus(command, policy, confidence, resp.ParsedFields, s.lastExecution, s.diagIdentityDetail(command, resp.ParsedFields))
 	}
 	return s.diagFailureStatus(command, policy, confidence, err, s.lastExecution, "")
+}
+
+// diagIdentityDetail words a passed check, cross-checking any PID the reply
+// carries against the PID the OS enumerated. On an Ultimate 2 (0x6013) the
+// GetPid reply's PID field holds unrelated, changing data and the PID arrives
+// in the GetReportRevision reply instead, so a PID is only stated as the
+// device's own when it actually matches.
+func (s *DeviceSession) diagIdentityDetail(command CommandID, facts map[string]uint32) string {
+	switch command {
+	case CommandGetPid:
+		if pid, ok := facts["detected_pid"]; ok && uint16(pid) != s.target.PID {
+			return fmt.Sprintf("replied, but its PID field reads %#04x, not this device's %#04x", pid, s.target.PID)
+		}
+	case CommandGetReportRevision:
+		detail := diagSuccessDetail(command, facts)
+		if pid, ok := facts["reported_pid"]; ok && uint16(pid) == s.target.PID {
+			return fmt.Sprintf("%s; device reports pid %#04x", detail, pid)
+		}
+		return detail
+	}
+	return diagSuccessDetail(command, facts)
 }
 
 func (s *DeviceSession) runDiagModeCheck(ctx context.Context, policy RuntimePolicy, confidence SupportEvidence) DiagCommandStatus {
@@ -361,10 +383,7 @@ func (s *DeviceSession) diagFailureStatus(command CommandID, policy RuntimePolic
 
 func errorCode(err error) ErrorCode {
 	var pe *Error
-	if e, ok := err.(*Error); ok {
-		pe = e
-	}
-	if pe == nil {
+	if !errors.As(err, &pe) {
 		return ""
 	}
 	return pe.Code()

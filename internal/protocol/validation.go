@@ -255,6 +255,9 @@ func parseFields(command CommandID, response []byte) map[string]uint32 {
 		parsed["detected_pid"] = uint32(binary.LittleEndian.Uint16(response[22:24]))
 	case command == CommandGetReportRevision && len(response) >= 6:
 		parsed["revision"] = uint32(response[5])
+		if len(response) >= 24 {
+			parsed["reported_pid"] = uint32(binary.LittleEndian.Uint16(response[22:24]))
+		}
 	case (command == CommandGetMode || command == CommandGetModeAlt) && len(response) >= 6:
 		parsed["mode"] = uint32(response[5])
 	case (command == CommandGetControllerVersion || command == CommandVersion) && len(response) >= 5:
@@ -266,21 +269,23 @@ func parseFields(command CommandID, response []byte) map[string]uint32 {
 	return parsed
 }
 
-func parseIndexedU16Table(raw []byte, expectedItems int) []IndexedUsage {
+// indexedU16TableOffset is where an indexed u16 table starts in a reply.
+const indexedU16TableOffset = 8
+
+// parseIndexedU16Table decodes expectedItems little-endian u16 entries. A
+// reply too short to hold the whole table is an error, never a table padded
+// with zeros: the result is used as a backup that may later be written back
+// to the device.
+func parseIndexedU16Table(command CommandID, raw []byte, expectedItems int) ([]IndexedUsage, error) {
+	if need := indexedU16TableOffset + expectedItems*2; len(raw) < need {
+		return nil, errMalformedResponse(command, len(raw))
+	}
 	out := make([]IndexedUsage, 0, expectedItems)
-	offset := 2
-	if len(raw) >= 8 {
-		offset = 8
-	}
 	for idx := 0; idx < expectedItems; idx++ {
-		pos := offset + idx*2
-		var usage uint16
-		if pos+1 < len(raw) {
-			usage = binary.LittleEndian.Uint16(raw[pos : pos+2])
-		}
-		out = append(out, IndexedUsage{Index: byte(idx), Usage: usage})
+		pos := indexedU16TableOffset + idx*2
+		out = append(out, IndexedUsage{Index: byte(idx), Usage: binary.LittleEndian.Uint16(raw[pos : pos+2])})
 	}
-	return out
+	return out, nil
 }
 
 func diagSuccessDetail(command CommandID, facts map[string]uint32) string {

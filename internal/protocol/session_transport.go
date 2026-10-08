@@ -2,6 +2,7 @@ package protocol
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 )
@@ -21,6 +22,7 @@ func (s *DeviceSession) SendCommand(ctx context.Context, command CommandID, over
 }
 
 func (s *DeviceSession) sendRow(ctx context.Context, row CommandRow, payload []byte) (ResponseFrame, error) {
+	s.drainStaleInput()
 	bytesWritten, err := s.transport.Write(payload)
 	if err != nil {
 		return ResponseFrame{}, err
@@ -42,9 +44,24 @@ func (s *DeviceSession) sendRow(ctx context.Context, row CommandRow, payload []b
 	lastLen := 0
 
 	for attempt := uint8(1); attempt <= attemptsTotal; attempt++ {
+		// A read has no side effects, so a request the device dropped is
+		// safe to repeat. A write is never resent: repeating a firmware
+		// chunk or a half-applied setting is not known to be harmless.
+		if attempt > 1 && row.SafetyClass == SafeRead {
+			s.drainStaleInput()
+			n, err := s.transport.Write(payload)
+			if err != nil {
+				s.recordExecution(CommandExecutionReport{
+					Command: row.ID, Attempts: attempt, Validator: s.validatorName(row),
+					Status: StatusMalformed, BytesWritten: bytesWritten, ErrorCode: errorCode(err),
+				})
+				return ResponseFrame{}, err
+			}
+			bytesWritten = n
+		}
 		raw, err := s.readResponseReassembled(ctx, timeoutMs, expectedMinLen)
-		switch err {
-		case nil:
+		switch {
+		case err == nil:
 			status := ValidateResponse(row.ID, raw)
 			if status == StatusOk {
 				s.recordExecution(CommandExecutionReport{
@@ -54,7 +71,7 @@ func (s *DeviceSession) sendRow(ctx context.Context, row CommandRow, payload []b
 				return ResponseFrame{Raw: raw, Status: status, ParsedFields: parseFields(row.ID, raw)}, nil
 			}
 			lastStatus, lastLen = status, len(raw)
-		case ErrTimeout:
+		case errors.Is(err, ErrTimeout):
 			lastStatus, lastLen = StatusMalformed, 0
 		default:
 			report := CommandExecutionReport{
@@ -102,6 +119,11 @@ func (s *DeviceSession) readResponseReassembled(ctx context.Context, timeoutMs u
 	for i := 0; i < 3; i++ {
 		chunk, err := s.transport.Read(ctx, 64, timeoutMs)
 		if err != nil {
+			// Keep what already arrived: a short reply is judged by the
+			// validator rather than reported as no reply at all.
+			if errors.Is(err, ErrTimeout) && len(raw) > 0 {
+				break
+			}
 			return nil, err
 		}
 		if len(chunk) == 0 {
@@ -116,6 +138,22 @@ func (s *DeviceSession) readResponseReassembled(ctx context.Context, timeoutMs u
 		return nil, ErrTimeout
 	}
 	return raw, nil
+}
+
+// inputDrainer is implemented by transports that can discard reports already
+// queued by the device. MockTransport deliberately does not: its queued reads
+// are the scripted replies.
+type inputDrainer interface {
+	DrainInput()
+}
+
+// drainStaleInput discards anything the device sent before this request, so
+// a late reply to an earlier command (many share the same leading bytes) is
+// never validated as the reply to this one.
+func (s *DeviceSession) drainStaleInput() {
+	if drainer, ok := s.transport.(inputDrainer); ok {
+		drainer.DrainInput()
+	}
 }
 
 func (s *DeviceSession) recordExecution(report CommandExecutionReport) {

@@ -99,7 +99,7 @@ func (s *DeviceSession) JP108ReadDedicatedMappings(ctx context.Context) ([]Index
 	if err != nil {
 		return nil, err
 	}
-	return parseIndexedU16Table(resp.Raw, 10), nil
+	return parseIndexedU16Table(CommandJp108ReadDedicatedMappings, resp.Raw, 10)
 }
 
 // JP108WriteDedicatedMapping writes one JP108 dedicated-button mapping entry.

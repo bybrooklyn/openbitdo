@@ -104,12 +104,37 @@ func (c *OpenBitdoCore) JP108ApplyDedicatedMappingWithRecovery(ctx context.Conte
 			break
 		}
 	}
+	if applyErr == nil {
+		applyErr = verifyJP108Readback(ctx, session, changes)
+	}
 	_ = session.Close()
 
 	if applyErr == nil {
 		return WriteRecoveryReport{BackupID: backupID, HasBackupID: hasBackup, WriteApplied: true}, nil
 	}
 	return c.rollbackAfterWriteFailure(ctx, backupID, hasBackup, applyErr)
+}
+
+// verifyJP108Readback re-reads the mapping table after a write and confirms
+// every changed entry holds the value that was sent. The device acknowledges
+// a write with a bare status byte, which says the frame arrived, not that
+// the mapping took.
+func verifyJP108Readback(ctx context.Context, session *protocol.DeviceSession, changes []DedicatedButtonMapping) error {
+	table, err := session.JP108ReadDedicatedMappings(ctx)
+	if err != nil {
+		return fmt.Errorf("readback after write failed: %w", err)
+	}
+	stored := make(map[byte]uint16, len(table))
+	for _, entry := range table {
+		stored[entry.Index] = entry.Usage
+	}
+	for _, change := range changes {
+		index := change.Button.WireIndex()
+		if got, ok := stored[index]; !ok || got != change.TargetHIDUsage {
+			return fmt.Errorf("readback mismatch for %s: wrote %#04x, device holds %#04x", change.Button, change.TargetHIDUsage, got)
+		}
+	}
+	return nil
 }
 
 func (c *OpenBitdoCore) rollbackAfterWriteFailure(ctx context.Context, backupID ConfigBackupID, hasBackup bool, writeErr error) (WriteRecoveryReport, error) {

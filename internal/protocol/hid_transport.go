@@ -361,6 +361,29 @@ func (h *HidTransport) Read(ctx context.Context, length int, timeoutMs uint64) (
 	}
 }
 
+// DrainInput discards reports the device has already queued. Only handles
+// that can time out their own read are drained; a blocking backend would
+// stall here on a quiet device.
+func (h *HidTransport) DrainInput() {
+	h.mu.Lock()
+	device := h.device
+	h.mu.Unlock()
+	timed, ok := device.(timedReader)
+	if !ok {
+		return
+	}
+	buf := make([]byte, 256)
+	for range maxDrainedReports {
+		if n, err := timed.ReadTimeout(buf, time.Millisecond); err != nil || n == 0 {
+			return
+		}
+	}
+}
+
+// maxDrainedReports bounds DrainInput against a device that never stops
+// sending (a gamepad interface streaming input reports).
+const maxDrainedReports = 64
+
 // readTimed reads one report from a handle that enforces its own timeout,
 // waking early if ctx is cancelled.
 func readTimed(ctx context.Context, device timedReader, length int, timeout time.Duration) ([]byte, error) {

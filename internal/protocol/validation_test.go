@@ -1,6 +1,9 @@
 package protocol
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 // Ported from sdk/tests/parser_rejection.rs.
 
@@ -44,5 +47,39 @@ func TestCommandRegistryRequestsAreWellFormed(t *testing.T) {
 	}
 	if len(seen) != 37 {
 		t.Fatalf("expected 37 distinct command IDs, got %d", len(seen))
+	}
+}
+
+func TestParseIndexedU16TableRejectsShortReply(t *testing.T) {
+	full := make([]byte, 64)
+	full[8], full[9] = 0x04, 0x00
+	full[26], full[27] = 0x1d, 0x00
+	table, err := parseIndexedU16Table(CommandJp108ReadDedicatedMappings, full, 10)
+	if err != nil || len(table) != 10 || table[0].Usage != 0x04 || table[9].Usage != 0x1d {
+		t.Fatalf("unexpected table %+v err=%v", table, err)
+	}
+
+	// 27 bytes holds nine and a half entries. Padding the rest with zeros
+	// would produce a backup that unmaps a key when restored.
+	if _, err := parseIndexedU16Table(CommandJp108ReadDedicatedMappings, full[:27], 10); err == nil {
+		t.Fatal("expected a reply too short for the whole table to be an error")
+	}
+}
+
+func TestDiagDetailOnlyClaimsAPIDThatMatchesTheDevice(t *testing.T) {
+	session := &DeviceSession{target: VidPid{VID: 0x2dc8, PID: 0x6013}}
+
+	// Captured from an Ultimate 2: GetPid's PID field held 0x32a0.
+	if got := session.diagIdentityDetail(CommandGetPid, map[string]uint32{"detected_pid": 0x32a0}); !strings.Contains(got, "not this device's 0x6013") {
+		t.Fatalf("a mismatched PID must not be reported as detected: %q", got)
+	}
+	if got := session.diagIdentityDetail(CommandGetPid, map[string]uint32{"detected_pid": 0x6013}); got != "detected pid 0x6013" {
+		t.Fatalf("unexpected detail for a matching PID: %q", got)
+	}
+	if got := session.diagIdentityDetail(CommandGetReportRevision, map[string]uint32{"revision": 1, "reported_pid": 0x6013}); got != "report revision 1; device reports pid 0x6013" {
+		t.Fatalf("unexpected revision detail: %q", got)
+	}
+	if got := session.diagIdentityDetail(CommandGetReportRevision, map[string]uint32{"revision": 1, "reported_pid": 0}); got != "report revision 1" {
+		t.Fatalf("a non-matching PID must be left out: %q", got)
 	}
 }
