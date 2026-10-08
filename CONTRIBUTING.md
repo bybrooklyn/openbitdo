@@ -20,6 +20,20 @@ just run-mock  # launch the TUI against mock devices, no hardware needed
 Run `just check` before opening a PR — it's exactly what CI gates on, so a
 clean local run means CI should pass too.
 
+The recipes refuse to run on any other Go release. If your system Go is
+newer, `GOTOOLCHAIN=go1.27.0 just check` downloads and uses the pinned one.
+
+To look at a screen without a terminal, dump a frame as plain text:
+
+```sh
+OPENBITDO_FRAME=80x24 go test ./internal/tui -run TestDumpFrame -v
+OPENBITDO_FRAME=100x30 OPENBITDO_FRAME_KEYS="down enter ?" go test ./internal/tui -run TestDumpFrame -v
+```
+
+`OPENBITDO_FRAME_KEYS` is a key script. To render what attached hardware
+reports instead of the mock devices, add `OPENBITDO_FRAME_REAL=1` and
+`-tags manual`; like every live hardware test, it only runs with that tag.
+
 Release-blocking checks also include pinned `golangci-lint` `2.13.1`,
 `govulncheck` `v1.7.0` with zero reachable findings, and archived
 `govulncheck` JSON output.

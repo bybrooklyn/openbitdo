@@ -4,6 +4,53 @@ All notable changes to OpenBitdo are tracked here.
 
 ## Unreleased
 
+### Fixed
+
+- Linux: devices could not be opened. OpenBitdo now talks to devices through the kernel's hidraw
+  nodes instead of a libusb-backed library. The old backend needed write access to the raw USB
+  device, which the shipped udev rule never granted (it was named `99-`, so its `uaccess` tag was
+  set after the step that applies it), and it could not tell a multi-interface device's
+  interfaces apart, so a Retro 108 was rejected as "ambiguous" before any open.
+- Linux: controller navigation looked up report descriptors under a path the old backend never
+  returned, so it could not start for any device.
+- The udev rule is now `70-openbitdo.rules` and matches hidraw nodes. Opening a device no longer
+  detaches the kernel's HID driver, so a keyboard keeps working while it is open.
+- A retried read never resent its request, so every retry waited on a reply that was not coming.
+- A stale reply to an earlier command could be validated as the reply to the next one.
+- JP108 mapping: a short table reply was padded with zeros and used as the pre-write backup, so
+  a rollback could write zeros back. A short reply is now an error, and a write is confirmed by
+  reading the table back.
+- TUI: `q`, `?` and `x` were handled before the device filter, so typing a name could quit the
+  app. The filter title printed a raw escape code. At 80x24 the device list was not shown.
+- TUI: a brick-risk dialog confirmed on enter as soon as it appeared; it now starts on Cancel.
+  The write probe's dialog no longer describes a firmware write.
+- TUI: after a failed rollback, a mouse click could still reach the mapping screen.
+- `--mock` no longer opens attached hardware for controller navigation.
+
+### Changed
+
+- The dashboard shows what each device is doing now (responding, not answering, unreachable, no
+  permission) instead of only its registry tier, and shows device names instead of registry IDs.
+  This replaces the `Status` / `Works now` / `Blocked` / `Next step` card.
+- A device with no configuration interface is reported as unreachable, and diagnostics and
+  mapping are not offered for it.
+- Text wraps instead of being cut off at the edge of a panel.
+- The help overlay lists the keys for the current view; the footer only shows keys that work
+  where you are.
+- Diagnostics names checks in plain words and explains unanswered ones. The report is available
+  for every device and can be copied (`c`) or saved (`w`). On the diagnostics screen `v` opens
+  the report and `f` filters to unanswered checks (`s` and `tab` still work).
+- Firmware is shown once per device as `Deferred in 0.0.3` instead of as a disabled action.
+  Settings and Quit are no longer rows in each device's action list (`s` and `q`).
+
+### Hardware evidence
+
+- First Linux hardware run, recorded in
+  `docs/clean-room-evidence/hardware_run_linux_2026-10-08.md`. An Ultimate 2 (`0x6013`) answers 4
+  of the 12 safe reads over hidraw; the "wrote 64 bytes, read 0" result below does not reproduce
+  on Linux. A Retro 108 (`0x5209`) over USB exposes no interface that carries the documented
+  protocol.
+
 ## v0.0.3
 
 ### Changed

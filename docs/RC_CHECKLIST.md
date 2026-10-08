@@ -125,6 +125,23 @@ OPENBITDO_MANUAL_PID=0x6013 go test ./internal/tui/...   -tags manual -run TestM
 If a future controller mode exposes a Generic Desktop Gamepad interface, record the mode and PID
 here and re-run both suites before restoring this gate to blocking.
 
+### Linux run after `v0.0.3`
+
+The qualification above was run on macOS. A Linux run on 2026-10-08, after the transport moved to
+hidraw, is recorded in `docs/clean-room-evidence/hardware_run_linux_2026-10-08.md`:
+
+| Requirement | Result on Linux |
+| --- | --- |
+| Device opens as the logged-in user | Pass, given a hidraw udev rule (`70-openbitdo.rules`) |
+| Vendor configuration channel present (Ultimate 2 `0x6013`) | Pass — usage page `0xffa0`, usage `0x0001` |
+| Safe-read diagnostics return real bytes (Ultimate 2) | **Partial** — 4 of 12 distinct reads answered, `transport_ready=true` |
+| Generic Desktop Gamepad usage present (Ultimate 2) | **Fail** — same single interface as on macOS |
+| Vendor configuration channel present (Retro 108 `0x5209`, USB) | **Fail** — no `0xffa0` interface; interface 2 is page `0x008c` with 32-byte reports |
+| No mapping writes, candidate probes, bootloader entry, or firmware writes | Pass — safe reads only |
+
+The "JP108 mapping | in scope" line in the scope contract has no hardware behind it: the one
+JP108 device tested cannot be reached with the documented framing over USB.
+
 ## Distribution Gate
 
 - GitHub release assets are published successfully and match the exact 14-file manifest.
@@ -138,7 +155,7 @@ here and re-run both suites before restoring this gate to blocking.
 | Gate | Status | Notes |
 | --- | --- | --- |
 | Source branch | In progress | Work is on `release/v0.0.3`; merge to `main` is still required before tagging. |
-| Firmware production availability | Deferred | Public UI must keep Firmware Update disabled as `Deferred in 0.0.3`. |
+| Firmware production availability | Deferred | Public UI must label firmware `Deferred in 0.0.3` and offer no way to start it. |
 | Ultimate 2 real mapping | Deferred | Mock preview only until button-map framing is hardware-confirmed. |
 | GitHub release assets | Pending | Verify the exact `v0.0.3` 14-asset manifest after tag workflow completion. |
 | AUR publication | Pending | Verify `openbitdo-bin` updates to `0.0.3`. |

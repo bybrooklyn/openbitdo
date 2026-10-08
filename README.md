@@ -7,9 +7,9 @@ OpenBitdo is unofficial and not affiliated with 8BitDo. Device writes always car
 
 ## What OpenBitdo Does Today
 
-- Detect connected 8BitDo devices and explain their current support level.
-- Run diagnostics and save support reports.
-- Show beginner-facing status, works-now, blocked, and next-step guidance for every selected device.
+- Detect connected 8BitDo devices and show what each one is doing right now: responding, not answering, unreachable, or blocked by permissions.
+- Run diagnostics, and view, copy or save the report.
+- Say for every selected device which actions are available, why the others are not, and what to do next.
 - Edit supported mappings for the currently confirmed JP108 flow.
 - Preview Ultimate 2 mapping in mock mode only; real Ultimate 2 mapping is blocked with the reason `button-map framing not hardware-confirmed`.
 - Show Firmware Update as disabled and deferred in `v0.0.3`; activating it does not download firmware, preflight firmware, or open a device session.
@@ -31,10 +31,10 @@ Contributors: [`justfile`](justfile) has common dev commands (`just build`, `jus
 
 1. Launch `openbitdo`.
 2. If you do not have hardware attached yet, launch `openbitdo --mock` to preview the interface.
-3. Pick a controller from the grouped dashboard: supported, read-only candidate, or detect-only.
-4. Run `Diagnose` first. Diagnostics are the safe path for every detected 8BitDo device.
-5. Save the TOML support report when a device is blocked, experimental, or behaving unexpectedly.
-6. Follow the `Status`, `Works now`, `Blocked`, and `Next step` guidance before attempting mapping work.
+3. Pick a device from the list. Each row shows its live state; the panel beside it lists what you can do.
+4. Run diagnostics first. They only read from the device, and are the safe path for every 8BitDo device that can be reached.
+5. Open the report (`v` on the diagnostics screen) and copy or save it when a device is blocked, experimental, or behaving unexpectedly.
+6. Press `?` on any screen for the keys that work there.
 
 OpenBitdo enables mouse support for clicking and scrolling, which by default
 intercepts click-drag so your terminal can't use it for normal text
@@ -66,6 +66,8 @@ When a device is not fully supported, run diagnostics and share the generated TO
 
 A non-destructive Ultimate 2 qualification was run for `v0.0.3` and did not pass. On the unit tested (`0x2dc8:0x6013`) the controller exposes only its vendor configuration interface and no Generic Desktop Gamepad interface, so controller navigation has nothing to read from, and every safe-read diagnostic writes successfully but reads back no data. Both results were traced to device/protocol behavior rather than defects in this project. The measured results, the reasoning, and how to re-run the qualification are recorded in [docs/RC_CHECKLIST.md](docs/RC_CHECKLIST.md). Keyboard and mouse navigation are unaffected.
 
+A later Linux run against the same controller and a Retro 108 keyboard is recorded in [docs/clean-room-evidence/hardware_run_linux_2026-10-08.md](docs/clean-room-evidence/hardware_run_linux_2026-10-08.md). Over hidraw the Ultimate 2 answers 4 of the 12 safe reads, so the empty reads above do not reproduce on Linux; it still exposes no gamepad interface. The Retro 108, connected over USB, exposes no interface that carries the documented protocol, so OpenBitdo identifies it and reports it as unreachable rather than offering diagnostics or mapping.
+
 ## Shell Completions
 
 Completion scripts for the CLI's flags live in [completions/](completions/):
@@ -76,12 +78,14 @@ Completion scripts for the CLI's flags live in [completions/](completions/):
 | zsh | Copy `completions/openbitdo.zsh` as `_openbitdo` onto a directory in your `$fpath`, added before `compinit` runs |
 | fish | Copy `completions/openbitdo.fish` into `~/.config/fish/completions/` |
 
-Linux archives and the AUR package include the udev rule and completions. After installing the udev rule, reload rules and replug the controller before expecting non-root HID access:
+Linux archives and the AUR package include the udev rule and completions. OpenBitdo opens the kernel's hidraw node for a device (`/dev/hidrawN`), so the rule, `70-openbitdo.rules`, grants the logged-in user access to hidraw nodes of 8BitDo devices. After installing it, reload rules and replug the device before expecting non-root access:
 
 ```sh
 sudo udevadm control --reload-rules
 sudo udevadm trigger
 ```
+
+Building from source? Install the rule yourself with `sudo cp packaging/linux/70-openbitdo.rules /etc/udev/rules.d/`. If a device shows "no permission" in the app, this is the fix.
 
 ## macOS Packaging Caveat
 
