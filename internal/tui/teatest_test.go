@@ -144,7 +144,7 @@ func TestTeatest_MappingEditorPresetCycling(t *testing.T) {
 // nowhere, and no risk acknowledgement can be reached.
 func TestTeatest_FirmwareIsNotOfferedIn010(t *testing.T) {
 	tm, _, _ := newTeatestModel(t, filepath.Join(t.TempDir(), "config.toml"), 100, 30)
-	waitForAllOutputs(t, tm, "Retro 108 Mechanical Keyboard", "Firmware updates are not available in this release.")
+	waitForAllOutputs(t, tm, "Retro 108 Mechanical Keyboard", "Firmware update: Deferred in 0.0.3.")
 
 	tm.Send(tea.KeyMsg{Type: tea.KeyRight}) // into actions pane at Run diagnostics(0)
 	waitForOutput(t, tm, "› Run diagnostics")

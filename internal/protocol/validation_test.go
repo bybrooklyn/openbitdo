@@ -70,7 +70,7 @@ func TestDiagDetailOnlyClaimsAPIDThatMatchesTheDevice(t *testing.T) {
 	session := &DeviceSession{target: VidPid{VID: 0x2dc8, PID: 0x6013}}
 
 	// Captured from an Ultimate 2: GetPid's PID field held 0x32a0.
-	if got := session.diagIdentityDetail(CommandGetPid, map[string]uint32{"detected_pid": 0x32a0}); !strings.Contains(got, "not this device's 0x6013") {
+	if got := session.diagIdentityDetail(CommandGetPid, map[string]uint32{"detected_pid": 0x32a0}); !strings.Contains(got, "does not carry this device's product ID") {
 		t.Fatalf("a mismatched PID must not be reported as detected: %q", got)
 	}
 	if got := session.diagIdentityDetail(CommandGetPid, map[string]uint32{"detected_pid": 0x6013}); got != "detected pid 0x6013" {

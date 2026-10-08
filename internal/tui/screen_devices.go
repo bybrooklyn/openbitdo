@@ -221,13 +221,13 @@ func (m Model) actionsForSelectedDevice() []actionItem {
 		})
 	}
 	if device.SupportTier == protocol.TierCandidateReadOnly {
-		reason := ""
+		// The risk acknowledgement is collected by a dialog when the action
+		// is triggered, so it is not a precondition here.
+		reason := candidateUnlockDisabledReason(device, m.advancedMode, true, m.writeLockUntilRestart)
 		switch {
-		case m.writeLockUntilRestart:
-			reason = "Write locked until restart"
-		case !m.advancedMode:
+		case reason == "Enable advanced mode first":
 			reason = "turn on Advanced mode in Settings first"
-		case !candidateUnlockFilePresent(m.settingsPath, device.VidPid):
+		case reason == "" && !candidateUnlockFilePresent(m.settingsPath, device.VidPid):
 			reason = "needs an unlock file: " + candidateUnlockFilePath(m.settingsPath, device.VidPid) +
 				" containing pid = \"" + fmt.Sprintf("%#04x", device.VidPid.PID) + "\" and candidate_write_unlock = true"
 		}
@@ -678,7 +678,10 @@ func (m Model) deviceDetailPanel(width, height int) devicePanel {
 	panel.add(-1, "")
 	panel.add(-1, strings.Split(wrapStyled(styleFaint, "Next: "+m.nextStepFor(device, health), text), "\n")...)
 	if !m.core.FirmwareEnabled() {
-		panel.add(-1, strings.Split(wrapStyled(styleFaint, "Firmware updates are not available in this release.", text), "\n")...)
+		// Said once, with the release's own label, instead of a disabled
+		// action row on every device.
+		note := "Firmware update: " + firmwareDisabledReason(device, false, true, m.writeLockUntilRestart) + ". Not available in this release."
+		panel.add(-1, strings.Split(wrapStyled(styleFaint, note, text), "\n")...)
 	}
 	if note := tierNote(device); note != "" && health.Reachable() {
 		panel.add(-1, "")

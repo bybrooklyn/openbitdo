@@ -293,7 +293,7 @@ func (s *DeviceSession) diagIdentityDetail(command CommandID, facts map[string]u
 	switch command {
 	case CommandGetPid:
 		if pid, ok := facts["detected_pid"]; ok && uint16(pid) != s.target.PID {
-			return fmt.Sprintf("replied, but its PID field reads %#04x, not this device's %#04x", pid, s.target.PID)
+			return fmt.Sprintf("answered; the reply does not carry this device's product ID (field reads %#04x)", pid)
 		}
 	case CommandGetReportRevision:
 		detail := diagSuccessDetail(command, facts)

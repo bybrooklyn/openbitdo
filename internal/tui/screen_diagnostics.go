@@ -227,6 +227,14 @@ func checkLabel(command protocol.CommandID) string {
 // checkOutcome says in a few words what a check found.
 func checkOutcome(c protocol.DiagCommandStatus) string {
 	if c.OK {
+		// The mode read has two forms; say which one answered without the
+		// internal error text of the one that did not.
+		if strings.HasPrefix(c.Detail, "ok via GetModeAlt fallback") {
+			return "answered by the alternate read only"
+		}
+		if c.Detail == "ok" {
+			return "answered"
+		}
 		return c.Detail
 	}
 	if c.BytesRead == 0 && c.ErrorCode == protocol.CodeMalformedResponse {

@@ -161,8 +161,15 @@ func (m Model) settingsInfoLines() []string {
 	if len(m.navNotes) == 0 {
 		add("No controller is driving the menus. Keyboard and mouse always work.")
 	}
+	shown := 0
 	for _, note := range m.navNotes {
-		add("· " + m.friendlyNavNote(note))
+		if friendly := m.friendlyNavNote(note); friendly != "" {
+			add("· " + friendly)
+			shown++
+		}
+	}
+	if len(m.navNotes) > 0 && shown == 0 {
+		add("No controller is connected. Keyboard and mouse always work.")
 	}
 
 	section("Files")
@@ -176,7 +183,7 @@ func (m Model) settingsInfoLines() []string {
 }
 
 // friendlyNavNote turns internal/input's "pid=0x6013: gamepad nav ..." note
-// into a sentence naming the device.
+// into a sentence naming the device, or "" for a note not worth showing.
 func (m Model) friendlyNavNote(note string) string {
 	prefix, rest, ok := strings.Cut(note, ": ")
 	var pid uint16
@@ -187,7 +194,13 @@ func (m Model) friendlyNavNote(note string) string {
 		return note
 	}
 	name := fmt.Sprintf("Device %#04x", pid)
-	if catalog := protocol.DeviceProfileFor(protocol.VidPid{VID: 0x2dc8, PID: pid}).DisplayName; catalog != "" {
+	profile := protocol.DeviceProfileFor(protocol.VidPid{VID: 0x2dc8, PID: pid})
+	if profile.ProtocolFamily == protocol.JpHandshake && !strings.HasPrefix(rest, "gamepad nav active") {
+		// A keyboard has no gamepad interface by nature; saying it "cannot
+		// drive the menus" would be both obvious and wrong.
+		return ""
+	}
+	if catalog := profile.DisplayName; catalog != "" {
 		name = catalog
 	}
 	for _, device := range m.devices.devices {

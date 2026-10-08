@@ -65,21 +65,3 @@ func candidateUnlockDisabledReason(device core.AppDevice, advancedMode, acknowle
 		return ""
 	}
 }
-
-// blockedLinesForDevice returns the beginner-facing bullet list of what's
-// blocked for device and why, shown on the device detail panel.
-func blockedLinesForDevice(device core.AppDevice, firmwareAvailable, mockMode, unsafeAcknowledged, advancedMode, acknowledgedRisk, writeLockUntilRestart bool) []string {
-	var lines []string
-	if reason := firmwareDisabledReason(device, firmwareAvailable, unsafeAcknowledged, writeLockUntilRestart); reason != "" {
-		lines = append(lines, "Firmware update: "+reason)
-	}
-	if reason := mappingDisabledReason(device, mockMode, writeLockUntilRestart); reason != "" {
-		lines = append(lines, "Mapping editor: "+reason)
-	}
-	if device.SupportTier == protocol.TierCandidateReadOnly {
-		if reason := candidateUnlockDisabledReason(device, advancedMode, acknowledgedRisk, writeLockUntilRestart); reason != "" {
-			lines = append(lines, "Guarded write probe: "+reason)
-		}
-	}
-	return lines
-}
