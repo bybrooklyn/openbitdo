@@ -11,6 +11,12 @@ All notable changes to OpenBitdo are tracked here.
   Win, Alt+Tab and Alt+F4 locks and the volume level are settings; the profile can be renamed or
   erased. Each write is read back, and what was written is put back if the keyboard did not keep
   it.
+- Retro 108 macros: press `m` on a key to build a macro for it from key taps, holds, releases and
+  pauses, with a repeat count and a pause between repeats. A macro that would leave a key held is
+  refused. On a real keyboard this stays behind advanced mode until a macro write has been
+  confirmed on hardware.
+- Profile and macro names are written the way the vendor's application writes them, so each
+  program can read names the other wrote.
 - Ultimate 2: the controller's real configuration protocol (a checksummed header over one
   1592-byte record per platform, written by byte range and committed) replaces frames that no
   controller ever answered. A profile editor covers three slots, the 22-input button map (back

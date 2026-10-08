@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"fmt"
+	"reflect"
 	"strings"
 
 	"github.com/bybrooklyn/openbitdo/internal/core"
@@ -91,6 +92,9 @@ type keyboardState struct {
 	// the text so far.
 	naming    bool
 	nameInput string
+
+	// macro is the macro editor, open over the key list for one key.
+	macro macroEditor
 }
 
 // kbNameMax is the longest profile name one report carries, in characters.
@@ -126,6 +130,10 @@ func cloneKeyboardProfile(p core.KeyboardProfile) core.KeyboardProfile {
 	for id, target := range p.Mappings {
 		out.Mappings[id] = target
 	}
+	out.Macros = make(map[byte]core.KeyMacro, len(p.Macros))
+	for id, macro := range p.Macros {
+		out.Macros[id] = cloneMacro(macro)
+	}
 	return out
 }
 
@@ -151,6 +159,20 @@ func (s keyboardState) changes() core.KeyboardChanges {
 		name := s.draft.Name
 		changes.Name = &name
 	}
+	if !macrosEqual(s.draft.Macros, s.loaded.Macros) {
+		changes.Macros = map[byte]*core.KeyMacro{}
+		for id := range s.loaded.Macros {
+			if _, kept := s.draft.Macros[id]; !kept {
+				changes.Macros[id] = nil
+			}
+		}
+		for id, macro := range s.draft.Macros {
+			if was, had := s.loaded.Macros[id]; !had || !reflect.DeepEqual(was, macro) {
+				macro := cloneMacro(macro)
+				changes.Macros[id] = &macro
+			}
+		}
+	}
 	return changes
 }
 
@@ -170,6 +192,8 @@ func (m *Model) kbSnapshot() {
 // removes the entry, so "back to normal" is not counted as a change.
 func (m *Model) kbSetTarget(key core.KeyboardKey, target core.KeyTarget) {
 	m.kbSnapshot()
+	// A key plays a macro or has a mapping, not both.
+	delete(m.mapping.kb.draft.Macros, key.ID)
 	if target == key.Default() {
 		if was, explicit := m.mapping.kb.loaded.Target(key); explicit && was != target {
 			m.mapping.kb.draft.Mappings[key.ID] = target
@@ -224,11 +248,26 @@ func (m Model) updateKeyboard(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.mapping.kb.naming {
 			return m.updateKeyboardName(msg)
 		}
+		if m.mapping.kb.macro.open {
+			return m.updateMacroEditor(msg)
+		}
 		rows := len(keyboardRows)
 		switch msg.String() {
 		case "X":
 			if !m.mapping.applying {
 				m.modal = eraseKeyboardModal()
+			}
+		case "m":
+			if m.mapping.cursor < rows && keyboardRows[m.mapping.cursor].kind == kbRowKey {
+				key := keyboardRows[m.mapping.cursor].key
+				_, has := m.mapping.kb.draft.Macros[key.ID]
+				if !has && len(m.mapping.kb.draft.Macros) >= core.KeyMacroSlots {
+					m.mapping.statusMsg = fmt.Sprintf("The keyboard holds %d macros. Remove one first.", core.KeyMacroSlots)
+				} else if !m.core.MacrosWritable() {
+					m.mapping.statusMsg = "Macros have not been confirmed on a real keyboard yet. Turn on advanced mode in Settings to edit them."
+				} else {
+					m.openMacroEditor(key)
+				}
 			}
 		case "esc":
 			if m.mapping.dirty() {
@@ -489,6 +528,14 @@ func (m Model) keyboardRowText(row kbRow) (label, value string, changed bool) {
 		}
 		return "Profile name", kb.draft.Name, kb.draft.Name != kb.loaded.Name
 	}
+	if macro, ok := kb.draft.Macros[row.key.ID]; ok {
+		was, had := kb.loaded.Macros[row.key.ID]
+		return row.key.Name, "macro: " + macro.Name + "  (" + macro.Summary() + ")", !had || !reflect.DeepEqual(was, macro)
+	}
+	if _, had := kb.loaded.Macros[row.key.ID]; had {
+		now, _ := kb.draft.Target(row.key)
+		return row.key.Name, now.String(), true // its macro was removed
+	}
 	now, explicit := kb.draft.Target(row.key)
 	was, _ := kb.loaded.Target(row.key)
 	value = now.String()
@@ -508,6 +555,9 @@ func (m Model) keyboardPanel(height int) devicePanel {
 
 	if kb.picking {
 		return m.keyboardPickerPanel(panel, text)
+	}
+	if kb.macro.open {
+		return m.macroPanel(panel, text)
 	}
 
 	profile := "no profile yet (applying creates one)"
@@ -635,6 +685,9 @@ func (m Model) clickKeyboard(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	}
 	owner, ok := m.keyboardPanel(m.height-3).ownerAt(msg.X, msg.Y)
 	if !ok {
+		return m, nil
+	}
+	if m.mapping.kb.macro.open {
 		return m, nil
 	}
 	if m.mapping.kb.picking {

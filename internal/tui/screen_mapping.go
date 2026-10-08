@@ -60,7 +60,7 @@ func (s mappingState) dirty() bool {
 
 // typing reports whether keys are going into a text field or search box.
 func (s mappingState) typing() bool {
-	return s.kb.picking || s.kb.naming || s.pad.picking || s.pad.naming
+	return s.kb.picking || s.kb.naming || s.pad.picking || s.pad.naming || s.kb.macro.open
 }
 
 func (m Model) updateMapping(msg tea.Msg) (tea.Model, tea.Cmd) {

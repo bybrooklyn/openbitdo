@@ -274,3 +274,95 @@ func TestKeyboardRenameAndErase(t *testing.T) {
 		t.Fatal("the editor should show the erased keyboard")
 	}
 }
+
+func TestMacroEditorBuildsSavesAndAppliesAMacro(t *testing.T) {
+	m, c := newTestModel(t, filepath.Join(t.TempDir(), "config.toml"))
+	m = loadDevicesAndDrain(t, m, c)
+	next, cmd := m.navigate(screenMapping, 0)
+	m = drainCmds(t, next, cmd)
+
+	// On K1: hold Left Ctrl, tap C, let go of Left Ctrl, pause, tap V.
+	m.mapping.cursor = 2
+	if keyboardRows[2].key.Name != "K1" {
+		t.Fatalf("row 2 is %q", keyboardRows[2].key.Name)
+	}
+	m = press(t, m, "m")
+	if !m.mapping.kb.macro.open || !strings.Contains(ansi.Strip(m.View()), "Macro on K1") {
+		t.Fatal("m should open the macro editor for the selected key")
+	}
+	// Letters typed here are commands or search text, never shell shortcuts.
+	m = press(t, m, "p", "left ctrl", "enter", "a", "c", "enter", "r", "left ctrl", "enter", "w", "right", "a", "v", "enter")
+	editor := m.mapping.kb.macro
+	if len(editor.macro.Steps) != 7 || editor.macro.Steps[4] != (core.KeyMacroStep{Kind: core.StepWait, Millis: 60}) {
+		t.Fatalf("steps = %+v", editor.macro.Steps)
+	}
+	if got := editor.macro.Summary(); got != "Left Ctrl+C V" {
+		t.Fatalf("summary = %q", got)
+	}
+
+	// Saving needs a name; a macro that leaves a key held cannot be saved.
+	m.mapping.kb.macro.cursor = macroHeadRows + 7 // Save
+	m = press(t, m, "enter")
+	if !m.mapping.kb.macro.open || !strings.Contains(m.mapping.kb.macro.problem, "name") {
+		t.Fatalf("saving without a name should say so, got %q", m.mapping.kb.macro.problem)
+	}
+	m.mapping.kb.macro.cursor = macroRowName
+	m = press(t, m, "enter", "copy", "enter")
+	m.mapping.kb.macro.cursor = macroRowRepeat
+	m = press(t, m, "right", "right")
+	m.mapping.kb.macro.cursor = macroHeadRows + 7
+	m = press(t, m, "enter")
+	if m.mapping.kb.macro.open {
+		t.Fatalf("expected the macro to save, problem=%q", m.mapping.kb.macro.problem)
+	}
+	if _, value, changed := m.keyboardRowText(keyboardRows[2]); !changed || !strings.Contains(value, "macro: copy") {
+		t.Fatalf("the key row should show its macro, got %q", value)
+	}
+
+	m.mapping.cursor = len(keyboardRows) // Apply
+	nextModel, cmd := m.Update(*keyMsg("enter"))
+	m = drainCmds(t, nextModel.(Model), cmd)
+	if m.mapping.dirty() || !strings.Contains(m.mapping.statusMsg, "Applied and verified") {
+		t.Fatalf("expected a verified apply, status=%q", m.mapping.statusMsg)
+	}
+	profile, err := c.KeyboardReadProfile(m.ctx, m.mapping.device.VidPid)
+	if err != nil || profile.Macros[240].Name != "copy" || profile.Macros[240].Repeat != 3 || len(profile.Macros[240].Steps) != 7 {
+		t.Fatalf("the keyboard should hold the macro on K1: %+v err=%v", profile.Macros, err)
+	}
+
+	// Assigning the key something else drops its macro.
+	m.mapping.cursor = 2
+	m = press(t, m, "enter", "f13", "enter")
+	if _, still := m.mapping.kb.draft.Macros[240]; still {
+		t.Fatal("a key with a mapping must not keep its macro")
+	}
+	if changes := m.mapping.kb.changes(); changes.Macros == nil || changes.Macros[240] != nil {
+		t.Fatalf("expected the change set to remove K1's macro, got %+v", changes.Macros)
+	}
+}
+
+func TestMacroEditorRefusesAHeldKeyAndCancelsCleanly(t *testing.T) {
+	m := keyboardModel(t, 100, 30)
+	m.mapping.cursor = 0
+	m = press(t, m, "m", "p", "a", "enter")
+	m.mapping.kb.macro.cursor = macroRowName
+	m = press(t, m, "enter", "stuck", "enter")
+	m.mapping.kb.macro.cursor = macroHeadRows + 1 // Save
+	m = press(t, m, "enter")
+	if !m.mapping.kb.macro.open || !strings.Contains(m.mapping.kb.macro.problem, "never released") {
+		t.Fatalf("a macro that leaves a key down must not save: %q", m.mapping.kb.macro.problem)
+	}
+	m = press(t, m, "esc")
+	if m.mapping.kb.macro.open || m.mapping.dirty() || m.screen != screenMapping {
+		t.Fatal("esc should leave the macro editor without changing the draft")
+	}
+}
+
+func TestRealKeyboardMacroEditorIsGatedUntilConfirmed(t *testing.T) {
+	m := keyboardModel(t, 100, 30)
+	m.core = core.New(core.Config{}) // a real keyboard, not --mock
+	m = press(t, m, "m")
+	if m.mapping.kb.macro.open || !strings.Contains(m.mapping.statusMsg, "advanced mode") {
+		t.Fatalf("expected the macro editor to stay shut with a reason, status=%q", m.mapping.statusMsg)
+	}
+}

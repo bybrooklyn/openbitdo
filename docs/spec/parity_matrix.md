@@ -43,7 +43,7 @@ asks the device which product it is. OpenBitdo lists 0x310b as detect-only today
 | Volume level 1-5 | yes | read: hardware; write: simulated |
 | Rename the profile | yes | hardware (first write of a name); rename of an existing profile simulated |
 | Erase the profile | yes | simulated |
-| Macros: 8 slots, any key, up to 200 steps, repeat count and interval | yes | no (list read: hardware) |
+| Macros: 8 slots, any key, up to 200 steps, repeat count and interval | yes | simulated (list read: hardware). Built step by step; recording live key presses: no |
 | Profile library on the computer: save, copy, export, import | yes | no |
 | Live view of the Super Button ports | yes | no |
 | Firmware update | yes | no (deferred) |

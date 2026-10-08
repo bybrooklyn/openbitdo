@@ -100,8 +100,23 @@ func (m Model) viewHints() []keyHint {
 					{key: "esc", label: "cancel"},
 				}
 			}
+			if m.mapping.kb.macro.open {
+				if m.mapping.kb.macro.picking {
+					return []keyHint{{key: "type", label: "to search"}, {key: move, label: "move"}, {key: "enter", label: "add"}, {key: "esc", label: "cancel"}}
+				}
+				return []keyHint{
+					{key: "a", label: "tap", help: "add a key tap (press and release)"},
+					{key: "p", label: "hold", help: "add a key press that stays down"},
+					{key: "r", label: "let go", help: "add a key release"},
+					{key: "w", label: "pause", help: "add a pause; ←→ changes its length"},
+					{key: "del", label: "remove", help: "remove the selected step"},
+					{key: move, label: "move"},
+					{key: "esc", label: "back", help: "back to the key list without saving"},
+				}
+			}
 			return append([]keyHint{
 				{key: move, label: "move", help: "move through the keys (j/k, pgup/pgdn too)"},
+				{key: "m", label: "macro", help: "record a sequence of keys for this key to play"},
 				{key: choose, label: "assign", help: "choose what the key does; on a setting, change it"},
 				{key: "←→", label: "step", help: "step through the choices without opening the list"},
 				{key: "del", label: "default", help: "put the key back to its normal behaviour"},
