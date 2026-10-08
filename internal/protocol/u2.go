@@ -28,6 +28,9 @@ const (
 	u2CmdSelectPlatform uint16 = 0x0014
 	u2CmdSetLight       uint16 = 0x0040
 	u2CmdGetLight       uint16 = 0x0041
+	u2CmdMacroRead      uint16 = 0x0102
+	u2CmdMacroWrite     uint16 = 0x0103
+	u2CmdMacroErase     uint16 = 0x0104
 	u2CmdPhysicalMode   uint16 = 0x0105
 	u2CmdConnected      uint16 = 0x0120
 
@@ -121,6 +124,12 @@ func u2CommandCode(command CommandID) (uint16, bool) {
 		return u2CmdConnected, true
 	case CommandU2GetLightEffect:
 		return u2CmdGetLight, true
+	case CommandU2MacroRead:
+		return u2CmdMacroRead, true
+	case CommandU2MacroWrite:
+		return u2CmdMacroWrite, true
+	case CommandU2MacroErase:
+		return u2CmdMacroErase, true
 	case CommandU2SetLightEffect:
 		return u2CmdSetLight, true
 	}
@@ -280,4 +289,87 @@ func (s *DeviceSession) U2SetLightEffect(ctx context.Context, effect byte) error
 	}
 	_, err = s.sendRow(ctx, row, u2Frame(row.Request, uint16(effect), nil, 0, 0, 0))
 	return err
+}
+
+// Macro storage. Besides its record, a controller keeps a 16 KiB area per
+// platform and slot for recorded macros: four regions of 4096 bytes, one
+// per macro, each holding ten-byte steps.
+const (
+	// U2MacroRegion is the size of one macro's storage.
+	U2MacroRegion = 4096
+	// U2MacrosPerSlot is how many macros a slot holds.
+	U2MacrosPerSlot = 4
+	// u2MacroChunk is how many macro bytes one report carries.
+	u2MacroChunk = 32
+)
+
+func u2MacroArg(platform, slot byte) uint16 { return uint16(platform)<<8 | uint16(slot) }
+
+func u2MacroRangeOK(offset, length int) bool {
+	return offset >= 0 && length >= 1 && offset+length <= U2MacroRegion*U2MacrosPerSlot
+}
+
+// U2ReadMacroData reads length bytes of a slot's macro storage at offset.
+func (s *DeviceSession) U2ReadMacroData(ctx context.Context, platform, slot byte, offset, length int) ([]byte, error) {
+	row, err := s.ensureCommandAllowed(CommandU2MacroRead)
+	if err != nil {
+		return nil, err
+	}
+	if !u2MacroRangeOK(offset, length) {
+		return nil, errInvalidInput("macro range %d+%d is outside a slot's macro storage", offset, length)
+	}
+	out := make([]byte, 0, length)
+	for len(out) < length {
+		want := min(u2MacroChunk, length-len(out))
+		resp, err := s.sendRow(ctx, row, u2Frame(row.Request, u2MacroArg(platform, slot), nil, want, uint32(length), uint32(offset+len(out))))
+		if err != nil {
+			return nil, err
+		}
+		_, data, _ := u2ReplyFor(resp.Raw, u2CmdMacroRead)
+		if len(data) == 0 {
+			return nil, errInvalidResponse(row.ID, fmt.Sprintf("empty chunk at offset %d", offset+len(out)))
+		}
+		out = append(out, data[:min(len(data), length-len(out))]...)
+	}
+	return out, nil
+}
+
+// U2EraseMacroData erases one region of a slot's macro storage. A region
+// is erased before it is written.
+func (s *DeviceSession) U2EraseMacroData(ctx context.Context, platform, slot byte, offset, length int) error {
+	row, err := s.ensureCommandAllowed(CommandU2MacroErase)
+	if err != nil {
+		return err
+	}
+	if !u2MacroRangeOK(offset, length) {
+		return errInvalidInput("macro range %d+%d is outside a slot's macro storage", offset, length)
+	}
+	_, err = s.sendRow(ctx, row, u2Frame(row.Request, u2MacroArg(platform, slot), nil, length, 0, uint32(offset)))
+	return err
+}
+
+// U2WriteMacroData writes data into a slot's macro storage at offset.
+// Nothing takes effect until U2Commit.
+func (s *DeviceSession) U2WriteMacroData(ctx context.Context, platform, slot byte, offset int, data []byte) error {
+	row, err := s.ensureCommandAllowed(CommandU2MacroWrite)
+	if err != nil {
+		return err
+	}
+	if !u2MacroRangeOK(offset, len(data)) {
+		return errInvalidInput("macro range %d+%d is outside a slot's macro storage", offset, len(data))
+	}
+	total := uint32(offset + len(data))
+	for sent := 0; sent < len(data); {
+		chunk := data[sent:min(len(data), sent+u2MacroChunk)]
+		resp, err := s.sendRow(ctx, row, u2Frame(row.Request, u2MacroArg(platform, slot), chunk, len(chunk), total, uint32(offset+sent)))
+		if err != nil {
+			return err
+		}
+		accepted, _, _ := u2ReplyFor(resp.Raw, u2CmdMacroWrite)
+		if accepted != len(chunk) {
+			return errInvalidResponse(row.ID, fmt.Sprintf("controller accepted %d of %d macro bytes at offset %d", accepted, len(chunk), offset+sent))
+		}
+		sent += accepted
+	}
+	return nil
 }

@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"math"
+	"reflect"
 	"unicode/utf16"
 
 	"github.com/bybrooklyn/openbitdo/internal/protocol"
@@ -129,6 +130,8 @@ type PadProfile struct {
 	// LightEffect is the stick-ring effect in use: one of the
 	// protocol.U2Light* values. It belongs to the controller, not a slot.
 	LightEffect byte
+	// Macros are each slot's four recorded macros.
+	Macros [PadSlots][PadMacros]PadMacro
 
 	// record is the raw record this was decoded from. Writes start from
 	// it so everything this program does not model is preserved.
@@ -454,6 +457,9 @@ func readPadProfile(ctx context.Context, session *protocol.DeviceSession) (PadPr
 	if profile.LightEffect, err = session.U2LightEffect(ctx); err != nil {
 		return PadProfile{}, errProtocol(err)
 	}
+	if profile.Macros, err = readPadMacros(ctx, session, record, profile.Platform); err != nil {
+		return PadProfile{}, errProtocol(err)
+	}
 	return profile, nil
 }
 
@@ -490,19 +496,43 @@ func (c *OpenBitdoCore) PadApply(ctx context.Context, vidPid protocol.VidPid, ed
 		}
 		spans = append(spans, changed...)
 	}
-	backupID := c.storeBackup(vidPid, configBackupPayload{kind: backupPad, padRecord: before.record})
+	macroSlots := map[int]bool{}
+	for slot := range edited.Macros {
+		if reflect.DeepEqual(edited.Macros[slot], before.Macros[slot]) {
+			continue
+		}
+		for j, macro := range edited.Macros[slot] {
+			if err := macro.Validate(); err != nil {
+				return WriteRecoveryReport{}, errInvalidState("slot %d macro %d: %v", slot+1, j+1, err)
+			}
+		}
+		macroSlots[slot] = true
+		section := encodePadMacroSection(platform, edited.Macros[slot])
+		at := padOffMacros + slot*padMacroSection
+		if !bytes.Equal(record[at:at+padMacroSection], section) {
+			copy(record[at:], section)
+			spans = append(spans, padRange{at, padMacroSection})
+		}
+	}
+	backupID := c.storeBackup(vidPid, configBackupPayload{kind: backupPad, padRecord: before.record, padMacros: before.Macros})
 	report := WriteRecoveryReport{BackupID: backupID, HasBackupID: true}
 	effect := edited.LightEffect
 	if effect == 0 {
 		effect = before.LightEffect // a profile built without one leaves it alone
 	}
-	if len(spans) == 0 && effect == before.LightEffect {
+	if len(spans) == 0 && len(macroSlots) == 0 && effect == before.LightEffect {
 		report.WriteApplied = true
 		return report, nil
 	}
 
 	var applyErr error
-	if len(spans) > 0 {
+	// Steps go first: a header must never describe steps that are not there.
+	for slot := 0; slot < PadSlots && applyErr == nil; slot++ {
+		if macroSlots[slot] {
+			applyErr = writePadMacroSteps(ctx, session, platform, slot, edited.Macros[slot], before.Macros[slot])
+		}
+	}
+	if applyErr == nil && len(spans) > 0 {
 		applyErr = writePadSpans(ctx, session, record, spans)
 	}
 	if applyErr == nil && effect != before.LightEffect {
@@ -516,6 +546,11 @@ func (c *OpenBitdoCore) PadApply(ctx context.Context, vidPid protocol.VidPid, ed
 	var rollbackErr error
 	if len(spans) > 0 {
 		rollbackErr = writePadSpans(ctx, session, before.record, spans)
+	}
+	for slot := 0; slot < PadSlots && rollbackErr == nil; slot++ {
+		if macroSlots[slot] {
+			rollbackErr = writePadMacroSteps(ctx, session, platform, slot, before.Macros[slot], edited.Macros[slot])
+		}
 	}
 	if rollbackErr == nil && effect != before.LightEffect {
 		rollbackErr = setPadLightEffect(ctx, session, before.LightEffect)
@@ -553,7 +588,7 @@ func writePadSpans(ctx context.Context, session *protocol.DeviceSession, record 
 
 // restorePadBackup writes a backed-up record back wherever the controller's
 // record now differs from it.
-func (c *OpenBitdoCore) restorePadBackup(ctx context.Context, vidPid protocol.VidPid, backup []byte) error {
+func (c *OpenBitdoCore) restorePadBackup(ctx context.Context, vidPid protocol.VidPid, backup []byte, macros [PadSlots][PadMacros]PadMacro) error {
 	session, platform, done, err := c.padSession(ctx, vidPid)
 	if err != nil {
 		return err
@@ -578,6 +613,15 @@ func (c *OpenBitdoCore) restorePadBackup(ctx context.Context, vidPid protocol.Vi
 			i++
 		}
 		spans = append(spans, padRange{start, i - start})
+	}
+	now, err2 := readPadMacros(ctx, session, current, platform)
+	if err2 != nil {
+		return errProtocol(err2)
+	}
+	for slot := 0; slot < PadSlots; slot++ {
+		if err := writePadMacroSteps(ctx, session, platform, slot, macros[slot], now[slot]); err != nil {
+			return errProtocol(err)
+		}
 	}
 	if len(spans) == 0 {
 		return nil

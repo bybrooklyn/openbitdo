@@ -240,7 +240,7 @@ var notAStandaloneCheck = map[CommandID]bool{
 	// to ask.
 	CommandJp108ReadMacroName: true, CommandJp108ReadMacroValue: true,
 	// Answered only by a controller that is on; the profile read asks it.
-	CommandU2GetLightEffect: true,
+	CommandU2GetLightEffect: true, CommandU2MacroRead: true,
 }
 
 type diagCheckPlan struct {

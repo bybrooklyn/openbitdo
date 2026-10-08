@@ -152,6 +152,7 @@ type configBackupPayload struct {
 	jp108Mappings []DedicatedButtonMapping
 	keyboard      KeyboardProfile
 	padRecord     []byte
+	padMacros     [PadSlots][PadMacros]PadMacro
 }
 
 type deviceKind int

@@ -162,7 +162,7 @@ func (c *OpenBitdoCore) RestoreBackup(ctx context.Context, backupID ConfigBackup
 		return nil
 	}
 	if backup.payload.kind == backupPad {
-		return c.restorePadBackup(ctx, backup.target, backup.payload.padRecord)
+		return c.restorePadBackup(ctx, backup.target, backup.payload.padRecord, backup.payload.padMacros)
 	}
 
 	session, err := c.openSessionForOps(ctx, backup.target)

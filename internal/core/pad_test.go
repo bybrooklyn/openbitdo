@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -278,5 +279,104 @@ func TestPadMotionAndLightsRoundTrip(t *testing.T) {
 	again.Slots[0].Motion = PadMotion{Target: PadMotionLeftStick, Button: PadHome, Sensitivity: 5, DeadZone: 40}
 	if _, err := c.PadApply(ctx, padTarget, again); err == nil {
 		t.Fatal("Home cannot enable motion and must be refused")
+	}
+}
+
+func TestPadMacrosApplyReadBackAndRestore(t *testing.T) {
+	pad := &protocol.U2Simulator{Physical: protocol.U2PlatformDInput}
+	c := padCore(pad)
+	ctx := context.Background()
+	profile, err := c.PadReadProfile(ctx, padTarget)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	combo := PadMacro{Name: "Combo", Trigger: PadPaddle1, Repeat: 1, Steps: []PadMacroStep{
+		{Millis: 50, Buttons: uint16(PadA | PadR1), Left: PadStickCentre, Right: PadStickCentre},
+		{Millis: 120, Left: PadStickDownRight, Right: PadStickCentre},
+		{Millis: 30, Left: PadStickCentre, Right: PadStickCentre},
+	}}
+	long := PadMacro{Name: "Long", Trigger: PadPaddle2, Repeat: 3, IntervalMillis: 500}
+	for i := 0; i < 99; i++ {
+		long.Steps = append(long.Steps,
+			PadMacroStep{Millis: 20, Buttons: uint16(PadB), Left: PadStickCentre, Right: PadStickCentre},
+			PadMacroStep{Millis: 20, Left: PadStickCentre, Right: PadStickCentre})
+	}
+	profile.Macros[1][0], profile.Macros[1][3] = combo, long
+	report, err := c.PadApply(ctx, padTarget, profile)
+	if err != nil || !report.WriteApplied {
+		t.Fatalf("apply: %+v err=%v", report, err)
+	}
+
+	// The first step as stored: 50 ms, A+R1, no analog triggers, sticks centred.
+	area := pad.MacroArea(uint16(protocol.U2PlatformDInput)<<8 | 1)
+	if got := area[:10]; !bytes.Equal(got, []byte{50, 0, 0x00, 0x28, 0, 0, 0x7f, 0x7f, 0x7f, 0x7f}) {
+		t.Fatalf("first step stored as % x", got)
+	}
+	// The header: name, platform, three steps at offset 0, trigger P1.
+	header := pad.Record(protocol.U2PlatformDInput)[0x1f4+216+8:]
+	if !bytes.Equal(header[:10], []byte("\x00C\x00o\x00m\x00b\x00o")) || header[32] != 1 || header[34] != 3 ||
+		binary.LittleEndian.Uint32(header[40:]) != 0x02000000 {
+		t.Fatalf("macro header stored as % x", header[:52])
+	}
+	if pad.Record(protocol.U2PlatformDInput)[0x1f4+216+4] != 2 {
+		t.Fatal("the slot should count two macros")
+	}
+
+	again, err := c.PadReadProfile(ctx, padTarget)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(again.Macros[1][0], combo) || !reflect.DeepEqual(again.Macros[1][3], long) {
+		t.Fatalf("macros read back differently:\n%+v", again.Macros[1][0])
+	}
+	if !again.Macros[0][0].Empty() || !again.Macros[1][1].Empty() {
+		t.Fatal("untouched macro slots must stay empty")
+	}
+	if got := combo.Steps[0].String(); got != "A+R1 for 50 ms" {
+		t.Fatalf("step described as %q", got)
+	}
+
+	// Removing a macro drops its header; restoring the backup brings it back.
+	again.Macros[1][0] = PadMacro{}
+	second, err := c.PadApply(ctx, padTarget, again)
+	if err != nil || !second.WriteApplied {
+		t.Fatalf("remove: %+v err=%v", second, err)
+	}
+	if after, _ := c.PadReadProfile(ctx, padTarget); !after.Macros[1][0].Empty() || after.Macros[1][3].Empty() {
+		t.Fatal("removing one macro should leave the other")
+	}
+	if err := c.RestoreBackup(ctx, second.BackupID); err != nil {
+		t.Fatal(err)
+	}
+	if after, _ := c.PadReadProfile(ctx, padTarget); !reflect.DeepEqual(after.Macros[1][0], combo) {
+		t.Fatalf("restore should bring the macro back, got %+v", after.Macros[1][0])
+	}
+}
+
+func TestPadMacroRefusals(t *testing.T) {
+	pad := &protocol.U2Simulator{Physical: protocol.U2PlatformDInput}
+	c := padCore(pad)
+	ctx := context.Background()
+	profile, _ := c.PadReadProfile(ctx, padTarget)
+	rest := PadMacroStep{Millis: 20, Left: PadStickCentre, Right: PadStickCentre}
+	held := PadMacroStep{Millis: 20, Buttons: uint16(PadA), Left: PadStickCentre, Right: PadStickCentre}
+	for name, macro := range map[string]PadMacro{
+		"a macro that ends holding a button": {Name: "x", Trigger: PadPaddle1, Steps: []PadMacroStep{held}},
+		"a macro with no name":               {Trigger: PadPaddle1, Steps: []PadMacroStep{held, rest}},
+		"a trigger that cannot play macros":  {Name: "x", Trigger: PadHome, Steps: []PadMacroStep{held, rest}},
+		"a step with no duration":            {Name: "x", Trigger: PadPaddle1, Steps: []PadMacroStep{{Left: PadStickCentre, Right: PadStickCentre}, rest}},
+	} {
+		edited := profile
+		edited.Macros[0][0] = macro
+		before := len(pad.Frames)
+		if _, err := c.PadApply(ctx, padTarget, edited); err == nil {
+			t.Errorf("%s must be refused", name)
+		}
+		for _, frame := range pad.Frames[before:] {
+			if cmd := binary.LittleEndian.Uint16(frame[2:]); cmd == 1 || cmd == 0x103 || cmd == 0x104 {
+				t.Errorf("%s: nothing may be written or erased, saw cmd %#x", name, cmd)
+			}
+		}
 	}
 }

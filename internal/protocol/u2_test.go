@@ -157,3 +157,45 @@ func TestU2ReplyToAnotherCommandIsNotAccepted(t *testing.T) {
 		t.Fatal("a reply too short to hold the header is malformed")
 	}
 }
+
+func TestU2MacroStorageEraseWriteCommitRead(t *testing.T) {
+	pad := &U2Simulator{Physical: U2PlatformDInput}
+	session := u2Session(t, pad)
+	ctx := context.Background()
+	steps := make([]byte, 70) // seven ten-byte steps: three reports
+	for i := range steps {
+		steps[i] = byte(i + 1)
+	}
+	const slot, region = 1, 2 * U2MacroRegion
+	if err := session.U2EraseMacroData(ctx, U2PlatformDInput, slot, region, U2MacroRegion); err != nil {
+		t.Fatal(err)
+	}
+	if err := session.U2WriteMacroData(ctx, U2PlatformDInput, slot, region, steps); err != nil {
+		t.Fatal(err)
+	}
+	if pad.BadCRCs != 0 {
+		t.Fatalf("%d chunks carried a wrong crc", pad.BadCRCs)
+	}
+	if got, _ := session.U2ReadMacroData(ctx, U2PlatformDInput, slot, region, len(steps)); bytes.Equal(got, steps) {
+		t.Fatal("macro bytes must not be stored before the commit")
+	}
+	if err := session.U2Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	got, err := session.U2ReadMacroData(ctx, U2PlatformDInput, slot, region, len(steps))
+	if err != nil || !bytes.Equal(got, steps) {
+		t.Fatalf("read back % x err=%v", got, err)
+	}
+	// The request addresses platform 1, slot 1: arg 0x0101.
+	last := pad.Frames[len(pad.Frames)-1]
+	if want, _ := hex.DecodeString("810402010101"); !bytes.Equal(last[:6], want) {
+		t.Fatalf("read request = % x", last[:6])
+	}
+	// Another slot's storage is untouched, and ranges are checked.
+	if other, _ := session.U2ReadMacroData(ctx, U2PlatformDInput, 0, region, 4); !bytes.Equal(other, []byte{0xff, 0xff, 0xff, 0xff}) {
+		t.Fatalf("slot 1's macro storage changed: % x", other)
+	}
+	if err := session.U2WriteMacroData(ctx, U2PlatformDInput, slot, 4*U2MacroRegion-4, steps); err == nil {
+		t.Fatal("a write past the end of macro storage must be refused")
+	}
+}

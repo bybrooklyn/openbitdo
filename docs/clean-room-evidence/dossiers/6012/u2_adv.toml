@@ -3,7 +3,7 @@
 dossier_id = "DOS-6012-U2-ADV"
 pid_hex = "0x6012"
 operation_group = "Ultimate2Core"
-command_id = ["U2GetConnected", "U2GetPhysicalMode", "U2SetReportState", "U2SelectPlatform", "U2RecordRead", "U2RecordWrite", "U2Commit", "U2GetLightEffect", "U2SetLightEffect"]
+command_id = ["U2GetConnected", "U2GetPhysicalMode", "U2SetReportState", "U2SelectPlatform", "U2RecordRead", "U2RecordWrite", "U2Commit", "U2GetLightEffect", "U2SetLightEffect", "U2MacroRead", "U2MacroWrite", "U2MacroErase"]
 request_shape = "64-byte output report 0x81: 81 04, then a 16-byte header (cmd u16, arg u16, len u16, crc u16, total u32, offset u32), then up to 45 data bytes"
 response_shape = "64-byte input report 0x02: 02 04, then a 16-byte header (04 00, cmd u16 echoed, len u16, crc u16, two u32), then data from byte 18"
 validator_rules = ["byte0 == 0x02", "byte1 == 0x04", "bytes 2-3 == 04 00", "bytes 4-5 echo the request's cmd"]
@@ -72,6 +72,16 @@ hardware = "no"
 request = "cmd 0x0040, arg = effect (2, 3, 4, or 5 for off)"
 reply = "cmd echoed"
 notes = "The effect belongs to the controller, not to a slot; the colours each effect uses are in the record."
+hardware = "no"
+
+[commands.macro_storage]
+area = "per platform and slot, 16384 bytes: four regions of 4096, one per macro"
+address = "arg = platform << 8 | slot; at most 32 data bytes per report"
+read = "cmd 0x0102, len, total, offset; reply carries the bytes"
+write = "cmd 0x0103, data with crc, offset; reply len = bytes accepted; takes effect on commit (cmd 6)"
+erase = "cmd 0x0104, len = bytes to erase, offset; the reply can take seconds. A region is erased before it is written."
+step = "ten bytes: duration ms u16, button bits u16, analog trigger values u16 (unused: triggers are button bits), left stick u16, right stick u16. A stick is X in the low byte and Y in the high byte, 0x7f centred"
+header = "in the record at 0x1f4 + slot * 216: flag u32, macro count u8, then four 52-byte entries: name 32 bytes, platform u8, a zero byte, step count u16, offset u16 (macro index * 4096), trigger button u32, repeat count u32, interval ms u32"
 hardware = "no"
 
 [record_sections]

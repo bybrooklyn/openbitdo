@@ -36,6 +36,10 @@ type U2Simulator struct {
 	Commits int
 	// Light is the stick-ring light effect in use.
 	Light byte
+	// Macros holds macro storage by platform<<8 | slot, erased to 0xff.
+	Macros map[uint16][]byte
+	// macroStaged holds macro writes until the next commit.
+	macroStaged map[uint16][]byte
 
 	platform byte
 	staged   []byte
@@ -104,6 +108,44 @@ func (u *U2Simulator) Write(data []byte) (int, error) {
 			mode = 1
 		}
 		u.reply(cmd, 1, []byte{mode})
+	case u2CmdMacroRead:
+		area := u.MacroArea(arg)
+		if offset >= len(area) || length < 1 {
+			u.reply(cmd, 0, nil)
+			break
+		}
+		end := min(len(area), offset+min(length, u2MacroChunk))
+		u.reply(cmd, end-offset, area[offset:end])
+	case u2CmdMacroErase:
+		area := u.MacroArea(arg)
+		for i := offset; i < min(len(area), offset+length); i++ {
+			area[i] = 0xff
+		}
+		u.reply(cmd, 0, nil)
+	case u2CmdMacroWrite:
+		if length < 1 || length > u2MacroChunk || offset+length > U2MacroRegion*U2MacrosPerSlot {
+			break
+		}
+		chunk := data[u2DataOffset : u2DataOffset+length]
+		if u2CRC(chunk) != crc {
+			u.BadCRCs++
+			break
+		}
+		if u.macroStaged == nil {
+			u.macroStaged = map[uint16][]byte{}
+		}
+		if u.macroStaged[arg] == nil {
+			u.macroStaged[arg] = append([]byte(nil), u.MacroArea(arg)...)
+		}
+		if u.ShortAccept {
+			length--
+		}
+		// Flash can only clear bits: writing over a region that was not
+		// erased first leaves garbage, as on the real thing.
+		for i, b := range chunk[:length] {
+			u.macroStaged[arg][offset+i] &= b
+		}
+		u.reply(cmd, length, nil)
 	case u2CmdGetLight:
 		u.reply(cmd, 1, []byte{u.Light})
 	case u2CmdSetLight:
@@ -146,6 +188,10 @@ func (u *U2Simulator) Write(data []byte) (int, error) {
 		if u.staged != nil {
 			u.Records[u.platform], u.staged = u.staged, nil
 		}
+		for key, area := range u.macroStaged {
+			u.Macros[key] = area
+		}
+		u.macroStaged = nil
 		u.Commits++
 		u.reply(cmd, 0, nil)
 	}
@@ -159,4 +205,19 @@ func (u *U2Simulator) Read(context.Context, int, uint64) ([]byte, error) {
 	frame := u.pending[0]
 	u.pending = u.pending[1:]
 	return frame, nil
+}
+
+// MacroArea returns the stored macro storage for platform<<8 | slot.
+func (u *U2Simulator) MacroArea(key uint16) []byte {
+	if u.Macros == nil {
+		u.Macros = map[uint16][]byte{}
+	}
+	if u.Macros[key] == nil {
+		area := make([]byte, U2MacroRegion*U2MacrosPerSlot)
+		for i := range area {
+			area[i] = 0xff
+		}
+		u.Macros[key] = area
+	}
+	return u.Macros[key]
 }
