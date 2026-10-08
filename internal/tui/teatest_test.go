@@ -92,11 +92,11 @@ func waitForAllOutputs(t *testing.T, tm *teatest.TestModel, substrs ...string) {
 // only render once that device is actually selected.
 func TestTeatest_DashboardRendersAndKeyboardNavMoves(t *testing.T) {
 	tm, _, _ := newTeatestModel(t, filepath.Join(t.TempDir(), "config.toml"), 100, 30)
-	waitForOutput(t, tm, "PID_108JP") // initial frame: header, device list, and detail panel together
+	waitForOutput(t, tm, "Retro 108 Mechanical Keyboard") // initial frame: header, device list, and detail panel together
 
 	tm.Send(tea.KeyMsg{Type: tea.KeyDown})
 	tm.Send(tea.KeyMsg{Type: tea.KeyDown})
-	waitForOutput(t, tm, "Not hardware-confirmed yet")
+	waitForOutput(t, tm, "This model is recognised")
 }
 
 // TestTeatest_GamepadNavDrivesSameNavigationAsKeyboard: a simulated gamepad
@@ -107,14 +107,14 @@ func TestTeatest_DashboardRendersAndKeyboardNavMoves(t *testing.T) {
 // frame, so its appearance is real proof the DPad-right event moved focus.
 func TestTeatest_GamepadNavDrivesSameNavigationAsKeyboard(t *testing.T) {
 	tm, navCh, _ := newTeatestModel(t, filepath.Join(t.TempDir(), "config.toml"), 100, 30)
-	waitForOutput(t, tm, "PID_108JP")
+	waitForOutput(t, tm, "Retro 108 Mechanical Keyboard")
 
 	navCh <- input.NavEvent{Kind: input.EventDPadChanged, DPad: input.DirDown}
 	navCh <- input.NavEvent{Kind: input.EventDPadChanged, DPad: input.DirDown}
-	waitForOutput(t, tm, "Not hardware-confirmed yet")
+	waitForOutput(t, tm, "This model is recognised")
 
 	navCh <- input.NavEvent{Kind: input.EventDPadChanged, DPad: input.DirRight}
-	waitForOutput(t, tm, "› Diagnose")
+	waitForOutput(t, tm, "› Run diagnostics")
 }
 
 // TestTeatest_MappingEditorPresetCycling: preset cycling in the mapping
@@ -126,32 +126,33 @@ func TestTeatest_GamepadNavDrivesSameNavigationAsKeyboard(t *testing.T) {
 // check would spuriously pass without cycling ever happening.
 func TestTeatest_MappingEditorPresetCycling(t *testing.T) {
 	tm, _, _ := newTeatestModel(t, filepath.Join(t.TempDir(), "config.toml"), 100, 30)
-	waitForOutput(t, tm, "PID_108JP")
+	waitForOutput(t, tm, "Retro 108 Mechanical Keyboard")
 
 	tm.Send(tea.KeyMsg{Type: tea.KeyRight}) // JP108 (full support) selected by default; into actions pane
-	waitForOutput(t, tm, "› Diagnose")
+	waitForOutput(t, tm, "› Run diagnostics")
 	tm.Send(tea.KeyMsg{Type: tea.KeyDown}) // Diagnose(0) -> Mapping Editor(1)
 	tm.Send(tea.KeyMsg{Type: tea.KeyEnter})
-	waitForOutput(t, tm, "0x0004  (←/→ to change)") // button A's mock-initial target, row 0 selected by default
+	waitForOutput(t, tm, "A (0x0004)  (←/→ to change)") // button A's mock-initial target, row 0 selected by default
 
 	tm.Send(tea.KeyMsg{Type: tea.KeyRight})
-	waitForOutput(t, tm, "0x0005  (←/→ to change)")
+	waitForOutput(t, tm, "B (0x0005)  (←/→ to change)")
 }
 
-// TestTeatest_FirmwareActionIsDeferredIn010: firmware is a visible but
-// disabled action in v0.0.3. Selecting it must explain the deferral without
-// opening the unsafe acknowledgement modal or starting download/preflight.
-func TestTeatest_FirmwareActionIsDeferredIn010(t *testing.T) {
+// TestTeatest_FirmwareIsNotOfferedIn010: firmware cannot run in v0.0.3, so
+// it is not an action a user can walk onto. The device panel says so once,
+// and the action list ends at the mapping editor: moving down from it goes
+// nowhere, and no risk acknowledgement can be reached.
+func TestTeatest_FirmwareIsNotOfferedIn010(t *testing.T) {
 	tm, _, _ := newTeatestModel(t, filepath.Join(t.TempDir(), "config.toml"), 100, 30)
-	waitForOutput(t, tm, "PID_108JP")
+	waitForAllOutputs(t, tm, "Retro 108 Mechanical Keyboard", "Firmware updates are not available in this release.")
 
-	tm.Send(tea.KeyMsg{Type: tea.KeyRight}) // JP108 selected; into actions pane at Diagnose(0)
-	waitForOutput(t, tm, "› Diagnose")
-	tm.Send(tea.KeyMsg{Type: tea.KeyDown}) // Diagnose(0) -> Mapping Editor(1)
-	tm.Send(tea.KeyMsg{Type: tea.KeyDown}) // Mapping Editor(1) -> Firmware Update(2)
-	waitForOutput(t, tm, "› Firmware Update  (Deferred in 0.0.3)")
+	tm.Send(tea.KeyMsg{Type: tea.KeyRight}) // into actions pane at Run diagnostics(0)
+	waitForOutput(t, tm, "› Run diagnostics")
+	tm.Send(tea.KeyMsg{Type: tea.KeyDown}) // -> Mapping editor(1), the last row
+	waitForOutput(t, tm, "› Mapping editor")
+	tm.Send(tea.KeyMsg{Type: tea.KeyDown}) // nothing below it
 	tm.Send(tea.KeyMsg{Type: tea.KeyEnter})
-	waitForOutput(t, tm, "Firmware Update: Deferred in 0.0.3")
+	waitForOutput(t, tm, "Key mapping:") // enter opened the mapping editor, not firmware
 }
 
 // TestTeatest_SettingsTogglePersistsAcrossReload: toggling a setting writes
@@ -163,16 +164,10 @@ func TestTeatest_FirmwareActionIsDeferredIn010(t *testing.T) {
 func TestTeatest_SettingsTogglePersistsAcrossReload(t *testing.T) {
 	settingsPath := filepath.Join(t.TempDir(), "config.toml")
 	tm, _, _ := newTeatestModel(t, settingsPath, 100, 30)
-	waitForOutput(t, tm, "PID_108JP")
+	waitForOutput(t, tm, "Retro 108 Mechanical Keyboard")
 
-	tm.Send(tea.KeyMsg{Type: tea.KeyRight}) // JP108 selected; into actions pane at Diagnose(0)
-	waitForOutput(t, tm, "› Diagnose")
-	tm.Send(tea.KeyMsg{Type: tea.KeyDown}) // -> Mapping Editor(1)
-	tm.Send(tea.KeyMsg{Type: tea.KeyDown}) // -> Firmware Update(2)
-	tm.Send(tea.KeyMsg{Type: tea.KeyDown}) // -> Settings(3)
-	waitForOutput(t, tm, "› Settings")
-	tm.Send(tea.KeyMsg{Type: tea.KeyEnter})
-	waitForOutput(t, tm, "Advanced Mode: false")
+	tm.Send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("s")}) // settings is a key, not a device action
+	waitForOutput(t, tm, "› Advanced mode    off")
 
 	tm.Send(tea.KeyMsg{Type: tea.KeyEnter}) // toggle Advanced Mode (settingsCursor starts at 0)
 	waitForOutput(t, tm, "Settings saved.")

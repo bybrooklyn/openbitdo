@@ -127,3 +127,7 @@ type settingsSavedMsg struct {
 type noticeExpiredMsg struct {
 	id int
 }
+
+// clipboardCopiedMsg reports that a copy request was sent to the terminal.
+// Whether the terminal honoured it cannot be known.
+type clipboardCopiedMsg struct{}

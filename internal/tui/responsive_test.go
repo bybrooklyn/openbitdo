@@ -135,7 +135,7 @@ func TestResponsiveEveryScreenCriticalContentAndFooter(t *testing.T) {
 	for _, size := range responsiveSizes {
 		t.Run(size.name+"/diagnostics-detail", func(t *testing.T) {
 			m := responsiveDiagModel(t, size.width, size.height, false)
-			assertResponsiveFrame(t, m, "Diagnostics:", "Checks:", "Detail", "command=")
+			assertResponsiveFrame(t, m, "Diagnostics:", "checks answered", "command ")
 			next, _ := m.Update(tea.MouseMsg{Button: tea.MouseButtonWheelDown})
 			m = next.(Model)
 			if m.diag.cursor != 11 {
@@ -145,14 +145,14 @@ func TestResponsiveEveryScreenCriticalContentAndFooter(t *testing.T) {
 
 		t.Run(size.name+"/diagnostics-support-request", func(t *testing.T) {
 			m := responsiveDiagModel(t, size.width, size.height, true)
-			next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("s")})
+			next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("v")})
 			m = next.(Model)
-			assertResponsiveFrame(t, m, "Support request", "esc to go back")
+			assertResponsiveFrame(t, m, "Diagnostics report:", "c copy", "w save", "esc back")
 		})
 
 		t.Run(size.name+"/jp108-mapping-actions", func(t *testing.T) {
 			m := responsiveJP108MappingModel(t, size.width, size.height)
-			assertResponsiveFrame(t, m, "JP108", "Apply", "Undo", "Reset")
+			assertResponsiveFrame(t, m, "Key mapping", "Apply", "Undo", "Reset")
 			for _, cursor := range []int{m.mapping.rowCount() - 3, m.mapping.rowCount() - 2, m.mapping.rowCount() - 1} {
 				m.mapping.cursor = cursor
 				next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
@@ -165,7 +165,7 @@ func TestResponsiveEveryScreenCriticalContentAndFooter(t *testing.T) {
 
 		t.Run(size.name+"/u2-long-mapping-actions", func(t *testing.T) {
 			m := responsiveU2MappingModel(t, size.width, size.height)
-			assertResponsiveFrame(t, m, "Ultimate2", "Apply", "Undo", "Reset", "more above")
+			assertResponsiveFrame(t, m, "Button mapping", "Apply", "Undo", "Reset", "more above")
 			m.mapping.cursor = m.mapping.rowCount() - 1
 			m.ensureMappingCursorVisible()
 			assertResponsiveFrame(t, m, "Reset")
@@ -177,16 +177,16 @@ func TestResponsiveEveryScreenCriticalContentAndFooter(t *testing.T) {
 			for i := 0; i < 16; i++ {
 				m.navNotes = append(m.navNotes, fmt.Sprintf("pid=0x%04x: gamepad nav active with a deliberately long note", 0x6000+i))
 			}
-			assertResponsiveFrame(t, m, "Settings", "Advanced Mode", "Report Save Mode", "Build")
+			assertResponsiveFrame(t, m, "Settings", "Advanced mode", "Save reports", "Recent activity")
 			if m.settingsInfoMaxOffset() > 0 {
 				next, _ := m.Update(tea.MouseMsg{Button: tea.MouseButtonWheelDown})
 				m = next.(Model)
 				if m.settingsInfoOffset == 0 {
 					t.Fatal("settings wheel must scroll secondary paths/navigation information")
 				}
-				assertResponsiveFrame(t, m, "more above", "Gamepad Navigation")
+				assertResponsiveFrame(t, m, "pgup/pgdn to scroll", "Controller navigation")
 			}
-			settingsRow := renderedRowContaining(t, m.View(), "Report Save Mode:")
+			settingsRow := renderedRowContaining(t, m.View(), "Save reports")
 			next, _ := m.Update(tea.MouseMsg{Button: tea.MouseButtonLeft, Action: tea.MouseActionPress, X: 4, Y: settingsRow})
 			m = next.(Model)
 			if m.settingsCursor != 1 {
@@ -199,23 +199,22 @@ func TestResponsiveEveryScreenCriticalContentAndFooter(t *testing.T) {
 			m.screen = screenRecovery
 			m.recoveryReason = "write failed during guarded recovery"
 			m.recoveryHasBackup = true
-			assertResponsiveFrame(t, m, "Write lock active", "restore", "quit")
+			assertResponsiveFrame(t, m, "Writes are locked", "restore", "quit")
 		})
 
-		t.Run(size.name+"/deferred-firmware-dashboard", func(t *testing.T) {
+		t.Run(size.name+"/unavailable-action-dashboard", func(t *testing.T) {
 			m, c := responsiveModel(t, size.width, size.height)
 			m = loadDevices(t, m, c)
+			m.devices.cursor = 1 // Ultimate 2: mapping is blocked on real hardware
 			m.devices.pane = paneActions
-			m.devices.actionIdx = 2
+			m.devices.actionIdx = 1
 			next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 			m = next.(Model)
-			if calculateLayout(m.width, m.height).mode == layoutCompact {
-				assertResponsiveFrame(t, m, "Actions:", "Firmware Update (Deferred in 0.0.3)")
-			} else {
-				assertResponsiveFrame(t, m, "Firmware update: Deferred in 0.0.3")
-			}
+			// The same panels at every size: the list never disappears, and
+			// the reason is written out under the row.
+			assertResponsiveFrame(t, m, "Devices", "› Mapping editor", "not available:")
 			if m.screen != screenDevices {
-				t.Fatalf("deferred firmware action should not leave dashboard, got screen=%v", m.screen)
+				t.Fatalf("an unavailable action should not leave the dashboard, got screen=%v", m.screen)
 			}
 		})
 
@@ -254,32 +253,34 @@ func TestResponsiveEveryScreenCriticalContentAndFooter(t *testing.T) {
 func TestCompactActionsEveryRowVisibleAndClickableAt60x18(t *testing.T) {
 	m, c := responsiveModel(t, 60, 18)
 	m = loadDevices(t, m, c)
+	// The candidate device has the longest action list, including a row
+	// whose reason wraps over several lines.
+	m.devices.cursor = 2
 	m.devices.pane = paneActions
 	items := m.actionsForSelectedDevice()
-	if len(items) < 5 {
-		t.Fatalf("expected compact action pane to expose at least five actions, got %d", len(items))
+	if len(items) < 3 {
+		t.Fatalf("expected the candidate device to offer at least three actions, got %d", len(items))
 	}
 
 	for i, item := range items {
 		m.devices.actionIdx = i
 		view := ansi.Strip(m.View())
-		label := item.label
-		if !strings.Contains(view, "› "+label) {
-			t.Fatalf("selected compact action %d %q not visible:\n%s", i, label, view)
+		if !strings.Contains(view, "› "+item.label) {
+			t.Fatalf("selected compact action %d %q not visible:\n%s", i, item.label, view)
 		}
-		if item.reason != "" && !strings.Contains(view, item.reason) {
-			t.Fatalf("disabled compact action %q should show reason %q:\n%s", label, item.reason, view)
+		if item.reason != "" && !strings.Contains(view, "not available:") {
+			t.Fatalf("unavailable compact action %q should show its reason:\n%s", item.label, view)
 		}
 
-		row := renderedRowContaining(t, m.View(), "› "+label)
+		row := renderedRowContaining(t, m.View(), "› "+item.label)
 		next, _ := m.Update(tea.MouseMsg{
 			Button: tea.MouseButtonLeft, Action: tea.MouseActionPress,
 			X: 3, Y: row,
 		})
 		clicked := next.(Model)
 		if item.reason != "" {
-			if clicked.screen != screenDevices || !strings.Contains(clicked.statusLine, item.reason) {
-				t.Fatalf("disabled compact click should stay on devices and expose reason, screen=%v status=%q", clicked.screen, clicked.statusLine)
+			if clicked.screen != screenDevices || !strings.Contains(clicked.statusLine, "is not available") {
+				t.Fatalf("unavailable compact click should stay on devices and say why, screen=%v status=%q", clicked.screen, clicked.statusLine)
 			}
 		}
 	}

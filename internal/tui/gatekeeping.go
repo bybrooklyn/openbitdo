@@ -8,8 +8,8 @@ import (
 // This file ports the exact blocked-action gating semantics from the prior
 // Rust TUI's state.rs (dashboard_firmware_disabled_reason,
 // dashboard_mapping_disabled_reason, dashboard_unlock_disabled_reason) —
-// same messages, same precedence order. The screen layout around them is
-// new; the safety semantics are not.
+// same conditions, same precedence order. The wording of a reason is free
+// to change; which condition wins is not.
 
 // firmwareDisabledReason returns why firmware update is blocked for device,
 // or "" if it's available.
@@ -37,9 +37,9 @@ func mappingDisabledReason(device core.AppDevice, mockMode, writeLockUntilRestar
 		(device.Capability.SupportsU2ButtonMap && device.Capability.SupportsU2SlotConfig)
 	switch {
 	case device.SupportTier != protocol.TierFull:
-		return "Blocked until read/write/readback confirmation"
+		return "this model is not confirmed for writing yet"
 	case !hasMapping:
-		return "No confirmed mapping editor for this PID"
+		return "there is no mapping editor for this model yet"
 	case device.Capability.SupportsU2ButtonMap && !mockMode:
 		return "button-map framing not hardware-confirmed"
 	case writeLockUntilRestart:

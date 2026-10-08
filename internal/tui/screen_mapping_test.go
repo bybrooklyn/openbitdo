@@ -255,15 +255,15 @@ func TestMappingDraft_U2MappingsUnavailableRendersWithoutPanicking(t *testing.T)
 // remain reachable while the Ultimate2 button/paddle rows scroll internally.
 func TestTeatest_U2PaddleRemapDraftAndApply(t *testing.T) {
 	tm, _, _ := newTeatestModel(t, filepath.Join(t.TempDir(), "config.toml"), 100, 30)
-	waitForOutput(t, tm, "PID_108JP")
+	waitForOutput(t, tm, "Retro 108 Mechanical Keyboard")
 
 	tm.Send(tea.KeyMsg{Type: tea.KeyDown}) // JP108 -> Ultimate2 (mock device order)
-	waitForOutput(t, tm, "PID_Ultimate2")
-	tm.Send(tea.KeyMsg{Type: tea.KeyRight}) // into actions pane, Diagnose(0)
-	waitForOutput(t, tm, "› Diagnose")
+	waitForOutput(t, tm, "› ● Ultimate 2 Wireless Controller")
+	tm.Send(tea.KeyMsg{Type: tea.KeyRight}) // into actions pane, Run diagnostics(0)
+	waitForOutput(t, tm, "› Run diagnostics")
 	tm.Send(tea.KeyMsg{Type: tea.KeyDown}) // Diagnose(0) -> Mapping Editor(1)
 	tm.Send(tea.KeyMsg{Type: tea.KeyEnter})
-	waitForAllOutputs(t, tm, "Ultimate2 Core Mapping", "more below")
+	waitForAllOutputs(t, tm, "Button mapping preview", "more below")
 
 	for range core.AllU2Buttons { // move the cursor past all 17 button rows onto Paddle1's row
 		tm.Send(tea.KeyMsg{Type: tea.KeyDown})

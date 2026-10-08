@@ -53,7 +53,7 @@ func TestFirmwareDisabledReason_WriteLockOverridesEverything(t *testing.T) {
 
 func TestMappingDisabledReason_RequiresConfirmedMappingCapability(t *testing.T) {
 	full := core.AppDevice{SupportTier: protocol.TierFull}
-	if reason := mappingDisabledReason(full, false, false); reason != "No confirmed mapping editor for this PID" {
+	if reason := mappingDisabledReason(full, false, false); reason != "there is no mapping editor for this model yet" {
 		t.Fatalf("got %q", reason)
 	}
 	full.Capability.SupportsJP108DedicatedMap = true

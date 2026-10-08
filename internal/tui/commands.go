@@ -2,11 +2,14 @@ package tui
 
 import (
 	"context"
+	"io"
+	"os"
 
 	"github.com/bybrooklyn/openbitdo/internal/core"
 	"github.com/bybrooklyn/openbitdo/internal/input"
 	"github.com/bybrooklyn/openbitdo/internal/protocol"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // Every command below wraps one internal/core (or internal/input) call as a
@@ -179,5 +182,21 @@ func cmdSaveReport(mode ReportSaveMode, settingsPath, operation string, device *
 	return func() tea.Msg {
 		path, err := persistSupportReport(mode, settingsPath, operation, device, status, message, diag, firmware, runtimeUnlock)
 		return reportSavedMsg{path: path, err: err}
+	}
+}
+
+// clipboardOut is where the clipboard escape sequence is written: the
+// terminal. A variable so tests can capture it.
+var clipboardOut io.Writer = os.Stdout
+
+// cmdCopyToClipboard asks the terminal to put text on the system clipboard
+// (OSC 52). It works over SSH and needs no clipboard tool, but a terminal
+// may ignore it, and nothing reports back either way. The sequence is one
+// write, so it cannot be split by a frame being drawn at the same time;
+// tea.Printf is no use here, since it prints nothing on the alternate screen.
+func cmdCopyToClipboard(text string) tea.Cmd {
+	return func() tea.Msg {
+		_, _ = io.WriteString(clipboardOut, ansi.SetSystemClipboard(text))
+		return clipboardCopiedMsg{}
 	}
 }

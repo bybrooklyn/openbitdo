@@ -22,6 +22,10 @@ type modal struct {
 	confirmLabel string
 	cancelLabel  string
 	onConfirm    tea.Msg
+	// focusCancel is which button enter activates. A dangerous confirmation
+	// starts on Cancel, so a stray enter (or a held gamepad button) backs
+	// out instead of writing to a device.
+	focusCancel bool
 }
 
 type discardAction int
@@ -43,28 +47,32 @@ func newModal(title string, body []string, danger bool, confirmLabel string, onC
 	return modal{
 		active: true, danger: danger, title: title, body: body,
 		confirmLabel: confirmLabel, cancelLabel: "Cancel", onConfirm: onConfirm,
+		focusCancel: danger,
 	}
 }
 
-// riskAckModal is the real one-time "this may brick your device"
-// confirmation the Rust TUI never actually had (it hardcoded the
-// acknowledgement flags true with a comment claiming a UI surface that
-// didn't exist). onConfirm is the action that was waiting on this
-// acknowledgement.
-func riskAckModal(action string, onConfirm tea.Msg) modal {
-	return newModal(
-		"Unsafe operation acknowledgement",
-		[]string{
-			"You are about to " + action + ".",
-			"",
-			"This writes to your controller's firmware or boot state.",
-			"An interrupted or failed write can permanently brick the device.",
-			"",
-			"This acknowledgement applies for the rest of this session.",
-		},
-		true, "I understand the risk", onConfirm,
-	)
+// riskAckModal is the real one-time confirmation before anything is written
+// to a device that could harm it (the Rust TUI hardcoded the acknowledgement
+// flags true with a comment claiming a UI surface that didn't exist).
+// consequence says what this particular action writes and what can go wrong;
+// onConfirm is the action that was waiting on this acknowledgement.
+func riskAckModal(action string, consequence []string, onConfirm tea.Msg) modal {
+	body := append([]string{"You are about to " + action + ".", ""}, consequence...)
+	body = append(body, "", "This acknowledgement applies for the rest of this session.")
+	return newModal("Confirm a risky operation", body, true, "I understand the risk", onConfirm)
 }
+
+var (
+	firmwareRisk = []string{
+		"This writes to your controller's firmware or boot state.",
+		"An interrupted or failed write can permanently brick the device.",
+	}
+	writeProbeRisk = []string{
+		"This writes one setting to the device and reads it back, to learn",
+		"whether writes work on this model. It does not touch firmware, but a",
+		"write to an unconfirmed device can leave it in an unexpected state.",
+	}
+)
 
 func discardMappingModal(action discardAction) modal {
 	return newModal(
@@ -78,8 +86,12 @@ func discardMappingModal(action discardAction) modal {
 	)
 }
 
-func helpModal(help string) modal {
-	return newModal("Help", []string{help}, false, "OK", nil)
+// helpModal lists the keys for the current view. It has nothing to confirm,
+// so it shows a single Close button.
+func helpModal(title string, lines []string) modal {
+	m := newModal("Keys: "+title, lines, false, "Close", nil)
+	m.cancelLabel = ""
+	return m
 }
 
 // view renders the modal box itself (no positioning/backdrop) — see
@@ -96,14 +108,27 @@ func (m modal) view(width int) string {
 	b.WriteString(strings.Join(m.body, "\n"))
 	b.WriteString("\n\n")
 
-	confirmBtn := stylePositive.Render("[ " + m.confirmLabel + " ]")
-	if m.danger {
-		confirmBtn = styleDanger.Render("[ " + m.confirmLabel + " ]")
+	// The focused button is drawn inverted; the other one faint. Colour
+	// alone never carries it: the focused button also gets the › marker.
+	button := func(label string, focused bool, tone lipgloss.Style) string {
+		if focused {
+			return tone.Reverse(true).Render("›[ " + label + " ]")
+		}
+		return styleFaint.Render(" [ " + label + " ]")
 	}
-	cancelBtn := styleFaint.Render("[ " + m.cancelLabel + " ]")
-	b.WriteString(confirmBtn + "   " + cancelBtn)
-	b.WriteString("\n")
-	b.WriteString(styleHelp.Render("enter/A confirm · esc/B cancel"))
+	tone := stylePositive
+	if m.danger {
+		tone = styleDanger
+	}
+	if m.cancelLabel == "" {
+		b.WriteString(button(m.confirmLabel, true, tone))
+		b.WriteString("\n")
+		b.WriteString(styleHelp.Render("enter or esc to close"))
+	} else {
+		b.WriteString(button(m.confirmLabel, !m.focusCancel, tone) + "  " + button(m.cancelLabel, m.focusCancel, styleBody))
+		b.WriteString("\n")
+		b.WriteString(styleHelp.Render("←→ choose · enter/A select · esc/B cancel"))
+	}
 
 	return styleModal.Width(min(60, width-6)).Render(b.String())
 }

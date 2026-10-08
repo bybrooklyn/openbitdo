@@ -10,6 +10,7 @@ import (
 	"github.com/bybrooklyn/openbitdo/internal/input"
 	"github.com/bybrooklyn/openbitdo/internal/protocol"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // These tests cover the auto-detect/auto-diagnose/diagnostics-cache wiring:
@@ -329,8 +330,8 @@ func TestViewDiagnostics_StalenessIndicatorOnlyShownOnceRanAtIsSet(t *testing.T)
 	if !strings.Contains(view, "Last run: 1m ago") {
 		t.Fatalf("expected the staleness indicator once ranAt is set, got:\n%s", view)
 	}
-	if !strings.Contains(view, "r to rerun") {
-		t.Fatalf("expected the staleness indicator to mention the force-refresh key, got:\n%s", view)
+	if footer := ansi.Strip(m.View()); !strings.Contains(footer, "r rerun") {
+		t.Fatalf("expected the footer to offer the force-refresh key, got:\n%s", footer)
 	}
 }
 
@@ -351,8 +352,8 @@ func TestHandleHotplugEvent_DisconnectWhileViewingSameDeviceShowsRescanHint(t *t
 		t.Fatalf("expected a KindDeviceDisconnected error on the currently-viewed device, got %v", m.diag.err)
 	}
 	view := m.viewDiagnostics(m.height)
-	if !strings.Contains(view, "press r on the dashboard to rescan") {
-		t.Fatalf("expected the same rescan hint an operation-level disconnect already shows, got:\n%s", view)
+	if !strings.Contains(view, "Reconnect it, then press r") {
+		t.Fatalf("expected the same retry hint an operation-level disconnect already shows, got:\n%s", view)
 	}
 }
 

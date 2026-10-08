@@ -94,8 +94,8 @@ func TestView_ResponsiveMatrixStaysWithinBounds(t *testing.T) {
 		width, height int
 		want          string
 	}{
-		{60, 18, "Status"},
-		{80, 24, "Status"},
+		{60, 18, "Devices"},
+		{80, 24, "Devices"},
 		{96, 24, "Devices"},
 		{100, 30, "Devices"},
 		{120, 40, "Devices"},
@@ -136,31 +136,44 @@ func TestView_TooSmallShowsResizeOnly(t *testing.T) {
 	}
 }
 
-func TestMouse_DisabledFirmwareShowsReasonWithoutTransition(t *testing.T) {
+func TestMouse_UnavailableActionShowsReasonWithoutTransition(t *testing.T) {
 	m, c := newTestModel(t, filepath.Join(t.TempDir(), "config.toml"))
 	m = loadDevices(t, m, c)
+	// The Ultimate 2's mapping editor is blocked on real hardware.
+	m.devices.cursor = 1
 	m.devices.pane = paneActions
-	m.devices.actionIdx = 2
+	m.devices.actionIdx = 0
 
-	firmwareRow := renderedRowContaining(t, m.View(), "Firmware Update")
-	next, _ := m.Update(tea.MouseMsg{Button: tea.MouseButtonLeft, Action: tea.MouseActionPress, X: m.width - 10, Y: firmwareRow})
+	mappingRow := renderedRowContaining(t, m.View(), "Mapping editor")
+	next, _ := m.Update(tea.MouseMsg{Button: tea.MouseButtonLeft, Action: tea.MouseActionPress, X: m.width - 10, Y: mappingRow})
 	m = next.(Model)
 	if m.screen != screenDevices {
-		t.Fatalf("disabled firmware click changed screens to %v", m.screen)
+		t.Fatalf("unavailable action click changed screens to %v", m.screen)
 	}
-	if !strings.Contains(m.statusLine, "Deferred in 0.0.3") {
-		t.Fatalf("expected disabled reason in status line, got %q", m.statusLine)
+	if !strings.Contains(m.statusLine, "not hardware-confirmed") {
+		t.Fatalf("expected the reason in the status line, got %q", m.statusLine)
+	}
+	if !m.notice.transient {
+		t.Fatal("the reason is already beside the row, so the notice must clear itself")
+	}
+
+	// A click on the wrapped reason under the row means the same row.
+	reasonRow := renderedRowContaining(t, m.View(), "not available:")
+	m.devices.actionIdx = 0
+	next, _ = m.Update(tea.MouseMsg{Button: tea.MouseButtonLeft, Action: tea.MouseActionPress, X: m.width - 10, Y: reasonRow})
+	if got := next.(Model).devices.actionIdx; got != 1 {
+		t.Fatalf("clicking a row's reason line should select that row, got action %d", got)
 	}
 }
 
 func TestMouse_DeviceRowsActionsAndWheelUseSharedGeometry(t *testing.T) {
 	m, c := newTestModel(t, filepath.Join(t.TempDir(), "config.toml"))
-	m = loadDevices(t, m, c)
+	m = loadDevicesAndDrain(t, m, c)
 	if len(m.devices.filtered) < 3 {
 		t.Fatalf("expected at least three mock devices, got %d", len(m.devices.filtered))
 	}
 
-	deviceRow := renderedRowContaining(t, m.View(), "PID_Ultimate2")
+	deviceRow := renderedRowContaining(t, m.View(), "Ultimate 2 Wireless Controller")
 	next, _ := m.Update(tea.MouseMsg{Button: tea.MouseButtonLeft, Action: tea.MouseActionPress, X: 2, Y: deviceRow})
 	m = next.(Model)
 	if m.devices.cursor != 1 || m.devices.pane != paneDeviceList {
@@ -174,7 +187,7 @@ func TestMouse_DeviceRowsActionsAndWheelUseSharedGeometry(t *testing.T) {
 	}
 
 	m.devices.cursor = 0
-	diagnoseRow := renderedRowContaining(t, m.View(), "Diagnose")
+	diagnoseRow := renderedRowContaining(t, m.View(), "Run diagnostics")
 	next, _ = m.Update(tea.MouseMsg{Button: tea.MouseButtonLeft, Action: tea.MouseActionPress, X: m.width - 10, Y: diagnoseRow})
 	m = next.(Model)
 	if m.screen != screenDiagnostics {
@@ -214,7 +227,7 @@ func TestMouse_DiagnosticsSettingsMappingAndModalContracts(t *testing.T) {
 
 	m.screen = screenSettings
 	before := m.settings.ReportSaveMode
-	settingsRow := renderedRowContaining(t, m.View(), "Report Save Mode:")
+	settingsRow := renderedRowContaining(t, m.View(), "Save reports")
 	next, _ = m.Update(tea.MouseMsg{Button: tea.MouseButtonLeft, Action: tea.MouseActionPress, X: 5, Y: settingsRow})
 	m = next.(Model)
 	if m.settingsCursor != 1 || m.settings.ReportSaveMode == before {
@@ -581,11 +594,11 @@ func TestDiagnostics_DeviceDisconnectedShowsRescanHint(t *testing.T) {
 	m = next.(Model)
 
 	view := m.viewDiagnostics(m.height)
-	if !strings.Contains(view, "Diagnostics failed") {
-		t.Fatalf("expected the failure message to still render, got:\n%s", view)
+	if !strings.Contains(view, "The device was disconnected.") {
+		t.Fatalf("expected the failure to be named, got:\n%s", view)
 	}
-	if !strings.Contains(view, "press r on the dashboard to rescan") {
-		t.Fatalf("expected the rescan hint for a disconnected device, got:\n%s", view)
+	if !strings.Contains(view, "Reconnect it, then press r") {
+		t.Fatalf("expected the retry hint for a disconnected device, got:\n%s", view)
 	}
 }
 
@@ -660,10 +673,10 @@ func TestView_ModalDimsBackgroundInsteadOfReplacingIt(t *testing.T) {
 	}
 	baselineHeaderLine := strings.Split(baseline, "\n")[0]
 
-	m.modal = riskAckModal("run a test-only unsafe operation", nil)
+	m.modal = riskAckModal("run a test-only unsafe operation", firmwareRisk, nil)
 
 	withModal := m.View()
-	if !strings.Contains(withModal, "Unsafe operation acknowledgement") {
+	if !strings.Contains(withModal, "Confirm a risky operation") {
 		t.Fatal("expected the modal's own content to render")
 	}
 
@@ -776,7 +789,7 @@ func TestMappingEditorSelectionIsDistinctFromHeading(t *testing.T) {
 	m, _ := newTestModel(t, filepath.Join(t.TempDir(), "config.toml"))
 	m.width = 100
 	m.mapping = mappingState{
-		device: core.AppDevice{Name: "JP108", VidPid: protocol.VidPid{VID: 0x2dc8, PID: 0x5203}},
+		device: core.AppDevice{Name: "JP108", DisplayName: "JP108", VidPid: protocol.VidPid{VID: 0x2dc8, PID: 0x5203}},
 		kind:   core.KindJP108,
 		jp108Draft: []core.DedicatedButtonMapping{
 			{Button: core.DedicatedButtonID(0), TargetHIDUsage: 0x0004},
@@ -787,7 +800,7 @@ func TestMappingEditorSelectionIsDistinctFromHeading(t *testing.T) {
 
 	view := m.viewMapping(30)
 
-	headingRendered := stylePanelTitle.Render("JP108 Dedicated Mapping: JP108")
+	headingRendered := stylePanelTitle.Render("Key mapping: JP108")
 	if !strings.Contains(view, headingRendered) {
 		t.Fatalf("expected the panel heading to use stylePanelTitle, got:\n%s", view)
 	}
@@ -814,7 +827,7 @@ func TestMappingEditorSelectionIsDistinctFromHeading(t *testing.T) {
 func TestScreenHelp_ControllerHintsOnlyShownWhenGamepadConnected(t *testing.T) {
 	m, _ := newTestModel(t, filepath.Join(t.TempDir(), "config.toml"))
 
-	help := m.screenHelp()
+	help := m.footerHints(200)
 	if strings.Contains(help, "enter/A") || strings.Contains(help, "esc/B") || strings.Contains(help, "dpad") {
 		t.Fatalf("expected no controller glyphs with no gamepad connected, got: %s", help)
 	}
@@ -823,7 +836,8 @@ func TestScreenHelp_ControllerHintsOnlyShownWhenGamepadConnected(t *testing.T) {
 	}
 
 	m.navNotes = []string{"pid=0x6012: gamepad nav active"}
-	help = m.screenHelp()
+	m.devices.pane = paneActions // the pane with a "back" hint
+	help = m.footerHints(200)
 	if !strings.Contains(help, "enter/A") || !strings.Contains(help, "esc/B") || !strings.Contains(help, "dpad") {
 		t.Fatalf("expected controller glyphs once a gamepad is connected, got: %s", help)
 	}
@@ -842,16 +856,17 @@ func TestScreenHelp_UnavailableNavNoteDoesNotCountAsConnected(t *testing.T) {
 	}
 }
 
-// TestScreenHelp_DevicesScreenMentionsRightTabForActions guards the Devices
-// footer omission: right/tab is the real key that moves focus into the
-// Actions pane (screen_devices.go's "right", "tab" case), but the footer
-// never told users that.
-func TestScreenHelp_DevicesScreenMentionsRightTabForActions(t *testing.T) {
+// TestHelp_DevicesScreenMentionsEveryWayIntoActions guards the Devices
+// omission: enter, right and tab all move focus into the Actions pane
+// (screen_devices.go), and the help overlay must say so.
+func TestHelp_DevicesScreenMentionsEveryWayIntoActions(t *testing.T) {
 	m, _ := newTestModel(t, filepath.Join(t.TempDir(), "config.toml"))
 	m.screen = screenDevices
-	help := m.screenHelp()
-	if !strings.Contains(help, "right/tab") {
-		t.Fatalf("expected the Devices footer to mention right/tab for the Actions pane, got: %s", help)
+	help := ansi.Strip(strings.Join(m.helpLines(), "\n"))
+	for _, want := range []string{"enter", "→", "tab", "j/k"} {
+		if !strings.Contains(help, want) {
+			t.Fatalf("expected the Devices help to mention %q, got:\n%s", want, help)
+		}
 	}
 }
 
@@ -900,9 +915,9 @@ func TestViewDeviceDetail_NoDoubleBlankLineBeforeActions(t *testing.T) {
 	m, c := newTestModel(t, filepath.Join(t.TempDir(), "config.toml"))
 	m = loadDevices(t, m, c)
 
-	view := m.viewDeviceDetail(50, 30)
-	if !strings.Contains(ansi.Strip(view), "Blocked:") {
-		t.Fatalf("expected the default selected mock device to show a Blocked section, got:\n%s", ansi.Strip(view))
+	view := m.deviceDetailPanel(50, 30).render()
+	if !strings.Contains(ansi.Strip(view), "Actions") {
+		t.Fatalf("expected the default selected mock device to show its actions, got:\n%s", ansi.Strip(view))
 	}
 	if got := countConsecutiveBlankLines(view); got > 1 {
 		t.Fatalf("expected at most one consecutive blank line, found a run of %d, in:\n%s", got, ansi.Strip(view))

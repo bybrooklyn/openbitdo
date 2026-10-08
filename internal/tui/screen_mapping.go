@@ -15,9 +15,21 @@ var jp108Presets = []uint16{
 	0x003b, 0x003c, 0x00e0, 0x00e1,
 }
 
-// jp108TargetLabel mirrors Rust's mapping_editor.rs, which shows JP108
-// targets as raw hex only (no friendly-name table exists for JP108).
+// jp108KeyNames names the preset targets, from the USB HID Usage Tables'
+// Keyboard/Keypad page (public USB-IF document), which is what these usage
+// IDs are.
+var jp108KeyNames = map[uint16]string{
+	0x0004: "A", 0x0005: "B", 0x0006: "C", 0x0007: "D", 0x0008: "E", 0x0009: "F", 0x000a: "G", 0x000b: "H",
+	0x0028: "Enter", 0x0029: "Escape", 0x002c: "Space", 0x003a: "F1", 0x003b: "F2", 0x003c: "F3",
+	0x00e0: "Left Ctrl", 0x00e1: "Left Shift",
+}
+
+// jp108TargetLabel shows a target as the key it is, keeping the usage ID
+// beside it; a usage outside the preset list is shown as the ID alone.
 func jp108TargetLabel(usage uint16) string {
+	if name, ok := jp108KeyNames[usage]; ok {
+		return fmt.Sprintf("%s (0x%04x)", name, usage)
+	}
 	return fmt.Sprintf("0x%04x", usage)
 }
 
@@ -129,6 +141,11 @@ type mappingState struct {
 
 func newMappingState() mappingState { return mappingState{} }
 
+// previewing reports whether the read-only slot preview is on screen.
+func (s mappingState) previewing() bool {
+	return s.u2PreviewResult != nil || s.u2PreviewLoading || s.u2PreviewErr != nil
+}
+
 // rowCount is the number of button rows (plus, for Ultimate2, 4 paddle
 // rows) plus the three virtual action rows (Apply, Undo, Reset) appended at
 // the end for unified up/down navigation. Naturally 3 (no button/paddle
@@ -238,11 +255,14 @@ func (m Model) updateMapping(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyMsg:
-		if m.mapping.u2PreviewResult != nil || m.mapping.u2PreviewLoading {
+		if m.mapping.previewing() {
 			switch msg.String() {
 			case "esc":
 				m.mapping.u2PreviewResult = nil
 				m.mapping.u2PreviewErr = nil
+				m.mapping.u2PreviewLoading = false
+			case "p":
+				return m.previewNextU2Slot()
 			case "enter":
 				if m.mapping.dirty() {
 					m.modal = discardMappingModal(discardActionLoadSlot)
@@ -288,8 +308,14 @@ func (m Model) updateMapping(msg tea.Msg) (tea.Model, tea.Cmd) {
 // previewNextU2Slot cycles to the next of the 3 Ultimate2 slots and starts a
 // read-only preview read against it.
 func (m Model) previewNextU2Slot() (tea.Model, tea.Cmd) {
-	next := m.mapping.u2PreviewSlot + 1
-	if next > core.U2Slot3 {
+	// Start from the slot after the one already in the editor: previewing
+	// what is already loaded would show nothing new.
+	current := m.mapping.u2PreviewSlot
+	if !m.mapping.previewing() {
+		current = m.mapping.u2Loaded.Slot
+	}
+	next := current + 1
+	if next > core.U2Slot3 || next < core.U2Slot1 {
 		next = core.U2Slot1
 	}
 	m.mapping.u2PreviewSlot = next
@@ -470,10 +496,14 @@ func (m Model) handleMappingApplyResult(report core.WriteRecoveryReport, err err
 		status = "attention"
 		message = "Write failed and rollback also failed — device state is uncertain."
 		m.writeLockUntilRestart = true
-		m.recoveryReason = "A mapping write to " + device.Name + " failed, and the automatic rollback to the previous mapping also failed."
+		m.recoveryReason = "A mapping write to " + device.DisplayName + " failed, and the automatic rollback to the previous mapping also failed."
 		m.recoveryHasBackup = report.HasBackupID
 		m.recoveryBackupID = report.BackupID
 		m.mapping.statusMsg = message
+		// Take over now, not on the next key press: the mapping screen must
+		// not stay up, clickable, after a failed rollback.
+		m.prevScreen = m.screen
+		m.screen = screenRecovery
 	default:
 		status = "attention"
 		message = "Write failed; previous mapping was restored from backup."
@@ -484,45 +514,58 @@ func (m Model) handleMappingApplyResult(report core.WriteRecoveryReport, err err
 
 func (m Model) viewMapping(height int) string {
 	var b strings.Builder
-	kindLabel := "JP108 Dedicated Mapping"
+	text := max(1, m.width-4)
+	kindLabel := "Key mapping"
 	if m.mapping.kind == core.KindUltimate2 {
-		kindLabel = "Ultimate2 Core Mapping Preview (mock-only)"
+		kindLabel = "Button mapping preview (mock only)"
 	}
-	b.WriteString(stylePanelTitle.Render(kindLabel+": "+m.mapping.device.Name) + "\n\n")
+	b.WriteString(stylePanelTitle.Render(truncate(kindLabel+": "+m.mapping.device.DisplayName, text)) + "\n\n")
 
 	if m.mapping.loading {
-		b.WriteString(styleFaint.Render("Loading mapping…"))
+		b.WriteString(styleFaint.Render("Reading the current mapping from the device…"))
 		return renderBoundedPanel(m.width-2, height-2, b.String())
 	}
 	if m.mapping.err != nil {
-		b.WriteString(styleDanger.Render("Error: " + m.mapping.err.Error()))
+		b.WriteString(styleDanger.Render("The mapping could not be read.") + "\n")
+		b.WriteString(wrapStyled(styleFaint, m.mapping.err.Error(), text) + "\n\n")
+		b.WriteString(styleFaint.Render("Nothing was changed on the device. Press esc to go back."))
 		return renderBoundedPanel(m.width-2, height-2, b.String())
 	}
 	if m.mapping.statusMsg != "" {
-		b.WriteString(styleFaint.Render(m.mapping.statusMsg) + "\n\n")
+		b.WriteString(wrapStyled(styleFaint, m.mapping.statusMsg, text) + "\n\n")
 	}
 
-	if m.mapping.u2PreviewLoading || m.mapping.u2PreviewResult != nil || m.mapping.u2PreviewErr != nil {
-		fmt.Fprintf(&b, "%s\n\n", stylePanelTitle.Render(fmt.Sprintf("Preview: Slot %d", m.mapping.u2PreviewSlot)))
+	if m.mapping.previewing() {
+		fmt.Fprintf(&b, "%s\n", stylePanelTitle.Render(fmt.Sprintf("Preview: Slot %d", m.mapping.u2PreviewSlot)))
 		switch {
 		case m.mapping.u2PreviewLoading:
-			b.WriteString(styleFaint.Render("Reading slot…"))
+			b.WriteString("\n" + styleFaint.Render("Reading slot…"))
 		case m.mapping.u2PreviewErr != nil:
-			b.WriteString(styleDanger.Render("Error: " + m.mapping.u2PreviewErr.Error()))
+			b.WriteString("\n" + styleDanger.Render("This slot could not be read.") + "\n")
+			b.WriteString(wrapStyled(styleFaint, m.mapping.u2PreviewErr.Error(), text))
 		default:
+			// What this is and what the keys do goes above the list, where
+			// a long list cannot push it off the screen.
+			b.WriteString(wrapStyled(styleWarning, "Read-only preview. Nothing changes until you load it and apply.", text) + "\n\n")
+			var rows []string
 			for _, row := range m.mapping.u2PreviewResult.Mappings {
-				line := fmt.Sprintf("%-14s → %s", fmt.Sprintf("%v", row.Button), u2FunctionLabel(row.Target))
-				b.WriteString(styleBody.Render(line) + "\n")
+				rows = append(rows, fmt.Sprintf("%-14s → %s", fmt.Sprintf("%v", row.Button), u2FunctionLabel(row.Target)))
 			}
 			for _, row := range m.mapping.u2PreviewResult.PaddleMappings {
-				line := fmt.Sprintf("%-14s → %s", fmt.Sprintf("%v", row.Paddle), u2FunctionLabel(row.Target))
-				b.WriteString(styleBody.Render(line) + "\n")
+				rows = append(rows, fmt.Sprintf("%-14s → %s", fmt.Sprintf("%v", row.Paddle), u2FunctionLabel(row.Target)))
+			}
+			used := strings.Count(b.String(), "\n")
+			room := max(1, height-2-used-1)
+			if len(rows) > room {
+				hidden := len(rows) - (room - 1)
+				rows = append(rows[:room-1], fmt.Sprintf("… and %d more; load the slot to see them all", hidden))
+			}
+			for _, row := range rows {
+				b.WriteString(styleBody.Render(row) + "\n")
 			}
 			if m.mapping.u2PreviewResult.MappingsUnavailable != "" {
-				b.WriteString(styleWarning.Render("Button/paddle map unavailable: " + m.mapping.u2PreviewResult.MappingsUnavailable))
+				b.WriteString(wrapStyled(styleWarning, "Button/paddle map unavailable: "+m.mapping.u2PreviewResult.MappingsUnavailable, text))
 			}
-			b.WriteString("\n" + styleWarning.Render("This is a read-only preview — nothing has changed yet."))
-			b.WriteString("\n" + styleFaint.Render("enter to load this slot into the editor · esc to dismiss · p for the next slot"))
 		}
 		return renderBoundedPanel(m.width-2, height-2, b.String())
 	}
@@ -548,9 +591,10 @@ func (m Model) viewMapping(height int) string {
 		b.WriteString(styleWarningBlock.Render(styleWarning.Render("Button/paddle remapping isn't available yet: ")+m.mapping.u2Draft.MappingsUnavailable) + "\n\n")
 	}
 
-	start, end, more := viewportWindow(editableRows, m.mapping.cursor, m.mapping.rowOffset, m.mappingVisibleRows())
-	if more != "" {
-		b.WriteString(styleFaint.Render(more) + "\n")
+	start, end, _ := viewportWindow(editableRows, m.mapping.cursor, m.mapping.rowOffset, m.mappingVisibleRows())
+	// Each indicator appears only at the end it describes.
+	if start > 0 {
+		b.WriteString(styleFaint.Render(fmt.Sprintf("  ↑ %d more above", start)) + "\n")
 	}
 	for i := start; i < end; i++ {
 		line := m.mappingRowText(i)
@@ -565,8 +609,8 @@ func (m Model) viewMapping(height int) string {
 		}
 	}
 
-	if more != "" {
-		b.WriteString(styleFaint.Render(more) + "\n")
+	if end < editableRows {
+		b.WriteString(styleFaint.Render(fmt.Sprintf("  ↓ %d more below", editableRows-end)) + "\n")
 	}
 	b.WriteString("\n")
 	applyText := "Apply Changes"
@@ -608,10 +652,6 @@ func (m Model) viewMapping(height int) string {
 		b.WriteString(styleSelectedRow.Render("› "+resetText) + "\n")
 	} else {
 		b.WriteString("  " + styleBody.Render(resetText) + "\n")
-	}
-
-	if m.mapping.kind == core.KindUltimate2 {
-		b.WriteString("\n" + styleHelp.Render("p to preview another slot before loading it into the editor"))
 	}
 
 	return renderBoundedPanel(m.width-2, height-2, b.String())

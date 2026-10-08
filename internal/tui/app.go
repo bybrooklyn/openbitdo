@@ -84,6 +84,7 @@ type Model struct {
 	err        error
 	notice     noticeState
 	nextNotice int
+	activity   []activityEntry
 
 	devices            devicesState
 	diag               diagnosticsState
@@ -109,6 +110,16 @@ type noticeState struct {
 	message   string
 	transient bool
 }
+
+// activityEntry is one past notice, kept so a message that has left the
+// footer can still be read (on the Settings screen).
+type activityEntry struct {
+	at      time.Time
+	level   noticeLevel
+	message string
+}
+
+const activityLogSize = 20
 
 // NewModel constructs the root model. ctx is the app's root context,
 // cancelled by cancel on quit.
@@ -147,6 +158,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.modal.active {
 			return m.updateModalMouse(msg)
 		}
+		// Once writes are locked, Recovery is the only screen; a click must
+		// not reach the screen that was showing when the lock tripped.
+		if m.writeLockUntilRestart {
+			if m.screen != screenRecovery {
+				m.prevScreen = m.screen
+				m.screen = screenRecovery
+			}
+			return m, nil
+		}
 		return m.routeMouse(msg)
 
 	case discardMappingMsg:
@@ -169,14 +189,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.cancel()
 			return m, tea.Quit
 		}
+		if m.modal.active {
+			return m.updateModalKey(msg)
+		}
+		// A text field gets its keys before any shortcut does: q, ? and x
+		// are letters there, not commands.
+		if m.capturingText() {
+			return m.route(msg)
+		}
 		if msg.String() == "x" && m.notice.level >= noticeWarning {
 			m.notice = noticeState{}
 			m.err = nil
 			m.statusLine = ""
 			return m, nil
-		}
-		if m.modal.active {
-			return m.updateModalKey(msg)
 		}
 		if msg.String() == "q" {
 			if m.screen == screenMapping && m.mapping.dirty() {
@@ -187,7 +212,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		}
 		if msg.String() == "?" {
-			m.modal = helpModal(m.screenHelp())
+			m.modal = helpModal(m.screenTitle(), m.helpLines())
 			return m, nil
 		}
 
@@ -325,8 +350,8 @@ func (m Model) routeMouseWheel(delta int) (tea.Model, tea.Cmd) {
 		}
 	case screenDiagnostics:
 		if m.diag.showSupportRequest {
-			bodyLines := strings.Split(supportRequestBody(m.diag.device, m.diag.result), "\n")
-			m.diag.supportOffset = clampInt(m.diag.supportOffset+delta, 0, len(bodyLines)-1)
+			body := m.diagnosticsReportLines(supportRequestBody(m.diag.device, m.diag.result))
+			m.diag.supportOffset = clampInt(m.diag.supportOffset+delta, 0, max(0, len(body)-m.diagnosticsReportRows()))
 		} else {
 			m.diag.cursor = clampInt(m.diag.cursor+delta, 0, len(m.diag.visibleChecks())-1)
 			m.ensureDiagnosticsCursorVisible()
@@ -345,59 +370,20 @@ func (m Model) routeMouseWheel(delta int) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) clickDevices(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
-	mode := calculateLayout(m.width, m.height).mode
 	layout := calculateLayout(m.width, m.height)
-	bodyRow := msg.Y - layout.headerHeight
-	if bodyRow < 0 || bodyRow >= layout.bodyHeight {
+	x, y := msg.X, msg.Y-layout.headerHeight
+	list, detail := m.devicePanels(layout.bodyHeight)
+	if i, ok := list.ownerAt(x, y); ok {
+		m.devices.cursor = i
+		m.ensureDeviceCursorVisible()
+		m.devices.pane = paneDeviceList
+		m.devices.filtering = false
 		return m, nil
 	}
-	if mode == layoutCompact {
-		if m.devices.pane != paneActions {
-			return m, nil
-		}
-		line := renderedLine(m.viewDevicesCompactActions(m.width-2, layout.bodyHeight), bodyRow)
-		for i, item := range m.actionsForSelectedDevice() {
-			if strings.Contains(line, item.label) {
-				m.devices.actionIdx = i
-				return m.triggerDevicesEnter()
-			}
-		}
-		return m, nil
-	}
-
-	listWidth := m.width * 2 / 5
-	if listWidth < 24 {
-		listWidth = 24
-	}
-	listRendered := m.viewDeviceList(listWidth, layout.bodyHeight)
-	listActualWidth := lipgloss.Width(listRendered)
-	if msg.X >= 0 && msg.X < listActualWidth {
-		line := renderedLine(listRendered, bodyRow)
-		start, end, _ := viewportWindow(len(m.devices.filtered), m.devices.cursor, m.devices.listOffset, m.deviceVisibleRows())
-		for i := start; i < end; i++ {
-			if strings.Contains(line, pidLabel(m.devices.filtered[i].VidPid)) {
-				m.devices.cursor = i
-				m.ensureDeviceCursorVisible()
-				m.devices.pane = paneDeviceList
-				return m, nil
-			}
-		}
-		return m, nil
-	}
-
-	detailX := listActualWidth + 1
-	detailWidth := m.width - listWidth - 5
-	detailRendered := m.viewDeviceDetail(detailWidth, layout.bodyHeight)
-	if msg.X < detailX || msg.X >= detailX+lipgloss.Width(detailRendered) {
-		return m, nil
-	}
-	line := renderedLine(detailRendered, bodyRow)
-	for i, item := range m.actionsForSelectedDevice() {
-		if strings.Contains(line, item.label) {
-			m.devices.pane = paneActions
-			m.devices.actionIdx = i
-			return m.triggerDevicesEnter()
-		}
+	if i, ok := detail.ownerAt(x, y); ok {
+		m.devices.pane = paneActions
+		m.devices.actionIdx = i
+		return m.triggerDevicesEnter()
 	}
 	return m, nil
 }
@@ -436,38 +422,35 @@ func renderedLine(rendered string, row int) string {
 }
 
 func (m Model) clickDiagnostics(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
-	if m.diag.showSupportRequest {
+	if m.diag.showSupportRequest || m.diag.loading || m.diag.err != nil {
 		return m, nil
 	}
 	layout := calculateLayout(m.width, m.height)
-	if msg.X < 0 || msg.X >= m.width || msg.Y < layout.headerHeight || msg.Y >= m.height-layout.footerHeight {
+	if msg.X < 0 || msg.X >= m.width {
 		return m, nil
 	}
-	line := renderedLine(m.viewDiagnostics(layout.bodyHeight), msg.Y-layout.headerHeight)
-	for i, check := range m.diag.visibleChecks() {
-		if strings.Contains(line, string(check.Command)) {
-			m.diag.cursor = i
-			m.ensureDiagnosticsCursorVisible()
-			return m, nil
-		}
+	// Check rows start right under the fixed header lines, in list order.
+	checks := m.diag.visibleChecks()
+	start, end, _ := viewportWindow(len(checks), m.diag.cursor, m.diag.rowOffset, m.diagnosticsVisibleRows())
+	row := msg.Y - layout.headerHeight - diagHeaderLines
+	if row >= 0 && start+row < end {
+		m.diag.cursor = start + row
 	}
 	return m, nil
 }
 
 func (m Model) clickSettings(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	layout := calculateLayout(m.width, m.height)
-	if msg.X < 0 || msg.X >= m.width || msg.Y < layout.headerHeight || msg.Y >= m.height-layout.footerHeight {
+	if msg.X < 0 || msg.X >= m.width {
 		return m, nil
 	}
-	line := renderedLine(m.viewSettings(layout.bodyHeight), msg.Y-layout.headerHeight)
-	labels := []string{"Advanced Mode:", "Report Save Mode:", "Back"}
-	for i, label := range labels {
-		if strings.Contains(line, label) {
-			m.settingsCursor = i
-			return m.triggerSettingsRow()
-		}
+	// The setting rows sit right under the title and its blank line.
+	row := msg.Y - layout.headerHeight - settingsFirstRow
+	if row < 0 || row >= settingsRowCount {
+		return m, nil
 	}
-	return m, nil
+	m.settingsCursor = row
+	return m.triggerSettingsRow()
 }
 
 func (m Model) updateModalMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
@@ -509,6 +492,10 @@ func clampInt(v, lo, hi int) int {
 func (m Model) setNotice(level noticeLevel, message string, transient bool) (Model, tea.Cmd) {
 	m.nextNotice++
 	m.notice = noticeState{id: m.nextNotice, level: level, message: message, transient: transient}
+	m.activity = append(m.activity, activityEntry{at: time.Now(), level: level, message: message})
+	if len(m.activity) > activityLogSize {
+		m.activity = append([]activityEntry(nil), m.activity[len(m.activity)-activityLogSize:]...)
+	}
 	m.statusLine = ""
 	m.err = nil
 	switch level {
@@ -553,7 +540,16 @@ func (m Model) route(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m Model) updateModalKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 	switch msg.String() {
+	case "left", "right", "tab", "shift+tab", "h", "l":
+		if m.modal.cancelLabel != "" {
+			m.modal.focusCancel = !m.modal.focusCancel
+		}
+		return m, nil
 	case "enter", " ":
+		if m.modal.focusCancel && m.modal.cancelLabel != "" {
+			m.modal = modal{}
+			return m, nil
+		}
 		confirmMsg := m.modal.onConfirm
 		m.modal = modal{}
 		if confirmMsg == nil {
@@ -626,115 +622,50 @@ func (m Model) viewHeader() string {
 		BorderBottom(true).BorderForeground(theme.BorderDim).Width(m.width - 2).Render(title)
 }
 
+// viewFooter is one line: a notice (if any) on the left, then the keys that
+// work right now. When both do not fit, hints are dropped before the notice
+// is shortened, and the notice is shortened with an ellipsis rather than
+// replaced by a generic word, so what went wrong stays readable.
 func (m Model) viewFooter() string {
-	help := m.screenHelp()
-	if calculateLayout(m.width, m.height).mode == layoutCompact {
-		help = m.compactScreenHelp()
+	width := max(1, m.width-2)
+	notice, noticeStyle := m.footerNotice()
+	if notice == "" {
+		return lipgloss.NewStyle().Padding(0, 1).Render(styleHelp.Render(m.footerHints(width)))
 	}
-	if help == "" {
-		help = hint("?", "help")
+
+	const gap = "   "
+	minHints := lipgloss.Width(m.footerHints(0))
+	room := width - minHints - len(gap)
+	if room < 8 {
+		return lipgloss.NewStyle().Padding(0, 1).Render(noticeStyle.Render(truncate(notice, width)))
 	}
-	if m.notice.level >= noticeWarning {
-		help = hint("x", "dismiss") + "  " + help
-	}
-	line := m.composeFooterLine(help)
-	if lipgloss.Width(line) > max(1, m.width-2) {
-		help = m.compactScreenHelp()
-		if m.notice.level >= noticeWarning {
-			help = hint("x", "dismiss") + "  " + help
-		}
-		line = m.composeFooterLine(help)
-	}
-	if lipgloss.Width(line) > max(1, m.width-2) {
-		help = hint("?", "help") + "  " + hint("q", "quit")
-		if m.notice.level >= noticeWarning {
-			help = hint("x", "dismiss") + "  " + help
-		}
-		line = m.composeFooterLine(help)
-	}
-	if lipgloss.Width(line) > max(1, m.width-2) && m.notice.message != "" {
-		saved := m.notice.message
-		m.notice.message = m.shortNoticeMessage()
-		line = m.composeFooterLine(help)
-		m.notice.message = saved
-	}
-	if lipgloss.Width(line) > max(1, m.width-2) {
-		line = ansi.Cut(line, 0, max(1, m.width-2))
-	}
-	return lipgloss.NewStyle().Padding(0, 1).Render(line)
+	notice = truncate(notice, room)
+	hints := m.footerHints(width - lipgloss.Width(notice) - len(gap))
+	return lipgloss.NewStyle().Padding(0, 1).Render(noticeStyle.Render(notice) + gap + styleHelp.Render(hints))
 }
 
-func (m Model) composeFooterLine(help string) string {
-	line := styleHelp.Render(help)
+func (m Model) footerNotice() (string, lipgloss.Style) {
 	if m.notice.message != "" {
-		msg := m.notice.message
 		switch m.notice.level {
 		case noticeSuccess:
-			line = stylePositive.Render(msg) + "   " + line
+			return m.notice.message, stylePositive
 		case noticeWarning:
-			line = styleWarning.Render(msg) + "   " + line
+			return m.notice.message, styleWarning
 		case noticeError:
-			line = styleDanger.Render("error: "+msg) + "   " + line
+			return "error: " + m.notice.message, styleDanger
 		default:
-			line = styleAccent.Render(msg) + "   " + line
-		}
-	} else {
-		if m.statusLine != "" {
-			line = stylePositive.Render(m.statusLine) + "   " + line
-		}
-		if m.err != nil {
-			line = styleDanger.Render(fmt.Sprintf("error: %v", m.err)) + "   " + line
+			return m.notice.message, styleAccent
 		}
 	}
-	return line
+	if m.err != nil {
+		return fmt.Sprintf("error: %v", m.err), styleDanger
+	}
+	return m.statusLine, stylePositive
 }
 
-func (m Model) shortNoticeMessage() string {
-	if strings.Contains(m.notice.message, "Deferred in 0.0.3") {
-		return "Deferred in 0.0.3"
-	}
-	if strings.Contains(m.notice.message, "button-map framing not hardware-confirmed") {
-		return "U2 mapping not hardware-confirmed"
-	}
-	switch m.notice.level {
-	case noticeError:
-		return "error"
-	case noticeWarning:
-		return "warning"
-	default:
-		return "notice"
-	}
-}
-
-// hint renders one "key label" pair for the footer — the small building
-// block every screen's contextual hints are assembled from, matching
-// opencode's per-context footer (e.g. "tab agents  ctrl+p commands") rather
-// than the same generic line everywhere.
+// hint renders one "key label" pair.
 func hint(key, label string) string {
 	return styleKey.Render(key) + " " + label
-}
-
-func (m Model) compactScreenHelp() string {
-	must := hint("?", "help") + "  " + hint("q", "quit")
-	switch m.screen {
-	case screenDevices:
-		return hint("r", "rescan") + "  " + hint("s", "settings") + "  " + must
-	case screenDiagnostics:
-		return hint("d", "details") + "  " + hint("r", "rerun") + "  " + must
-	case screenMapping:
-		return hint("←→", "edit") + "  " + hint("esc", "back") + "  " + must
-	case screenFirmware:
-		return hint("esc", "back") + "  " + must
-	case screenSettings:
-		return hint("enter", "toggle") + "  " + hint("pg↑↓", "info") + "  " + must
-	case screenRecovery:
-		if m.recoveryHasBackup && !m.recoveryRestoreDone {
-			return hint("r", "restore") + "  " + must
-		}
-		return must
-	default:
-		return must
-	}
 }
 
 // Switch-vs-Xbox button-layout awareness (physical A/B/X/Y swapped) was
@@ -771,70 +702,40 @@ func (m Model) gamepadConnected() bool {
 	return false
 }
 
-func (m Model) screenHelp() string {
-	moveLabel, selectLabel, backLabel := "↑↓", "enter", "esc"
-	if m.gamepadConnected() {
-		moveLabel, selectLabel, backLabel = "↑↓/dpad", "enter/A", "esc/B"
-	}
-	nav := hint(moveLabel, "move") + "  " + hint(selectLabel, "select") + "  " + hint(backLabel, "back") + "  " + hint("?", "help") + "  " + hint("q", "quit")
-	switch m.screen {
-	case screenDevices:
-		return hint("/", "filter") + "  " + hint("r", "rescan") + "  " + hint("s", "settings") + "  " + hint("right/tab", "actions") + "  " + nav
-	case screenDiagnostics:
-		extra := hint("tab", "toggle filter") + "  " + hint("d", "details") + "  " + hint("r", "rerun")
-		if m.diag.device.SupportTier != protocol.TierFull {
-			extra = hint("s", "file support request") + "  " + extra
-		}
-		return extra + "  " + nav
-	case screenMapping:
-		extra := hint("←→", "cycle target")
-		if m.mapping.kind == core.KindUltimate2 {
-			extra += "  " + hint("p", "preview slot")
-		}
-		return extra + "  " + nav
-	case screenFirmware:
-		switch m.fw.stage {
-		case fwStageReadyToConfirm:
-			return hint("enter", "confirm") + "  " + hint("esc", "back") + "  " + hint("?", "help") + "  " + hint("q", "quit")
-		case fwStageRunning:
-			return hint("c", "cancel") + "  " + hint("?", "help") + "  " + hint("q", "quit")
-		default:
-			return hint("esc", "back") + "  " + hint("?", "help") + "  " + hint("q", "quit")
-		}
-	case screenSettings:
-		return hint("←→/enter", "toggle") + "  " + hint("pg↑↓/wheel", "info") + "  " + nav
-	case screenRecovery:
-		extra := hint("q", "quit")
-		if m.recoveryHasBackup && !m.recoveryRestoreDone {
-			extra = hint("r", "restore backup") + "  " + extra
-		}
-		return extra + "  " + hint("?", "help")
-	default:
-		return nav
-	}
-}
-
 func (m Model) handleDevicesLoaded(msg devicesLoadedMsg) (tea.Model, tea.Cmd) {
 	var noticeCmd tea.Cmd
-	if msg.err != nil {
-		m, noticeCmd = m.setNotice(noticeError, msg.err.Error(), false)
-	} else {
-		m.err = nil
-	}
+	announce := m.devices.announceScan
+	m.devices.loading, m.devices.scanned, m.devices.announceScan = false, true, false
+
+	selected, hadSelection := m.devices.selected()
 	m.devices.devices = sortDevicesByTier(msg.devices)
 	m.devices.applyFilter()
-	if m.devices.cursor >= len(m.devices.filtered) {
-		m.devices.cursor = 0
+	m.devices.reselect(selected, hadSelection)
+	m.ensureDeviceCursorVisible()
+
+	switch {
+	case msg.err != nil:
+		m, noticeCmd = m.setNotice(noticeError, msg.err.Error(), false)
+	case announce:
+		m.err = nil
+		m, noticeCmd = m.setNotice(noticeInfo, scanSummary(len(msg.devices)), true)
+	default:
+		m.err = nil
 	}
+
 	// Every load (startup, manual "r" rescan, or a hotplug-triggered reload
 	// from handleHotplugEvent) auto-diagnoses any device this session hasn't
 	// probed yet — core.HasDiagnosed makes this naturally idempotent, so an
 	// already-cached device is skipped rather than re-probed on every
 	// reload. This is what makes a freshly-connected controller have a
 	// "Last run: Xs ago" diagnostic result already waiting by the time the
-	// user navigates to it.
+	// user navigates to it. A device with no configuration interface is
+	// skipped: there is nothing to send a check through.
 	cmds := make([]tea.Cmd, 0, len(msg.devices)+1)
 	for _, d := range msg.devices {
+		if d.ConfigChannel == core.ChannelAbsent {
+			continue
+		}
 		if !m.core.HasDiagnosed(d) {
 			cmds = append(cmds, cmdAutoDiagnose(m.ctx, m.core, d))
 		}
@@ -843,6 +744,17 @@ func (m Model) handleDevicesLoaded(msg devicesLoadedMsg) (tea.Model, tea.Cmd) {
 		cmds = append(cmds, noticeCmd)
 	}
 	return m, tea.Batch(cmds...)
+}
+
+func scanSummary(found int) string {
+	switch found {
+	case 0:
+		return "No 8BitDo device found."
+	case 1:
+		return "Found 1 device."
+	default:
+		return fmt.Sprintf("Found %d devices.", found)
+	}
 }
 
 // handleHotplugEvent reacts to a live device connect/disconnect
@@ -858,7 +770,13 @@ func (m Model) handleDevicesLoaded(msg devicesLoadedMsg) (tea.Model, tea.Cmd) {
 // being read.
 func (m Model) handleHotplugEvent(e input.NavEvent, listenCmd tea.Cmd) (Model, tea.Cmd) {
 	m.navNotes = replacePIDNote(m.navNotes, e.SourcePID, e.Note)
-	m, noticeCmd := m.setNotice(noticeInfo, e.Note, true)
+	summary := "Device connected."
+	if e.Kind == input.EventDeviceDisconnected {
+		summary = "Device disconnected."
+	}
+	m, noticeCmd := m.setNotice(noticeInfo, summary, true)
+	// Whatever a failed probe was caused by, the device set just changed.
+	m.core.ForgetFailedDiags()
 
 	if e.Kind == input.EventDeviceDisconnected && m.screen == screenDiagnostics &&
 		m.diag.device.VidPid.PID == e.SourcePID && m.diag.device.Serial == e.Serial {
