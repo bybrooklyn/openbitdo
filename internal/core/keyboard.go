@@ -163,10 +163,10 @@ func (c *OpenBitdoCore) KeyboardReadProfile(ctx context.Context, vidPid protocol
 		return KeyboardProfile{}, err
 	}
 	defer func() { _ = session.Close() }()
-	return readKeyboardProfile(ctx, session)
+	return readKeyboardProfile(ctx, session, keyboardLayoutFor(vidPid))
 }
 
-func readKeyboardProfile(ctx context.Context, session *protocol.DeviceSession) (KeyboardProfile, error) {
+func readKeyboardProfile(ctx context.Context, session *protocol.DeviceSession, layout keyboardLayout) (KeyboardProfile, error) {
 	profile := KeyboardProfile{Mappings: map[byte]KeyTarget{}, Macros: map[byte]KeyMacro{}}
 	var err error
 	if profile.Name, err = session.JP108ReadProfileName(ctx); err != nil {
@@ -181,7 +181,7 @@ func readKeyboardProfile(ctx context.Context, session *protocol.DeviceSession) (
 		if err != nil {
 			return KeyboardProfile{}, errProtocol(err)
 		}
-		target, err := keyTargetFromWire(wire)
+		target, err := layout.fromWire(wire)
 		if err != nil {
 			// Refuse rather than drop it: this profile becomes the backup,
 			// and a backup missing a mapping would erase it on restore.
@@ -247,7 +247,7 @@ func (c *OpenBitdoCore) KeyboardApply(ctx context.Context, vidPid protocol.VidPi
 	}
 	defer func() { _ = session.Close() }()
 
-	before, err := readKeyboardProfile(ctx, session)
+	before, err := readKeyboardProfile(ctx, session, keyboardLayoutFor(vidPid))
 	if err != nil {
 		return WriteRecoveryReport{}, err
 	}
@@ -279,7 +279,8 @@ func (c *OpenBitdoCore) KeyboardApply(ctx context.Context, vidPid protocol.VidPi
 		changes.Macros = macros
 	}
 
-	applyErr := writeKeyboardChanges(ctx, session, changes)
+	layout := keyboardLayoutFor(vidPid)
+	applyErr := writeKeyboardChanges(ctx, session, layout, changes)
 	if applyErr == nil {
 		return WriteRecoveryReport{BackupID: backupID, HasBackupID: true, WriteApplied: true}, nil
 	}
@@ -288,7 +289,7 @@ func (c *OpenBitdoCore) KeyboardApply(ctx context.Context, vidPid protocol.VidPi
 	report := WriteRecoveryReport{
 		BackupID: backupID, HasBackupID: true, RollbackAttempted: true, WriteError: applyErr.Error(),
 	}
-	if rollbackErr := writeKeyboardChanges(ctx, session, undoOf(changes, before)); rollbackErr != nil {
+	if rollbackErr := writeKeyboardChanges(ctx, session, layout, undoOf(layout, changes, before)); rollbackErr != nil {
 		report.RollbackError = rollbackErr.Error()
 		return report, nil
 	}
@@ -298,15 +299,13 @@ func (c *OpenBitdoCore) KeyboardApply(ctx context.Context, vidPid protocol.VidPi
 
 // undoOf builds the changes that restore, from before, every setting that
 // changes touches.
-func undoOf(changes KeyboardChanges, before KeyboardProfile) KeyboardChanges {
+func undoOf(layout keyboardLayout, changes KeyboardChanges, before KeyboardProfile) KeyboardChanges {
 	undo := KeyboardChanges{Mappings: map[byte]KeyTarget{}}
 	for id := range changes.Mappings {
 		if target, ok := before.Mappings[id]; ok {
 			undo.Mappings[id] = target
-		} else if key, known := KeyboardKeyByID(id); known {
-			undo.Mappings[id] = key.Default()
 		} else {
-			undo.Mappings[id] = KeyTarget{}
+			undo.Mappings[id] = layout.defaultOf(id)
 		}
 	}
 	if len(changes.Macros) > 0 {
@@ -336,7 +335,7 @@ func undoOf(changes KeyboardChanges, before KeyboardProfile) KeyboardChanges {
 
 // writeKeyboardChanges writes each change and reads it back. Keys are
 // written in id order so a run is reproducible.
-func writeKeyboardChanges(ctx context.Context, session *protocol.DeviceSession, changes KeyboardChanges) error {
+func writeKeyboardChanges(ctx context.Context, session *protocol.DeviceSession, layout keyboardLayout, changes KeyboardChanges) error {
 	if changes.Name != nil {
 		if err := session.JP108WriteProfileName(ctx, *changes.Name); err != nil {
 			return fmt.Errorf("profile name: %w", err)
@@ -348,7 +347,7 @@ func writeKeyboardChanges(ctx context.Context, session *protocol.DeviceSession, 
 	}
 	sort.Ints(ids)
 	for _, id := range ids {
-		want := changes.Mappings[byte(id)].wire()
+		want := layout.toWire(changes.Mappings[byte(id)])
 		if err := session.JP108WriteKey(ctx, byte(id), want); err != nil {
 			return fmt.Errorf("key %d: %w", id, err)
 		}
@@ -403,7 +402,7 @@ func (c *OpenBitdoCore) KeyboardClearProfile(ctx context.Context, vidPid protoco
 		return "", err
 	}
 	defer func() { _ = session.Close() }()
-	before, err := readKeyboardProfile(ctx, session)
+	before, err := readKeyboardProfile(ctx, session, keyboardLayoutFor(vidPid))
 	if err != nil {
 		return "", err
 	}
@@ -415,19 +414,15 @@ func (c *OpenBitdoCore) KeyboardClearProfile(ctx context.Context, vidPid protoco
 }
 
 // restoreKeyboardBackup writes a backed-up profile back in full.
-func restoreKeyboardBackup(ctx context.Context, session *protocol.DeviceSession, backup KeyboardProfile) error {
-	current, err := readKeyboardProfile(ctx, session)
+func restoreKeyboardBackup(ctx context.Context, session *protocol.DeviceSession, layout keyboardLayout, backup KeyboardProfile) error {
+	current, err := readKeyboardProfile(ctx, session, layout)
 	if err != nil {
 		return err
 	}
 	changes := KeyboardChanges{Mappings: map[byte]KeyTarget{}}
 	// Keys mapped now but not in the backup go back to their defaults.
 	for id := range current.Mappings {
-		if key, known := KeyboardKeyByID(id); known {
-			changes.Mappings[id] = key.Default()
-		} else {
-			changes.Mappings[id] = KeyTarget{}
-		}
+		changes.Mappings[id] = layout.defaultOf(id)
 	}
 	for id, target := range backup.Mappings {
 		changes.Mappings[id] = target
@@ -450,7 +445,7 @@ func restoreKeyboardBackup(ctx context.Context, session *protocol.DeviceSession,
 		name := backup.Name
 		changes.Name = &name
 	}
-	if err := writeKeyboardChanges(ctx, session, changes); err != nil {
+	if err := writeKeyboardChanges(ctx, session, layout, changes); err != nil {
 		return errProtocol(err)
 	}
 	return nil

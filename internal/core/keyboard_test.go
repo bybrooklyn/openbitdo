@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/bybrooklyn/openbitdo/internal/protocol"
@@ -240,5 +241,47 @@ func TestRealKeyboardMacroWritesNeedAdvancedMode(t *testing.T) {
 	c.SetAdvancedMode(true)
 	if !c.MacrosWritable() {
 		t.Fatal("advanced mode should allow them")
+	}
+}
+
+func TestRetroMechanicalKeyboardUsesItsOwnKeyNumbers(t *testing.T) {
+	retro := protocol.VidPid{VID: 0x2dc8, PID: 0x5200}
+	keys := KeyboardKeysFor(retro)
+	// Ten dedicated buttons and 85 ordinary keys: no numpad.
+	if len(keys) != 95 || keys[0].ID != 109 || keys[1].ID != 108 || keys[2].ID != 116 {
+		t.Fatalf("%d keys, first ids %d %d %d", len(keys), keys[0].ID, keys[1].ID, keys[2].ID)
+	}
+	seen := map[byte]bool{}
+	for _, key := range keys {
+		if seen[key.ID] || key.Name == "" || strings.HasPrefix(key.Name, "Num ") {
+			t.Errorf("bad key entry %+v", key)
+		}
+		seen[key.ID] = true
+	}
+	layout := keyboardLayoutFor(retro)
+	// Its Left Ctrl is key 100 and types Left Ctrl.
+	if got := layout.defaultOf(100); got != KeyTargetKeyOf(0xe0) {
+		t.Fatalf("key 100 defaults to %+v", got)
+	}
+	// F13 as a target is 118 on this keyboard, 104 on a Retro 108.
+	if got := layout.toWire(KeyTargetKeyOf(0x68)).Value; got != [4]byte{0, 118} {
+		t.Fatalf("F13 goes out as % x", got)
+	}
+	if got := keyboardLayoutFor(retro108Target).toWire(KeyTargetKeyOf(0x68)).Value; got != [4]byte{0, 0x68} {
+		t.Fatalf("on a Retro 108 F13 goes out as % x", got)
+	}
+
+	// Reading works against a keyboard holding mappings under those ids.
+	keyboard := &protocol.JP108Simulator{Volume: 2, Mappings: map[byte][5]byte{
+		109: {0x07, 0x00, 118},  // A button -> F13, in this keyboard's numbering
+		100: {0x07, 0x00, 0x39}, // Left Ctrl -> Caps Lock
+	}}
+	c := keyboardCore(keyboard)
+	profile, err := c.KeyboardReadProfile(context.Background(), retro)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if profile.Mappings[109] != KeyTargetKeyOf(0x68) || profile.Mappings[100] != KeyTargetKeyOf(0x39) {
+		t.Fatalf("read %+v", profile.Mappings)
 	}
 }

@@ -3,6 +3,8 @@ package core
 import (
 	"fmt"
 	"strings"
+
+	"github.com/bybrooklyn/openbitdo/internal/protocol"
 )
 
 // KeyboardKey is one physical key that can be assigned.
@@ -14,12 +16,18 @@ type KeyboardKey struct {
 	// Dedicated marks the buttons that do nothing until assigned (A, B and
 	// the K1-K8 ports). Every other key defaults to itself.
 	Dedicated bool
+	// Types is the usage the key sends unassigned, when that is not its
+	// id: a Retro Mechanical Keyboard numbers its modifier keys 100-106.
+	Types byte
 }
 
 // Default is what the key does with no assignment.
 func (k KeyboardKey) Default() KeyTarget {
 	if k.Dedicated {
 		return KeyTarget{}
+	}
+	if k.Types != 0 {
+		return KeyTargetKeyOf(k.Types)
 	}
 	return KeyTargetKeyOf(k.ID) // a modifier is itself as a modifier
 }
@@ -200,3 +208,81 @@ func KeyTargetChoices() []KeyTargetChoice {
 // ModifierChoices are the modifiers a key target can be combined with; 0 is
 // no modifier.
 var ModifierChoices = []byte{0, 0xe0, 0xe1, 0xe2, 0xe3, 0xe4, 0xe5, 0xe6, 0xe7}
+
+// RetroKeyboardKeys lists every assignable key of a Retro Mechanical
+// Keyboard (0x5200): the ten dedicated buttons, then the ordinary keys. It
+// has no numpad, and its own ids for the modifiers and dedicated buttons.
+var RetroKeyboardKeys = buildRetroKeyboardKeys()
+
+func buildRetroKeyboardKeys() []KeyboardKey {
+	keys := []KeyboardKey{
+		{ID: 109, Name: "A button", Dedicated: true}, {ID: 108, Name: "B button", Dedicated: true},
+		{ID: 116, Name: "K1", Dedicated: true}, {ID: 117, Name: "K2", Dedicated: true},
+		{ID: 114, Name: "K3", Dedicated: true}, {ID: 115, Name: "K4", Dedicated: true},
+		{ID: 112, Name: "K5", Dedicated: true}, {ID: 113, Name: "K6", Dedicated: true},
+		{ID: 110, Name: "K7", Dedicated: true}, {ID: 111, Name: "K8", Dedicated: true},
+	}
+	for _, usage := range retro108Remappable {
+		switch {
+		case usage >= 0x54 && usage <= 0x63: // no numpad
+		case usage >= 0xe0 && usage <= 0xe6:
+			keys = append(keys, KeyboardKey{ID: 100 + (usage - 0xe0), Name: hidKeyNames[usage], Types: usage})
+		default:
+			keys = append(keys, KeyboardKey{ID: usage, Name: hidKeyNames[usage]})
+		}
+	}
+	return keys
+}
+
+// keyboardLayout is what differs between keyboard models that share the
+// per-key protocol.
+type keyboardLayout struct {
+	keys []KeyboardKey
+	// fKeyShift is added to the usages of F13-F24 as targets: a Retro
+	// Mechanical Keyboard numbers them 118-129 rather than 104-115.
+	fKeyShift byte
+}
+
+func keyboardLayoutFor(vidPid protocol.VidPid) keyboardLayout {
+	if vidPid.PID == 0x5200 {
+		return keyboardLayout{keys: RetroKeyboardKeys, fKeyShift: 118 - 0x68}
+	}
+	return keyboardLayout{keys: Retro108Keys}
+}
+
+// KeyboardKeysFor lists the assignable keys of the keyboard with this id.
+func KeyboardKeysFor(vidPid protocol.VidPid) []KeyboardKey { return keyboardLayoutFor(vidPid).keys }
+
+func (l keyboardLayout) key(id byte) (KeyboardKey, bool) {
+	for _, key := range l.keys {
+		if key.ID == id {
+			return key, true
+		}
+	}
+	return KeyboardKey{}, false
+}
+
+// defaultOf is what key id does unassigned on this keyboard.
+func (l keyboardLayout) defaultOf(id byte) KeyTarget {
+	if key, ok := l.key(id); ok {
+		return key.Default()
+	}
+	return KeyTarget{}
+}
+
+// toWire and fromWire translate a target to and from this keyboard's
+// numbering of F13-F24.
+func (l keyboardLayout) toWire(t KeyTarget) protocol.JP108Mapping {
+	if t.Kind == TargetKey && t.Key >= 0x68 && t.Key <= 0x73 {
+		t.Key += l.fKeyShift
+	}
+	return t.wire()
+}
+
+func (l keyboardLayout) fromWire(m protocol.JP108Mapping) (KeyTarget, error) {
+	t, err := keyTargetFromWire(m)
+	if err == nil && l.fKeyShift != 0 && t.Kind == TargetKey && t.Key >= 0x68+l.fKeyShift && t.Key <= 0x73+l.fKeyShift {
+		t.Key -= l.fKeyShift
+	}
+	return t, err
+}

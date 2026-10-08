@@ -42,6 +42,17 @@ func (m JP108Mapping) Unassigned() bool {
 // contiguous or in order.
 var jp108KeyIDs = [...]byte{233, 232, 240, 241, 238, 239, 236, 237, 234, 235}
 
+// retroKeyIDs are the same ten buttons' ids on a Retro Mechanical Keyboard.
+var retroKeyIDs = [...]byte{109, 108, 116, 117, 114, 115, 112, 113, 110, 111}
+
+// dedicatedKeyIDs is the dedicated buttons' ids for the session's keyboard.
+func (s *DeviceSession) dedicatedKeyIDs() [10]byte {
+	if s.target.PID == 0x5200 {
+		return retroKeyIDs
+	}
+	return jp108KeyIDs
+}
+
 // jp108DefaultProfileName is the profile name written when the keyboard has
 // none. A JP108 holds its mappings in a named profile.
 const jp108DefaultProfileName = "OpenBitdo"
@@ -151,7 +162,7 @@ func (s *DeviceSession) JP108ReadMappedKeys(ctx context.Context) ([]byte, error)
 // buttons is assigned to, one request per button. Usage 0 means unassigned.
 func (s *DeviceSession) JP108ReadDedicatedMappings(ctx context.Context) ([]IndexedUsage, error) {
 	out := make([]IndexedUsage, 0, len(jp108KeyIDs))
-	for index, key := range jp108KeyIDs {
+	for index, key := range s.dedicatedKeyIDs() {
 		mapping, err := s.JP108ReadKey(ctx, key)
 		if err != nil {
 			return nil, err
@@ -178,7 +189,7 @@ func (s *DeviceSession) JP108WriteDedicatedMapping(ctx context.Context, index by
 	}
 	mapping := JP108Mapping{Type: JP108TypeKeyboard}
 	mapping.Value[0], mapping.Value[1] = jp108Value(targetHIDUsage)
-	return s.JP108WriteKey(ctx, jp108KeyIDs[index], mapping)
+	return s.JP108WriteKey(ctx, s.dedicatedKeyIDs()[index], mapping)
 }
 
 // JP108ReadProfileName reads the name of the profile the keyboard holds, or

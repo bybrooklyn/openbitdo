@@ -173,7 +173,7 @@ func (c *OpenBitdoCore) RestoreBackup(ctx context.Context, backupID ConfigBackup
 
 	switch backup.payload.kind {
 	case backupKeyboard:
-		return restoreKeyboardBackup(ctx, session, backup.payload.keyboard)
+		return restoreKeyboardBackup(ctx, session, keyboardLayoutFor(backup.target), backup.payload.keyboard)
 	case backupJP108:
 		for _, entry := range backup.payload.jp108Mappings {
 			if err := session.JP108WriteDedicatedMapping(ctx, entry.Button.WireIndex(), entry.TargetHIDUsage); err != nil {

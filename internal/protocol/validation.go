@@ -72,6 +72,8 @@ var standardCandidateReadCommands = map[CommandID]bool{
 
 var jpCandidateReadCommands = map[CommandID]bool{
 	CommandJp108ReadDedicatedMappings: true, CommandJp108ReadFeatureFlags: true, CommandJp108ReadVoice: true,
+	CommandJp108ReadProfileName: true, CommandJp108ReadMappedKeys: true, CommandJp108ReadMacroList: true,
+	CommandJp108ReadMacroName: true, CommandJp108ReadMacroValue: true,
 }
 
 // isCommandAllowedForCandidatePID is gate 3 (support-tier restriction) for
@@ -146,6 +148,11 @@ var jp108Commands = map[CommandID]bool{
 // jp108PIDs are the keyboards hardware evidence exists for.
 var jp108PIDs = map[uint16]bool{0x5209: true}
 
+// jp108FramedPIDs are the keyboards that take the JP108 commands on the same
+// report: the Retro 108, and the Retro Mechanical Keyboard, which the
+// vendor library drives with the same frames but no hardware has confirmed.
+var jp108FramedPIDs = map[uint16]bool{0x5209: true, 0x5200: true}
+
 var jpHandshakeDisallowed = map[CommandID]bool{
 	CommandSetModeDInput: true, CommandReadProfile: true, CommandWriteProfile: true,
 	CommandFirmwareChunk: true, CommandFirmwareCommit: true,
@@ -171,7 +178,7 @@ var ds4BootAllowed = map[CommandID]bool{
 // known about the specific device. A JP108 keyboard only takes its own
 // commands (and, once firmware is enabled, its own boot/firmware ones).
 func isCommandAllowedForDevice(target VidPid, family ProtocolFamily, command CommandID) bool {
-	if jp108PIDs[target.PID] {
+	if jp108FramedPIDs[target.PID] {
 		switch command {
 		case CommandJp108EnterBootloader, CommandJp108ExitBootloader, CommandJp108FirmwareChunk, CommandJp108FirmwareCommit:
 			return true

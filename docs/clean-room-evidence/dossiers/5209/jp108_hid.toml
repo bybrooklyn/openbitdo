@@ -107,6 +107,12 @@ profile_state = "Whether the Profile button's state can be read or set from the 
 # Macros. Static evidence only: none of the writes below has been sent to
 # hardware. The macro list read has, on a keyboard holding no macros.
 
+[retro_mechanical_keyboard]
+pid = "0x5200 takes the same commands on the same report and interface (usage page 0x008c)"
+key_ids = "ordinary keys by HID usage; modifiers LCtrl..RAlt are 100..106; A button 109, B button 108; K1..K8 are 116, 117, 114, 115, 112, 113, 110, 111; no numpad"
+f_keys = "F13..F24 as targets are 118..129, not the HID usages 104..115 a Retro 108 takes"
+hardware = "no"
+
 [names]
 encoding = "UTF-16, high byte first, as the vendor application writes profile and macro names; the keyboard stores the bytes as given"
 compatibility = "OpenBitdo wrote profile names low byte first before this was known; a stored name whose units all have a zero second byte is read that way"
