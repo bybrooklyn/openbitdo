@@ -107,6 +107,7 @@ func (m Model) handleMappingApplyResult(report core.WriteRecoveryReport, err err
 				}
 			}
 			m.mapping.pad.loaded.Slots = m.mapping.pad.draft.Slots
+			m.mapping.pad.loaded.LightEffect = m.mapping.pad.draft.LightEffect
 			m.mapping.pad.undo = nil
 		}
 	case report.RollbackFailed():

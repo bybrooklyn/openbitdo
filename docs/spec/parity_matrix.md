@@ -62,8 +62,8 @@ asks the device which product it is. OpenBitdo lists 0x310b as detect-only today
 | Invert stick axes, swap sticks, swap triggers, swap d-pad and left stick | yes | simulated |
 | XInput vibration range | yes | no |
 | Macros: 4 per slot, recorded steps, repeat | yes | no |
-| Motion (gyro) mapping: target, sensitivity, dead zone | yes | no |
-| Stick-ring lighting: three themes, colours, speed | yes | no |
+| Motion (gyro) mapping: target stick, enabling button, hold or toggle, sensitivity, dead zone | yes | simulated |
+| Stick-ring lighting: off, tracing, fire ring, per-LED colours, speed | yes | simulated (colours by hex or swatch; no colour wheel) |
 | Stick and trigger calibration | yes | no |
 | Profile library on the computer | yes | save and load one slot as a readable profile file |
 | Reached under the shared ID 0x310b | yes (only this way) | no |

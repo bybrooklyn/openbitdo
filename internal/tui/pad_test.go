@@ -16,13 +16,7 @@ import (
 func padMapping() mappingState {
 	profile := core.PadProfile{Platform: protocol.U2PlatformDInput}
 	for s := range profile.Slots {
-		slot := &profile.Slots[s]
-		for i := range slot.Buttons {
-			slot.Buttons[i] = profile.DefaultTarget(i)
-		}
-		slot.LeftStick, slot.RightStick = core.PadRange{End: 128}, core.PadRange{End: 128}
-		slot.LeftTrigger, slot.RightTrigger = core.PadRange{End: 255}, core.PadRange{End: 255}
-		slot.VibrationLeft, slot.VibrationRight = 5, 5
+		profile.Slots[s] = core.DefaultPadSlot(profile.Platform)
 	}
 	return mappingState{
 		kind:   core.KindUltimate2,
@@ -238,5 +232,72 @@ func TestProfileFilesSaveAndLoadInBothEditors(t *testing.T) {
 	k = press(t, k, "right", "I", "enter")
 	if k.mapping.kb.draft.Mappings[233] != want {
 		t.Fatalf("loading should restore the saved mapping, got %+v", k.mapping.kb.draft.Mappings[233])
+	}
+}
+
+func TestPadEditorMotionAndLights(t *testing.T) {
+	m, c := newTestModel(t, filepath.Join(t.TempDir(), "config.toml"))
+	m = loadDevicesAndDrain(t, m, c)
+	m.mockMode = true
+	next, cmd := m.navigate(screenMapping, 1)
+	m = drainCmds(t, next, cmd)
+
+	// Motion: steering a stick picks a sensible enabling button by itself.
+	m.mapping.cursor = padRowIndex(t, "Motion steers")
+	if value, _ := m.padRowText(padRows[m.mapping.cursor]); value != "nothing (off)" {
+		t.Fatalf("motion should start off, got %q", value)
+	}
+	m = press(t, m, "right", "right")
+	motion := m.mapping.pad.draft.Slots[0].Motion
+	if motion.Target != core.PadMotionLeftStick || motion.Button != core.PadR2 {
+		t.Fatalf("motion = %+v", motion)
+	}
+	m.mapping.cursor = padRowIndex(t, "Motion button works by")
+	m = press(t, m, "enter")
+	m.mapping.cursor = padRowIndex(t, "Motion sensitivity")
+	for i := 0; i < 12; i++ {
+		m = press(t, m, "right")
+	}
+	if got := m.mapping.pad.draft.Slots[0].Motion; !got.Toggle || got.Sensitivity != 10 {
+		t.Fatalf("motion = %+v", got)
+	}
+
+	// Lights: the effect belongs to the controller; colours are typed as
+	// hex or stepped through swatches.
+	m.mapping.cursor = padRowIndex(t, "Stick lights")
+	m = press(t, m, "right", "right", "right")
+	if m.mapping.pad.draft.LightEffect != protocol.U2LightCustom {
+		t.Fatalf("light effect = %d", m.mapping.pad.draft.LightEffect)
+	}
+	m.mapping.cursor = padRowIndex(t, "Left ring light 1")
+	m = press(t, m, "enter", "ff8800", "enter")
+	m.mapping.cursor = padRowIndex(t, "Right ring light 12")
+	m = press(t, m, "right")
+	lights := m.mapping.pad.draft.Slots[0].Lights
+	if lights.Custom[0] != 0xff8800 || lights.Custom[23] != 0xff0000 {
+		t.Fatalf("custom lights = %06x %06x", lights.Custom[0], lights.Custom[23])
+	}
+	m.mapping.cursor = padRowIndex(t, "Tracing colour")
+	m = press(t, m, "enter", "nothex", "enter")
+	if !strings.Contains(m.mapping.statusMsg, "six hex digits") || m.mapping.pad.draft.Slots[0].Lights.TracingColor != 0 {
+		t.Fatalf("a bad colour should be refused with a hint, status=%q", m.mapping.statusMsg)
+	}
+	// The profile name still takes text after a colour was typed.
+	m.mapping.cursor = padRowIndex(t, "Profile name")
+	m = press(t, m, "enter", "glow", "enter")
+	if m.mapping.pad.draft.Slots[0].Name != "glow" {
+		t.Fatalf("name = %q", m.mapping.pad.draft.Slots[0].Name)
+	}
+
+	m.mapping.cursor = len(padRows)
+	nextModel, cmd := m.Update(*keyMsg("enter"))
+	m = drainCmds(t, nextModel.(Model), cmd)
+	if m.mapping.dirty() || !strings.Contains(m.mapping.statusMsg, "Applied and verified") {
+		t.Fatalf("expected a verified apply, status=%q", m.mapping.statusMsg)
+	}
+	profile, err := c.PadReadProfile(m.ctx, m.mapping.device.VidPid)
+	if err != nil || profile.LightEffect != protocol.U2LightCustom || profile.Slots[0].Lights.Custom[0] != 0xff8800 ||
+		profile.Slots[0].Motion.Target != core.PadMotionLeftStick || !profile.Slots[0].Motion.Toggle {
+		t.Fatalf("the controller should hold the motion and light settings: %+v err=%v", profile.Slots[0].Motion, err)
 	}
 }

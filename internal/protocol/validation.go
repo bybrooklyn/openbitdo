@@ -66,7 +66,7 @@ var jpCandidatePIDs = jpCandidateDiagPIDs // same set, reused for gate 3
 var standardCandidateReadCommands = map[CommandID]bool{
 	CommandGetMode: true, CommandGetModeAlt: true, CommandReadProfile: true,
 	CommandU2GetConnected: true, CommandU2GetPhysicalMode: true, CommandU2SetReportState: true,
-	CommandU2SelectPlatform: true, CommandU2RecordRead: true,
+	CommandU2SelectPlatform: true, CommandU2RecordRead: true, CommandU2GetLightEffect: true,
 }
 
 var jpCandidateReadCommands = map[CommandID]bool{
@@ -120,7 +120,7 @@ func isCommandAllowedByCapability(cap PidCapability, command CommandID) bool {
 		CommandJp108WriteMacroName, CommandJp108WriteMacroValue, CommandJp108ClearMacro:
 		return cap.SupportsJP108DedicatedMap
 	case CommandU2GetConnected, CommandU2GetPhysicalMode, CommandU2SetReportState, CommandU2SelectPlatform,
-		CommandU2RecordRead, CommandU2RecordWrite, CommandU2Commit:
+		CommandU2RecordRead, CommandU2RecordWrite, CommandU2Commit, CommandU2GetLightEffect, CommandU2SetLightEffect:
 		return cap.SupportsU2SlotConfig
 	default:
 		return false
@@ -149,6 +149,7 @@ var jpHandshakeDisallowed = map[CommandID]bool{
 	CommandFirmwareChunk: true, CommandFirmwareCommit: true,
 	CommandU2GetConnected: true, CommandU2GetPhysicalMode: true, CommandU2SetReportState: true,
 	CommandU2SelectPlatform: true, CommandU2RecordRead: true, CommandU2RecordWrite: true, CommandU2Commit: true,
+	CommandU2GetLightEffect: true, CommandU2SetLightEffect: true,
 	CommandU2EnterBootloader: true, CommandU2FirmwareChunk: true, CommandU2FirmwareCommit: true,
 	CommandU2ExitBootloader: true,
 }
@@ -249,7 +250,7 @@ func ValidateResponse(command CommandID, response []byte) ResponseStatus {
 		}
 		return StatusInvalid
 	case CommandU2GetConnected, CommandU2GetPhysicalMode, CommandU2SelectPlatform,
-		CommandU2RecordRead, CommandU2RecordWrite, CommandU2Commit:
+		CommandU2RecordRead, CommandU2RecordWrite, CommandU2Commit, CommandU2GetLightEffect, CommandU2SetLightEffect:
 		if len(response) < u2DataOffset {
 			return StatusMalformed
 		}
@@ -314,7 +315,7 @@ func minimumResponseLen(command CommandID) int {
 	case CommandGetMode, CommandGetModeAlt:
 		return 6
 	case CommandU2GetConnected, CommandU2GetPhysicalMode, CommandU2SelectPlatform,
-		CommandU2RecordRead, CommandU2RecordWrite, CommandU2Commit:
+		CommandU2RecordRead, CommandU2RecordWrite, CommandU2Commit, CommandU2GetLightEffect, CommandU2SetLightEffect:
 		return u2DataOffset
 	case CommandGetControllerVersion, CommandVersion:
 		return 5

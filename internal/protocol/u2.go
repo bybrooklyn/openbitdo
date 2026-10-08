@@ -26,6 +26,8 @@ const (
 	u2CmdCommit         uint16 = 0x0006
 	u2CmdReportState    uint16 = 0x0007
 	u2CmdSelectPlatform uint16 = 0x0014
+	u2CmdSetLight       uint16 = 0x0040
+	u2CmdGetLight       uint16 = 0x0041
 	u2CmdPhysicalMode   uint16 = 0x0105
 	u2CmdConnected      uint16 = 0x0120
 
@@ -117,6 +119,10 @@ func u2CommandCode(command CommandID) (uint16, bool) {
 		return u2CmdPhysicalMode, true
 	case CommandU2GetConnected:
 		return u2CmdConnected, true
+	case CommandU2GetLightEffect:
+		return u2CmdGetLight, true
+	case CommandU2SetLightEffect:
+		return u2CmdSetLight, true
 	}
 	return 0, false
 }
@@ -239,5 +245,39 @@ func (s *DeviceSession) U2Commit(ctx context.Context) error {
 		return err
 	}
 	_, err = s.sendRow(ctx, row, u2Frame(row.Request, u2CommitArg, nil, 0, 0, 0))
+	return err
+}
+
+// Stick-ring light effects.
+const (
+	U2LightTracing byte = 2
+	U2LightFire    byte = 3
+	U2LightCustom  byte = 4
+	U2LightOff     byte = 5
+)
+
+// U2LightEffect reads which stick-ring light effect is in use. Anything
+// other than the three effects is reported as off.
+func (s *DeviceSession) U2LightEffect(ctx context.Context) (byte, error) {
+	resp, err := s.SendCommand(ctx, CommandU2GetLightEffect, nil)
+	if err != nil {
+		return 0, err
+	}
+	if _, data, _ := u2ReplyFor(resp.Raw, u2CmdGetLight); len(data) > 0 && data[0] >= U2LightTracing && data[0] <= U2LightCustom {
+		return data[0], nil
+	}
+	return U2LightOff, nil
+}
+
+// U2SetLightEffect selects the stick-ring light effect.
+func (s *DeviceSession) U2SetLightEffect(ctx context.Context, effect byte) error {
+	row, err := s.ensureCommandAllowed(CommandU2SetLightEffect)
+	if err != nil {
+		return err
+	}
+	if effect < U2LightTracing || effect > U2LightOff {
+		return errInvalidInput("light effect %d is not one of tracing, fire ring, per-LED or off", effect)
+	}
+	_, err = s.sendRow(ctx, row, u2Frame(row.Request, uint16(effect), nil, 0, 0, 0))
 	return err
 }

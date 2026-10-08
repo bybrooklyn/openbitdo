@@ -3,7 +3,7 @@
 dossier_id = "DOS-6012-U2-ADV"
 pid_hex = "0x6012"
 operation_group = "Ultimate2Core"
-command_id = ["U2GetConnected", "U2GetPhysicalMode", "U2SetReportState", "U2SelectPlatform", "U2RecordRead", "U2RecordWrite", "U2Commit"]
+command_id = ["U2GetConnected", "U2GetPhysicalMode", "U2SetReportState", "U2SelectPlatform", "U2RecordRead", "U2RecordWrite", "U2Commit", "U2GetLightEffect", "U2SetLightEffect"]
 request_shape = "64-byte output report 0x81: 81 04, then a 16-byte header (cmd u16, arg u16, len u16, crc u16, total u32, offset u32), then up to 45 data bytes"
 response_shape = "64-byte input report 0x02: 02 04, then a 16-byte header (04 00, cmd u16 echoed, len u16, crc u16, two u32), then data from byte 18"
 validator_rules = ["byte0 == 0x02", "byte1 == 0x04", "bytes 2-3 == 04 00", "bytes 4-5 echo the request's cmd"]
@@ -62,6 +62,23 @@ hardware = "no"
 request = "cmd 0x0006, arg 0x0123"
 reply = "cmd echoed, within about 4 seconds"
 hardware = "no"
+
+[commands.get_light_effect]
+request = "cmd 0x0041, no data"
+reply = "data byte 0: 2 tracing, 3 fire ring, 4 per-LED colours; anything else means off"
+hardware = "no"
+
+[commands.set_light_effect]
+request = "cmd 0x0040, arg = effect (2, 3, 4, or 5 for off)"
+reply = "cmd echoed"
+notes = "The effect belongs to the controller, not to a slot; the colours each effect uses are in the record."
+hardware = "no"
+
+[record_sections]
+motion = "12 bytes: flag (0x20200911 on, 0x20190000 off), enabling button u32, mode (1 hold, 2 toggle), sensitivity 1-10, dead zone 0-100, target (0 off, 1 right stick, 2 left stick)"
+tracing = "12 bytes: flag, colour u32, background u32; colours are 0x00RRGGBB"
+fire_ring = "16 bytes: flag, colour u32, background u32, speed 1-15"
+per_led = "100 bytes: flag, 24 colours: the left ring's twelve lights from the bottom going clockwise, then the right ring's"
 
 [record]
 size = "0x638 bytes, little-endian, three slots"

@@ -231,6 +231,37 @@ type padSlotFile struct {
 		Right int `toml:"right"`
 	} `toml:"vibration"`
 	Options uint32 `toml:"options"`
+	Motion  struct {
+		Target      int    `toml:"target"` // 0 off, 1 right stick, 2 left stick
+		Button      uint32 `toml:"button"`
+		Toggle      bool   `toml:"toggle"`
+		Sensitivity int    `toml:"sensitivity"`
+		DeadZone    int    `toml:"dead_zone"`
+	} `toml:"motion"`
+	Lights struct {
+		TracingColor      string   `toml:"tracing_color"`
+		TracingBackground string   `toml:"tracing_background"`
+		FireColor         string   `toml:"fire_color"`
+		FireBackground    string   `toml:"fire_background"`
+		FireSpeed         int      `toml:"fire_speed"`
+		Custom            []string `toml:"custom"`
+	} `toml:"lights"`
+}
+
+// FormatColor writes a colour as six hex digits; ParseColor reads that,
+// with or without a leading #.
+func FormatColor(colour uint32) string { return fmt.Sprintf("%06x", colour&0xffffff) }
+
+func ParseColor(text string) (uint32, error) {
+	text = strings.TrimPrefix(strings.TrimSpace(text), "#")
+	var colour uint32
+	if len(text) != 6 {
+		return 0, fmt.Errorf("colour %q is not six hex digits", text)
+	}
+	if _, err := fmt.Sscanf(text, "%06x", &colour); err != nil {
+		return 0, fmt.Errorf("colour %q is not six hex digits", text)
+	}
+	return colour, nil
 }
 
 type padButtonFile struct {
@@ -257,6 +288,14 @@ func EncodePadSlot(platform byte, slot PadSlot) ([]byte, error) {
 	file.Sticks = padRangesFile{int(slot.LeftStick.Start), int(slot.LeftStick.End), int(slot.RightStick.Start), int(slot.RightStick.End)}
 	file.Triggers = padRangesFile{int(slot.LeftTrigger.Start), int(slot.LeftTrigger.End), int(slot.RightTrigger.Start), int(slot.RightTrigger.End)}
 	file.Vibration.Left, file.Vibration.Right = slot.VibrationLeft, slot.VibrationRight
+	file.Motion.Target, file.Motion.Button, file.Motion.Toggle = int(slot.Motion.Target), uint32(slot.Motion.Button), slot.Motion.Toggle
+	file.Motion.Sensitivity, file.Motion.DeadZone = slot.Motion.Sensitivity, slot.Motion.DeadZone
+	file.Lights.TracingColor, file.Lights.TracingBackground = FormatColor(slot.Lights.TracingColor), FormatColor(slot.Lights.TracingBackground)
+	file.Lights.FireColor, file.Lights.FireBackground = FormatColor(slot.Lights.FireColor), FormatColor(slot.Lights.FireBackground)
+	file.Lights.FireSpeed = slot.Lights.FireSpeed
+	for _, colour := range slot.Lights.Custom {
+		file.Lights.Custom = append(file.Lights.Custom, FormatColor(colour))
+	}
 	var out bytes.Buffer
 	if err := toml.NewEncoder(&out).Encode(file); err != nil {
 		return nil, err
@@ -310,6 +349,29 @@ func DecodePadSlot(data []byte, platform byte) (PadSlot, error) {
 	}
 	if slot.RightTrigger, err = byteRange(file.Triggers.RightStart, file.Triggers.RightEnd); err != nil {
 		return PadSlot{}, err
+	}
+	if file.Motion.Target < 0 || file.Motion.Target > 255 {
+		return PadSlot{}, fmt.Errorf("motion target %d is not 0, 1 or 2", file.Motion.Target)
+	}
+	slot.Motion = PadMotion{Target: byte(file.Motion.Target), Button: PadTarget(file.Motion.Button), Toggle: file.Motion.Toggle,
+		Sensitivity: file.Motion.Sensitivity, DeadZone: file.Motion.DeadZone}
+	slot.Lights.FireSpeed = file.Lights.FireSpeed
+	for _, c := range []struct {
+		text string
+		into *uint32
+	}{{file.Lights.TracingColor, &slot.Lights.TracingColor}, {file.Lights.TracingBackground, &slot.Lights.TracingBackground},
+		{file.Lights.FireColor, &slot.Lights.FireColor}, {file.Lights.FireBackground, &slot.Lights.FireBackground}} {
+		if *c.into, err = ParseColor(c.text); err != nil {
+			return PadSlot{}, err
+		}
+	}
+	if len(file.Lights.Custom) != PadLEDs {
+		return PadSlot{}, fmt.Errorf("%d LED colours listed, expected %d", len(file.Lights.Custom), PadLEDs)
+	}
+	for i, text := range file.Lights.Custom {
+		if slot.Lights.Custom[i], err = ParseColor(text); err != nil {
+			return PadSlot{}, err
+		}
 	}
 	if err := slot.validate(); err != nil {
 		return PadSlot{}, err

@@ -34,6 +34,8 @@ type U2Simulator struct {
 	InputReports bool
 	// Commits counts commits answered.
 	Commits int
+	// Light is the stick-ring light effect in use.
+	Light byte
 
 	platform byte
 	staged   []byte
@@ -102,6 +104,11 @@ func (u *U2Simulator) Write(data []byte) (int, error) {
 			mode = 1
 		}
 		u.reply(cmd, 1, []byte{mode})
+	case u2CmdGetLight:
+		u.reply(cmd, 1, []byte{u.Light})
+	case u2CmdSetLight:
+		u.Light = byte(arg)
+		u.reply(cmd, 0, nil)
 	case u2CmdReportState:
 		u.InputReports = arg == 1
 	case u2CmdSelectPlatform:

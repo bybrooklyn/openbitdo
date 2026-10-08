@@ -49,7 +49,26 @@ const (
 	padRowRange
 	padRowVibration
 	padRowOption
+	padRowMotionTarget
+	padRowMotionButton
+	padRowMotionMode
+	padRowMotionSensitivity
+	padRowMotionDeadZone
+	padRowLightEffect
+	padRowColor
+	padRowFireSpeed
 )
+
+// Colour row selectors below PadLEDs are per-LED; these follow.
+const (
+	padColorTracing = core.PadLEDs + iota
+	padColorTracingBack
+	padColorFire
+	padColorFireBack
+)
+
+// padSwatches are the colours left/right steps through on a colour row.
+var padSwatches = []uint32{0x000000, 0xff0000, 0xffa500, 0xffff00, 0x00ff00, 0x007fff, 0x0000ff, 0x8b00ff, 0xffffff}
 
 type padRow struct {
 	kind  padRowKind
@@ -105,6 +124,25 @@ func buildPadRows() []padRow {
 	} {
 		rows = append(rows, padRow{kind: padRowOption, label: option.name, bit: option.bit})
 	}
+	rows = append(rows,
+		padRow{kind: padRowMotionTarget, label: "Motion steers"},
+		padRow{kind: padRowMotionButton, label: "Motion while pressing"},
+		padRow{kind: padRowMotionMode, label: "Motion button works by"},
+		padRow{kind: padRowMotionSensitivity, label: "Motion sensitivity"},
+		padRow{kind: padRowMotionDeadZone, label: "Motion dead zone"},
+		padRow{kind: padRowLightEffect, label: "Stick lights"},
+		padRow{kind: padRowColor, label: "Tracing colour", index: padColorTracing},
+		padRow{kind: padRowColor, label: "Tracing background", index: padColorTracingBack},
+		padRow{kind: padRowColor, label: "Fire ring colour", index: padColorFire},
+		padRow{kind: padRowColor, label: "Fire ring background", index: padColorFireBack},
+		padRow{kind: padRowFireSpeed, label: "Fire ring speed"})
+	for led := 0; led < core.PadLEDs; led++ {
+		side, n := "Left", led+1
+		if led >= core.PadLEDs/2 {
+			side, n = "Right", led-core.PadLEDs/2+1
+		}
+		rows = append(rows, padRow{kind: padRowColor, label: fmt.Sprintf("%s ring light %d", side, n), index: led})
+	}
 	return rows
 }
 
@@ -123,12 +161,40 @@ type padEditor struct {
 
 	naming    bool
 	nameInput string
+	// typingColor says naming is being used for the colour row colorRow
+	// rather than for the profile name.
+	typingColor bool
+	colorRow    int
+}
+
+func padColorOf(slot *core.PadSlot, index int) *uint32 {
+	switch index {
+	case padColorTracing:
+		return &slot.Lights.TracingColor
+	case padColorTracingBack:
+		return &slot.Lights.TracingBackground
+	case padColorFire:
+		return &slot.Lights.FireColor
+	case padColorFireBack:
+		return &slot.Lights.FireBackground
+	}
+	return &slot.Lights.Custom[index]
+}
+
+var padLightEffects = []struct {
+	effect byte
+	name   string
+}{
+	{protocol.U2LightOff, "off"}, {protocol.U2LightTracing, "tracing"},
+	{protocol.U2LightFire, "fire ring"}, {protocol.U2LightCustom, "your own colours"},
 }
 
 // padNameMax is the longest profile name a slot holds, in characters.
 const padNameMax = 16
 
-func (s padEditor) dirty() bool { return s.draft.Slots != s.loaded.Slots }
+func (s padEditor) dirty() bool {
+	return s.draft.Slots != s.loaded.Slots || s.draft.LightEffect != s.loaded.LightEffect
+}
 
 // padEditing reports whether the Mapping tab is showing the controller
 // editor.
@@ -284,6 +350,68 @@ func (m *Model) padAdjustRow(row padRow, delta int) {
 				m.padSlot().VibrationLeft = next
 			}
 		}
+	case padRowMotionTarget:
+		m.padSnapshot()
+		motion := &m.padSlot().Motion
+		motion.Target = byte((int(motion.Target) + 3 + sign(delta)) % 3)
+		// Motion needs a button to enable it; start with the trigger on
+		// the same side as the stick it steers.
+		if motion.Target != core.PadMotionOff && !core.PadMotionButton(motion.Button) {
+			motion.Button = core.PadR2
+			if motion.Target == core.PadMotionLeftStick {
+				motion.Button = core.PadL2
+			}
+		}
+	case padRowMotionButton:
+		m.padSnapshot()
+		motion := &m.padSlot().Motion
+		index := 0
+		for i, button := range core.PadMotionButtons {
+			if button == motion.Button {
+				index = i
+			}
+		}
+		n := len(core.PadMotionButtons)
+		motion.Button = core.PadMotionButtons[((index+sign(delta))%n+n)%n]
+	case padRowMotionMode:
+		m.padSnapshot()
+		m.padSlot().Motion.Toggle = !m.padSlot().Motion.Toggle
+	case padRowMotionSensitivity:
+		if next := clampInt(m.padSlot().Motion.Sensitivity+sign(delta), 1, 10); next != m.padSlot().Motion.Sensitivity {
+			m.padSnapshot()
+			m.padSlot().Motion.Sensitivity = next
+		}
+	case padRowMotionDeadZone:
+		if next := clampInt(m.padSlot().Motion.DeadZone+delta, 0, 100); next != m.padSlot().Motion.DeadZone {
+			m.padSnapshot()
+			m.padSlot().Motion.DeadZone = next
+		}
+	case padRowLightEffect:
+		m.padSnapshot()
+		index := 0
+		for i, entry := range padLightEffects {
+			if entry.effect == pad.draft.LightEffect {
+				index = i
+			}
+		}
+		n := len(padLightEffects)
+		pad.draft.LightEffect = padLightEffects[((index+sign(delta))%n+n)%n].effect
+	case padRowColor:
+		m.padSnapshot()
+		colour := padColorOf(m.padSlot(), row.index)
+		index := 0
+		for i, swatch := range padSwatches {
+			if swatch == *colour {
+				index = i
+			}
+		}
+		n := len(padSwatches)
+		*colour = padSwatches[((index+sign(delta))%n+n)%n]
+	case padRowFireSpeed:
+		if next := clampInt(m.padSlot().Lights.FireSpeed+sign(delta), 1, 15); next != m.padSlot().Lights.FireSpeed {
+			m.padSnapshot()
+			m.padSlot().Lights.FireSpeed = next
+		}
 	case padRowOption:
 		m.padSnapshot()
 		slot := m.padSlot()
@@ -311,7 +439,9 @@ func (m Model) triggerPadRow() (tea.Model, tea.Cmd) {
 		case padRowButton:
 			pad.picking, pad.pickButton, pad.pickFilter, pad.pickCursor = true, row.index, "", 0
 		case padRowName:
-			pad.naming, pad.nameInput = true, m.padSlot().Name
+			pad.naming, pad.nameInput, pad.typingColor = true, m.padSlot().Name, false
+		case padRowColor:
+			pad.naming, pad.nameInput, pad.typingColor, pad.colorRow = true, "", true, row.index
 		default:
 			m.padAdjustRow(row, 1)
 		}
@@ -338,9 +468,22 @@ func (m Model) updatePadName(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	pad := &m.mapping.pad
 	switch msg.Type {
 	case tea.KeyEsc:
-		pad.naming = false
+		pad.naming, pad.typingColor = false, false
 	case tea.KeyEnter:
 		pad.naming = false
+		if pad.typingColor {
+			colour, err := core.ParseColor(pad.nameInput)
+			switch {
+			case pad.nameInput == "":
+			case err != nil:
+				m.mapping.statusMsg = "A colour is six hex digits, like ff8800."
+			case colour != *padColorOf(m.padSlot(), pad.colorRow):
+				m.padSnapshot()
+				*padColorOf(m.padSlot(), pad.colorRow) = colour
+			}
+			pad.typingColor = false
+			break
+		}
 		if name := strings.TrimSpace(pad.nameInput); name != m.padSlot().Name {
 			m.padSnapshot()
 			m.padSlot().Name = name
@@ -431,7 +574,7 @@ func (m Model) padRowText(row padRow) (value string, changed bool) {
 		}
 		return value, false
 	case padRowName:
-		if pad.naming {
+		if pad.naming && !pad.typingColor {
 			return pad.nameInput + "▏", true
 		}
 		if now.Name == "" {
@@ -455,6 +598,44 @@ func (m Model) padRowText(row padRow) (value string, changed bool) {
 			return "off", a != b
 		}
 		return fmt.Sprintf("%d of 5", a), a != b
+	}
+	switch row.kind {
+	case padRowMotionTarget:
+		names := []string{"nothing (off)", "the right stick", "the left stick"}
+		return names[min(int(now.Motion.Target), 2)], now.Motion.Target != was.Motion.Target
+	case padRowMotionButton:
+		if now.Motion.Target == core.PadMotionOff {
+			return "-", false
+		}
+		return core.PadMotionButtonName(now.Motion.Button), now.Motion.Button != was.Motion.Button
+	case padRowMotionMode:
+		if now.Motion.Target == core.PadMotionOff {
+			return "-", false
+		}
+		if now.Motion.Toggle {
+			return "pressing once to switch on and off", now.Motion.Toggle != was.Motion.Toggle
+		}
+		return "holding it down", now.Motion.Toggle != was.Motion.Toggle
+	case padRowMotionSensitivity:
+		return fmt.Sprintf("%d of 10", now.Motion.Sensitivity), now.Motion.Sensitivity != was.Motion.Sensitivity
+	case padRowMotionDeadZone:
+		return fmt.Sprintf("%d%%", now.Motion.DeadZone), now.Motion.DeadZone != was.Motion.DeadZone
+	case padRowLightEffect:
+		name := "off"
+		for _, entry := range padLightEffects {
+			if entry.effect == pad.draft.LightEffect {
+				name = entry.name
+			}
+		}
+		return name + "  (all slots)", pad.draft.LightEffect != pad.loaded.LightEffect
+	case padRowColor:
+		a, b := *padColorOf(&now, row.index), *padColorOf(&was, row.index)
+		if pad.naming && pad.typingColor && pad.colorRow == row.index {
+			return "#" + pad.nameInput + "▏", true
+		}
+		return "#" + core.FormatColor(a), a != b
+	case padRowFireSpeed:
+		return fmt.Sprintf("%d of 15", now.Lights.FireSpeed), now.Lights.FireSpeed != was.Lights.FireSpeed
 	}
 	on := "off"
 	if now.Options&row.bit != 0 {
@@ -606,4 +787,11 @@ func (m Model) clickPad(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		return m.triggerPadRow()
 	}
 	return m, nil
+}
+
+func sign(delta int) int {
+	if delta < 0 {
+		return -1
+	}
+	return 1
 }

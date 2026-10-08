@@ -17,6 +17,10 @@ All notable changes to OpenBitdo are tracked here.
   confirmed on hardware.
 - Profile and macro names are written the way the vendor's application writes them, so each
   program can read names the other wrote.
+- Ultimate 2 motion and lights: the editor can steer a stick with the motion sensor (which stick,
+  the button that enables it, hold or toggle, sensitivity, dead zone) and set the stick-ring
+  lights (off, tracing, fire ring or a colour per light). Simulator-tested, like the rest of the
+  controller editor.
 - Profile files: `E` in either editor saves the draft (a keyboard profile, or one controller slot)
   as a readable TOML file under the config directory's `profiles/`; `I` loads one back into the
   draft. A file a device could not hold is refused with the reason.

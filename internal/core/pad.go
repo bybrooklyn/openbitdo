@@ -35,6 +35,12 @@ const (
 	padOffTriggers  = 0x0b0 // 8: flag, two (start, end)
 	padOffOptions   = 0x0c8 // 8: flag, option word
 	padOffButtons   = 0x0e0 // 92: flag, 22 targets
+	padOffMotion    = 0x494 // 12: flag, button, mode, sensitivity, dead zone, target
+	padOffTracing   = 0x4b8 // 12: flag, colour, background
+	padOffFire      = 0x4dc // 16: flag, colour, background, speed
+	padOffCustom    = 0x50c // 100: flag, 24 colours
+
+	padMotionOff = 0x20190000 // the motion section's flag when motion is off
 
 	padNameLen = 32
 )
@@ -58,6 +64,39 @@ const (
 	PadSwapDpadStick uint32 = 0x0100
 )
 
+// Where motion (tilting the controller) is sent.
+const (
+	PadMotionOff        byte = 0
+	PadMotionRightStick byte = 1
+	PadMotionLeftStick  byte = 2
+)
+
+// PadMotion maps the controller's motion sensor onto a stick while a
+// button enables it.
+type PadMotion struct {
+	// Target is PadMotionOff, PadMotionRightStick or PadMotionLeftStick.
+	Target byte
+	// Button enables motion: held down, or pressed once to toggle.
+	Button PadTarget
+	Toggle bool
+	// Sensitivity is 1 (least) to 10; DeadZone is 0 to 100.
+	Sensitivity, DeadZone int
+}
+
+// PadLEDs is how many LEDs the two stick rings have: twelve each, left
+// ring first, each ring starting at the bottom and going clockwise.
+const PadLEDs = 24
+
+// PadLights are a slot's stick-ring colours, as 0xRRGGBB, for each of the
+// three effects. Which effect shows is PadProfile.LightEffect.
+type PadLights struct {
+	TracingColor, TracingBackground uint32
+	FireColor, FireBackground       uint32
+	// FireSpeed is 1 to 15.
+	FireSpeed int
+	Custom    [PadLEDs]uint32
+}
+
 // PadSlot is one profile slot.
 type PadSlot struct {
 	// InUse is whether the slot holds a profile. An unused slot behaves as
@@ -75,6 +114,8 @@ type PadSlot struct {
 	// Options is the slot's option switches (the Pad* bits). Bits this
 	// program does not name are kept as read.
 	Options uint32
+	Motion  PadMotion
+	Lights  PadLights
 }
 
 // PadProfile is a controller's configuration for one platform.
@@ -85,6 +126,9 @@ type PadProfile struct {
 	// on the controller, not from here.
 	ActiveSlot int
 	Slots      [PadSlots]PadSlot
+	// LightEffect is the stick-ring effect in use: one of the
+	// protocol.U2Light* values. It belongs to the controller, not a slot.
+	LightEffect byte
 
 	// record is the raw record this was decoded from. Writes start from
 	// it so everything this program does not model is preserved.
@@ -130,13 +174,17 @@ func flagAt(record []byte, offset int) bool {
 	return binary.LittleEndian.Uint32(record[offset:]) == padInUse
 }
 
-// defaultPadSlot is how a slot behaves when nothing is set: every input is
+// DefaultPadSlot is how a slot behaves when nothing is set: every input is
 // itself and ranges are full.
+func DefaultPadSlot(platform byte) PadSlot { return defaultPadSlot(platform) }
+
 func defaultPadSlot(platform byte) PadSlot {
 	slot := PadSlot{
 		LeftStick: PadRange{0, 128}, RightStick: PadRange{0, 128},
 		LeftTrigger: PadRange{0, 255}, RightTrigger: PadRange{0, 255},
 		VibrationLeft: 5, VibrationRight: 5,
+		Motion: PadMotion{Sensitivity: 5, DeadZone: 40},
+		Lights: PadLights{FireSpeed: 7},
 	}
 	for i, input := range PadInputs {
 		slot.Buttons[i] = input.defaultFor(platform)
@@ -183,6 +231,27 @@ func decodePadProfile(record []byte) (PadProfile, error) {
 		if at := padOffOptions + i*8; flagAt(record, at) {
 			slot.Options = binary.LittleEndian.Uint32(record[at+4:])
 		}
+		if at := padOffMotion + i*12; flagAt(record, at) && record[at+11] != PadMotionOff {
+			slot.Motion = PadMotion{
+				Target: record[at+11], Button: PadTarget(binary.LittleEndian.Uint32(record[at+4:])),
+				Toggle:      record[at+8] == 2,
+				Sensitivity: max(1, min(10, int(record[at+9]))), DeadZone: min(100, int(record[at+10])),
+			}
+		}
+		if at := padOffTracing + i*12; flagAt(record, at) {
+			slot.Lights.TracingColor = binary.LittleEndian.Uint32(record[at+4:]) & 0xffffff
+			slot.Lights.TracingBackground = binary.LittleEndian.Uint32(record[at+8:]) & 0xffffff
+		}
+		if at := padOffFire + i*16; flagAt(record, at) {
+			slot.Lights.FireColor = binary.LittleEndian.Uint32(record[at+4:]) & 0xffffff
+			slot.Lights.FireBackground = binary.LittleEndian.Uint32(record[at+8:]) & 0xffffff
+			slot.Lights.FireSpeed = max(1, min(15, int(record[at+12])))
+		}
+		if at := padOffCustom + i*100; flagAt(record, at) {
+			for led := range slot.Lights.Custom {
+				slot.Lights.Custom[led] = binary.LittleEndian.Uint32(record[at+4+led*4:]) & 0xffffff
+			}
+		}
 		profile.Slots[i] = slot
 	}
 	return profile, nil
@@ -205,6 +274,20 @@ func (s PadSlot) validate() error {
 	for i, target := range s.Buttons {
 		if !padTargetKnown(target) {
 			return fmt.Errorf("%s is assigned %#08x, which is not a function this controller has", PadInputs[i].Name, uint32(target))
+		}
+	}
+	if m := s.Motion; m.Target > PadMotionLeftStick || m.Sensitivity < 1 || m.Sensitivity > 10 || m.DeadZone < 0 || m.DeadZone > 100 {
+		return fmt.Errorf("motion settings are out of range (target %d, sensitivity %d, dead zone %d)", m.Target, m.Sensitivity, m.DeadZone)
+	}
+	if m := s.Motion; m.Target != PadMotionOff && !PadMotionButton(m.Button) {
+		return fmt.Errorf("%s cannot be the button that enables motion", m.Button)
+	}
+	if s.Lights.FireSpeed < 1 || s.Lights.FireSpeed > 15 {
+		return fmt.Errorf("fire ring speed %d is outside 1-15", s.Lights.FireSpeed)
+	}
+	for _, colour := range append([]uint32{s.Lights.TracingColor, s.Lights.TracingBackground, s.Lights.FireColor, s.Lights.FireBackground}, s.Lights.Custom[:]...) {
+		if colour > 0xffffff {
+			return fmt.Errorf("colour %#x is not 0xRRGGBB", colour)
 		}
 	}
 	_, err := encodePadName(s.Name)
@@ -257,6 +340,37 @@ func encodePadSlot(record []byte, i int, slot, was PadSlot) ([]padRange, error) 
 	}
 	if slot.Options != was.Options {
 		put(padOffOptions+i*8, binary.LittleEndian.AppendUint32(append([]byte(nil), flag...), slot.Options))
+	}
+	if slot.Motion != was.Motion {
+		section := binary.LittleEndian.AppendUint32(nil, padMotionOff)
+		if m := slot.Motion; m.Target == PadMotionOff {
+			// Off is stored as the controller's own "off" values.
+			section = append(section, 0, 0, 0, 0, 0, 5, 40, PadMotionOff)
+		} else {
+			mode := byte(1)
+			if m.Toggle {
+				mode = 2
+			}
+			section = binary.LittleEndian.AppendUint32(append([]byte(nil), flag...), uint32(m.Button))
+			section = append(section, mode, byte(m.Sensitivity), byte(m.DeadZone), m.Target)
+		}
+		put(padOffMotion+i*12, section)
+	}
+	if l, w := slot.Lights, was.Lights; l.TracingColor != w.TracingColor || l.TracingBackground != w.TracingBackground {
+		section := binary.LittleEndian.AppendUint32(append([]byte(nil), flag...), l.TracingColor)
+		put(padOffTracing+i*12, binary.LittleEndian.AppendUint32(section, l.TracingBackground))
+	}
+	if l, w := slot.Lights, was.Lights; l.FireColor != w.FireColor || l.FireBackground != w.FireBackground || l.FireSpeed != w.FireSpeed {
+		section := binary.LittleEndian.AppendUint32(append([]byte(nil), flag...), l.FireColor)
+		section = binary.LittleEndian.AppendUint32(section, l.FireBackground)
+		put(padOffFire+i*16, append(section, byte(l.FireSpeed), 0, 0, 0))
+	}
+	if slot.Lights.Custom != was.Lights.Custom {
+		section := append([]byte(nil), flag...)
+		for _, colour := range slot.Lights.Custom {
+			section = binary.LittleEndian.AppendUint32(section, colour)
+		}
+		put(padOffCustom+i*100, section)
 	}
 	// A slot with anything set in it is in use.
 	if len(changed) > 0 || slot.InUse != was.InUse {
@@ -337,6 +451,9 @@ func readPadProfile(ctx context.Context, session *protocol.DeviceSession) (PadPr
 	if err != nil {
 		return PadProfile{}, errProtocol(err)
 	}
+	if profile.LightEffect, err = session.U2LightEffect(ctx); err != nil {
+		return PadProfile{}, errProtocol(err)
+	}
 	return profile, nil
 }
 
@@ -375,18 +492,35 @@ func (c *OpenBitdoCore) PadApply(ctx context.Context, vidPid protocol.VidPid, ed
 	}
 	backupID := c.storeBackup(vidPid, configBackupPayload{kind: backupPad, padRecord: before.record})
 	report := WriteRecoveryReport{BackupID: backupID, HasBackupID: true}
-	if len(spans) == 0 {
+	effect := edited.LightEffect
+	if effect == 0 {
+		effect = before.LightEffect // a profile built without one leaves it alone
+	}
+	if len(spans) == 0 && effect == before.LightEffect {
 		report.WriteApplied = true
 		return report, nil
 	}
 
-	applyErr := writePadSpans(ctx, session, record, spans)
+	var applyErr error
+	if len(spans) > 0 {
+		applyErr = writePadSpans(ctx, session, record, spans)
+	}
+	if applyErr == nil && effect != before.LightEffect {
+		applyErr = setPadLightEffect(ctx, session, effect)
+	}
 	if applyErr == nil {
 		report.WriteApplied = true
 		return report, nil
 	}
 	report.RollbackAttempted, report.WriteError = true, applyErr.Error()
-	if rollbackErr := writePadSpans(ctx, session, before.record, spans); rollbackErr != nil {
+	var rollbackErr error
+	if len(spans) > 0 {
+		rollbackErr = writePadSpans(ctx, session, before.record, spans)
+	}
+	if rollbackErr == nil && effect != before.LightEffect {
+		rollbackErr = setPadLightEffect(ctx, session, before.LightEffect)
+	}
+	if rollbackErr != nil {
 		report.RollbackError = rollbackErr.Error()
 		return report, nil
 	}
@@ -452,4 +586,55 @@ func (c *OpenBitdoCore) restorePadBackup(ctx context.Context, vidPid protocol.Vi
 		return errProtocol(err)
 	}
 	return nil
+}
+
+// setPadLightEffect selects the stick-ring effect and reads it back.
+func setPadLightEffect(ctx context.Context, session *protocol.DeviceSession, effect byte) error {
+	if err := session.U2SetLightEffect(ctx, effect); err != nil {
+		return fmt.Errorf("light effect: %w", err)
+	}
+	if got, err := session.U2LightEffect(ctx); err != nil || got != effect {
+		return fmt.Errorf("readback mismatch for the light effect: set %d, the controller reports %d (%v)", effect, got, err)
+	}
+	return nil
+}
+
+// PadMotionButton reports whether target can be the button that enables
+// motion: a face button, d-pad direction, shoulder, trigger, stick click
+// or one of the four back buttons.
+func PadMotionButton(target PadTarget) bool {
+	for _, allowed := range PadMotionButtons {
+		if target == allowed {
+			return true
+		}
+	}
+	return false
+}
+
+// Back buttons as the motion setting names them.
+const (
+	padMotionP3 PadTarget = 0x00200000
+	padMotionP4 PadTarget = 0x40000000
+)
+
+// PadMotionButtons are the buttons that can enable motion, in menu order.
+var PadMotionButtons = []PadTarget{
+	PadR2, PadL2, PadR1, PadL1, PadA, PadB, PadX, PadY, PadUp, PadDown, PadLeft, PadRight,
+	PadL3, PadR3, PadPaddle1, PadPaddle2, padMotionP3, padMotionP4,
+}
+
+// PadMotionButtonName names a motion-enable button. The four back buttons
+// are named by where they are rather than by the function they can send.
+func PadMotionButtonName(target PadTarget) string {
+	switch target {
+	case PadPaddle1:
+		return "Back paddle P1"
+	case PadPaddle2:
+		return "Back paddle P2"
+	case padMotionP3:
+		return "Extra button L4"
+	case padMotionP4:
+		return "Extra button R4"
+	}
+	return target.String()
 }

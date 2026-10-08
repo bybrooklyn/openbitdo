@@ -217,3 +217,66 @@ func TestMockModeHasAWorkingController(t *testing.T) {
 		t.Fatal("the mock controller did not keep the edit")
 	}
 }
+
+func TestPadMotionAndLightsRoundTrip(t *testing.T) {
+	pad := &protocol.U2Simulator{Physical: protocol.U2PlatformXInput}
+	c := padCore(pad)
+	ctx := context.Background()
+	profile, err := c.PadReadProfile(ctx, padTarget)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if profile.LightEffect != protocol.U2LightOff || profile.Slots[0].Motion.Target != PadMotionOff {
+		t.Fatalf("an unconfigured controller has lights and motion off: effect=%d motion=%+v", profile.LightEffect, profile.Slots[0].Motion)
+	}
+
+	slot := &profile.Slots[0]
+	slot.Motion = PadMotion{Target: PadMotionRightStick, Button: PadR2, Toggle: true, Sensitivity: 8, DeadZone: 25}
+	slot.Lights.TracingColor, slot.Lights.TracingBackground = 0xff0000, 0x00007f
+	slot.Lights.FireColor, slot.Lights.FireSpeed = 0xffa500, 12
+	slot.Lights.Custom[0], slot.Lights.Custom[23] = 0x00ff00, 0x8b00ff
+	profile.LightEffect = protocol.U2LightCustom
+
+	report, err := c.PadApply(ctx, padTarget, profile)
+	if err != nil || !report.WriteApplied {
+		t.Fatalf("apply: %+v err=%v", report, err)
+	}
+	record := pad.Record(protocol.U2PlatformXInput)
+	// Motion: flag, enabling button, mode 2 (toggle), sensitivity, dead zone, target.
+	if got := record[0x494 : 0x494+12]; !bytes.Equal(got, []byte{0x11, 0x09, 0x20, 0x20, 0x00, 0x80, 0, 0, 2, 8, 25, 1}) {
+		t.Fatalf("motion stored as % x", got)
+	}
+	if got := record[0x4b8+4 : 0x4b8+12]; !bytes.Equal(got, []byte{0, 0, 0xff, 0, 0x7f, 0, 0, 0}) {
+		t.Fatalf("tracing colours stored as % x", got)
+	}
+	if record[0x4dc+12] != 12 || binary.LittleEndian.Uint32(record[0x50c+4:]) != 0x00ff00 || binary.LittleEndian.Uint32(record[0x50c+4+23*4:]) != 0x8b00ff {
+		t.Fatal("fire speed or per-LED colours stored wrongly")
+	}
+	if pad.Light != protocol.U2LightCustom {
+		t.Fatalf("light effect = %d, want per-LED", pad.Light)
+	}
+
+	again, err := c.PadReadProfile(ctx, padTarget)
+	if err != nil || again.LightEffect != protocol.U2LightCustom || again.Slots[0].Motion != slot.Motion || again.Slots[0].Lights != slot.Lights {
+		t.Fatalf("read back effect=%d motion=%+v err=%v", again.LightEffect, again.Slots[0].Motion, err)
+	}
+
+	// Turning motion off stores the controller's own "off" values.
+	again.Slots[0].Motion = PadMotion{Sensitivity: 5, DeadZone: 40}
+	again.LightEffect = protocol.U2LightOff
+	if report, err := c.PadApply(ctx, padTarget, again); err != nil || !report.WriteApplied {
+		t.Fatalf("apply off: %+v err=%v", report, err)
+	}
+	if got := pad.Record(protocol.U2PlatformXInput)[0x494 : 0x494+12]; !bytes.Equal(got, []byte{0, 0, 0x19, 0x20, 0, 0, 0, 0, 0, 5, 40, 0}) {
+		t.Fatalf("motion off stored as % x", got)
+	}
+	if pad.Light != protocol.U2LightOff {
+		t.Fatal("the light effect should be off")
+	}
+
+	// Motion needs a button that can enable it.
+	again.Slots[0].Motion = PadMotion{Target: PadMotionLeftStick, Button: PadHome, Sensitivity: 5, DeadZone: 40}
+	if _, err := c.PadApply(ctx, padTarget, again); err == nil {
+		t.Fatal("Home cannot enable motion and must be refused")
+	}
+}

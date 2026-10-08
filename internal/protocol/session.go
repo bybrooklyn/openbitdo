@@ -239,6 +239,8 @@ var notAStandaloneCheck = map[CommandID]bool{
 	// These ask about one key's macro; with no key named there is nothing
 	// to ask.
 	CommandJp108ReadMacroName: true, CommandJp108ReadMacroValue: true,
+	// Answered only by a controller that is on; the profile read asks it.
+	CommandU2GetLightEffect: true,
 }
 
 type diagCheckPlan struct {
