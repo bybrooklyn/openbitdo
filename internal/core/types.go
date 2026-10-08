@@ -157,6 +157,8 @@ type configBackupPayload struct {
 	padRecord     []byte
 	padMacros     [PadSlots][PadMacros]PadMacro
 	padProduct    protocol.VidPid
+	// recordKeyboard is a record keyboard's profile as it was read.
+	recordKeyboard RecordKeyboardProfile
 }
 
 type deviceKind int
@@ -165,6 +167,7 @@ const (
 	backupJP108 deviceKind = iota
 	backupKeyboard
 	backupPad
+	backupRecordKeyboard
 )
 
 // WriteRecoveryReport describes the outcome of a backup-then-write-then-

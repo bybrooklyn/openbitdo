@@ -275,6 +275,10 @@ var notAStandaloneCheck = map[CommandID]bool{
 	CommandJp108ReadMacroName: true, CommandJp108ReadMacroValue: true,
 	// Answered only by a controller that is on; the profile read asks it.
 	CommandU2GetLightEffect: true, CommandU2MacroRead: true, CommandArcadeGetMode: true,
+	// A record keyboard's reads name a length and an offset; bare, they
+	// ask for nothing. The first only turns key reports off.
+	CommandKbRecordSetReportMode: true, CommandKbRecordRead: true,
+	CommandKbRecordMacroRead: true, CommandKbRecordLightsRead: true,
 }
 
 type diagCheckPlan struct {

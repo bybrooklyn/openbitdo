@@ -84,6 +84,7 @@ type reportDiagCapability struct {
 	SupportsJP108DedicatedMap bool `toml:"supports_jp108_dedicated_map"`
 	SupportsU2SlotConfig      bool `toml:"supports_u2_slot_config"`
 	SupportsU2ButtonMap       bool `toml:"supports_u2_button_map"`
+	SupportsRecordKeyboard    bool `toml:"supports_record_keyboard"`
 }
 
 type reportCommandCheck struct {

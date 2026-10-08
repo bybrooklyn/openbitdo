@@ -84,6 +84,11 @@ var candidateUnlockableWrites = map[CommandID]bool{
 	CommandJp108WriteMacroName:        true,
 	CommandJp108WriteMacroValue:       true,
 	CommandJp108ClearMacro:            true,
+	CommandKbRecordWrite:              true,
+	CommandKbRecordMacroErase:         true,
+	CommandKbRecordMacroWrite:         true,
+	CommandKbRecordLightsBegin:        true,
+	CommandKbRecordLightsWrite:        true,
 }
 
 func (s *DeviceSession) allowCandidateRuntimeWritePath(command CommandID, safety SafetyClass) bool {

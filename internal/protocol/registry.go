@@ -119,6 +119,14 @@ var jpCandidateDiagPIDs = map[uint16]bool{
 // expose U2 slot/button-map reads ahead of full confirmation (0x3105, 0x301a).
 var pidWithSlotConfigCandidate = map[uint16]bool{0x3105: true, 0x301a: true}
 
+// recordKeyboardPIDs are the keyboards that keep their profile in one
+// record (see kbrecord.go) and their 2.4G receivers: Retro 87 Xbox edition,
+// Retro 87 UK, Retro 68 and the Riviera keyboard. The Riviera is listed for
+// completeness; while its tier is detect-only it is granted nothing.
+var recordKeyboardPIDs = map[uint16]bool{
+	0x2028: true, 0x202e: true, 0x3026: true, 0x3027: true, 0x203a: true, 0x2049: true, 0x205a: true,
+}
+
 // DefaultCapabilityFor derives a PID's capability set from its tier, PID,
 // and protocol family. Ported 1:1 from registry.rs's default_capability_for,
 // including every per-PID special case.
@@ -128,16 +136,17 @@ func DefaultCapabilityFor(pid uint16, tier SupportTier, family ProtocolFamily) P
 	}
 
 	if tier == TierCandidateReadOnly {
+		record := recordKeyboardPIDs[pid]
 		switch {
 		case standardCandidateReadDiagPIDs[pid] && !pidWithSlotConfigCandidate[pid]:
-			return PidCapability{SupportsMode: true, SupportsProfileRW: true}
+			return PidCapability{SupportsMode: true, SupportsProfileRW: true, SupportsRecordKeyboard: record}
 		case pidWithSlotConfigCandidate[pid]:
 			return PidCapability{
 				SupportsMode: true, SupportsProfileRW: true,
 				SupportsU2SlotConfig: true, SupportsU2ButtonMap: true,
 			}
 		case jpCandidateDiagPIDs[pid]:
-			return PidCapability{SupportsJP108DedicatedMap: true}
+			return PidCapability{SupportsJP108DedicatedMap: true, SupportsRecordKeyboard: record}
 		}
 	}
 
@@ -163,6 +172,7 @@ func DefaultCapabilityFor(pid uint16, tier SupportTier, family ProtocolFamily) P
 	// of record as an Ultimate 2, but update their firmware the standard way.
 	cap.SupportsU2SlotConfig = pid == 0x6009 || pid == 0x600b
 	cap.SupportsU2ButtonMap = false
+	cap.SupportsRecordKeyboard = false
 	return cap
 }
 
