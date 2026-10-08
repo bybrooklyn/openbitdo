@@ -189,14 +189,3 @@ const (
 	IconProgressFilled = "█"
 	IconProgressEmpty  = "░"
 )
-
-func supportTierBadge(label string, kind string) string {
-	switch kind {
-	case "full":
-		return styleBadgeFull.Render(IconTierFull + " " + label)
-	case "candidate":
-		return styleBadgeCandidate.Render(IconTierCandidate + " " + label)
-	default:
-		return styleBadgeDetect.Render(IconTierDetect + " " + label)
-	}
-}

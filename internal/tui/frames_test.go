@@ -19,11 +19,14 @@ import (
 //
 //	OPENBITDO_FRAME=80x24 go test ./internal/tui -run TestDumpFrame -v
 //	OPENBITDO_FRAME=100x30 OPENBITDO_FRAME_KEYS="enter down ?" go test ...
-//	OPENBITDO_FRAME=100x30 OPENBITDO_FRAME_REAL=1 go test ...
 //
 // OPENBITDO_FRAME_KEYS is a space-separated key script (bubbletea key names;
-// a longer word is typed rune by rune). OPENBITDO_FRAME_REAL=1 uses attached
-// hardware instead of the mock devices, and sends it the diagnostic reads.
+// a longer word is typed rune by rune). The devices are the mock ones; see
+// frames_manual_test.go for the same dump against attached hardware.
+// frameUsesHardware is replaced in builds tagged "manual", the only builds
+// allowed to touch attached devices.
+var frameUsesHardware = func() bool { return false }
+
 func TestDumpFrame(t *testing.T) {
 	size := os.Getenv("OPENBITDO_FRAME")
 	if size == "" {
@@ -34,7 +37,7 @@ func TestDumpFrame(t *testing.T) {
 		t.Fatalf("OPENBITDO_FRAME must look like 100x30: %v", err)
 	}
 
-	mock := os.Getenv("OPENBITDO_FRAME_REAL") == ""
+	mock := !frameUsesHardware()
 	c := core.New(core.Config{MockMode: mock, ProgressIntervalMs: 1})
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)

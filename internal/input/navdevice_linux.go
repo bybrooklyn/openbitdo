@@ -14,10 +14,14 @@ func enumerateNavDevices() []hid.DeviceInfo {
 	nodes := hidraw.Enumerate(bitdoVID, 0)
 	infos := make([]hid.DeviceInfo, 0, len(nodes))
 	for _, node := range nodes {
-		infos = append(infos, hid.DeviceInfo{
+		info := hid.DeviceInfo{
 			Path: node.Path, VendorID: node.VendorID, ProductID: node.ProductID,
 			Product: node.Product, Serial: node.Serial, Interface: node.Interface,
-		})
+		}
+		if len(node.Usages) > 0 {
+			info.UsagePage, info.Usage = node.Usages[0].Page, node.Usages[0].Usage
+		}
+		infos = append(infos, info)
 	}
 	return infos
 }

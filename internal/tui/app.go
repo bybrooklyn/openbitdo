@@ -663,11 +663,6 @@ func (m Model) footerNotice() (string, lipgloss.Style) {
 	return m.statusLine, stylePositive
 }
 
-// hint renders one "key label" pair.
-func hint(key, label string) string {
-	return styleKey.Render(key) + " " + label
-}
-
 // Switch-vs-Xbox button-layout awareness (physical A/B/X/Y swapped) was
 // investigated and found not currently feasible: GetMode's response does
 // carry a real, parsed "mode" byte (validation.go: parsed["mode"] =
