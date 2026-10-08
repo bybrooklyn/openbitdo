@@ -24,6 +24,9 @@ All notable changes to OpenBitdo are tracked here.
   editor. Untested on hardware.
 - Arcade Controller: button map, macros and the choice of which direction wins when two opposite
   ones are pressed together. Untested on hardware.
+- Retro 87 and Retro 68 keyboards: protocol and core support for their configuration record (keys,
+  locks, volume, sleep, lighting, macros). No editor yet; untested on hardware.
+- Retro Mechanical Keyboard (0x5200): its profile can be read.
 - Pro 3 and Ultimate 2 Bluetooth: the controller editor covers them too, using each model's own
   record layout. Untested on hardware.
 - Ultimate 2 macros: each slot's four macros can be built in the editor (a trigger button, then

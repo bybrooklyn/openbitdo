@@ -81,7 +81,8 @@ on, answering the read. The receiver alone answers only the connection query.
 | Arcade Controller (0x600b) | simulated: button map, the opposite-directions (SOCD) choice, macros and profile name, reached under the shared ID. No hardware has been tried. |
 | Arcade Controller Pro (0x2062) | no |
 | Retro Mechanical Keyboard (0x5200) | simulated, read-only: its profile reads with the Retro 108's commands, its own key ids (modifiers 100-106, A/B 109/108, K1-K8 116-110, F13-F24 targets 118-129) and no numpad. Writes and the editor stay off while it is a read-only-tier device in `pid_matrix.csv`. |
-| Retro 87 Xbox, Retro 68, Riviera keyboard | no |
+| Retro 87 Xbox (0x2028, 0x3026), Retro 68 (0x203a) | simulated, no editor yet: protocol and core read and write the whole record (key table, locks, volume, sleep timers, lighting themes and per-key colours, macros) with readback and rollback. Not modelled: paired Super Buttons, which key each light is under. They are read-only-tier devices, so real writes need the unlock. |
+| Riviera keyboard (0x205a) | as above in code, but it is detect-only in `pid_matrix.csv` and its adapter (0x2060) path is not implemented |
 | Retro R8, Riviera and SN30 Pro mice | no |
 | N64 receiver controller-pak manager, calibration pages | no |
 | Firmware update, any product | no (deferred; see `docs/RC_CHECKLIST.md`) |

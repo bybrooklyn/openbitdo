@@ -146,7 +146,9 @@ func DefaultCapabilityFor(pid uint16, tier SupportTier, family ProtocolFamily) P
 				SupportsU2SlotConfig: true, SupportsU2ButtonMap: true,
 			}
 		case jpCandidateDiagPIDs[pid]:
-			return PidCapability{SupportsJP108DedicatedMap: true, SupportsRecordKeyboard: record}
+			// A record keyboard does not take the Retro 108's 33-byte
+			// commands; the vendor library never sends it one.
+			return PidCapability{SupportsJP108DedicatedMap: !record, SupportsRecordKeyboard: record}
 		}
 	}
 
