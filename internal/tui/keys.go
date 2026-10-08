@@ -105,6 +105,7 @@ func (m Model) viewHints() []keyHint {
 					return []keyHint{{key: "type", label: "to search"}, {key: move, label: "move"}, {key: "enter", label: "add"}, {key: "esc", label: "cancel"}}
 				}
 				return []keyHint{
+					{key: "R", label: "record", help: "type what the macro should type; esc stops"},
 					{key: "a", label: "tap", help: "add a key tap (press and release)"},
 					{key: "p", label: "hold", help: "add a key press that stays down"},
 					{key: "r", label: "let go", help: "add a key release"},

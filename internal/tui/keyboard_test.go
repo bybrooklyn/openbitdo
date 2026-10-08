@@ -366,3 +366,24 @@ func TestRealKeyboardMacroEditorIsGatedUntilConfirmed(t *testing.T) {
 		t.Fatalf("expected the macro editor to stay shut with a reason, status=%q", m.mapping.statusMsg)
 	}
 }
+
+func TestMacroEditorRecordsTypedText(t *testing.T) {
+	m := keyboardModel(t, 100, 30)
+	m.mapping.cursor = 0
+	m = press(t, m, "m", "R")
+	if !strings.Contains(ansi.Strip(m.View()), "RECORDING") {
+		t.Fatal("R should start recording and say so")
+	}
+	// While recording, every key is text: q, a, w and R included.
+	m = press(t, m, "q", "a", "W", "R", "!", "enter", "esc")
+	editor := m.mapping.kb.macro
+	if editor.recording || !editor.open {
+		t.Fatal("esc should stop recording and stay in the editor")
+	}
+	if got := editor.macro.Summary(); got != "Q A Left Shift+W Left Shift+R Left Shift+1 Enter" {
+		t.Fatalf("recorded %q", got)
+	}
+	if err := (core.KeyMacro{Name: "x", Repeat: 1, Steps: editor.macro.Steps}).Validate(); err != nil {
+		t.Fatalf("a recorded macro must be valid: %v", err)
+	}
+}

@@ -90,3 +90,37 @@ func TestKeyMacroRefusesWhatWouldMisbehave(t *testing.T) {
 		t.Fatal("a value shorter than its step count must be refused")
 	}
 }
+
+func TestTypeTextBuildsAValidMacro(t *testing.T) {
+	steps, skipped := TypeText("Hi, there!\n")
+	if skipped != 0 {
+		t.Fatalf("%d characters skipped", skipped)
+	}
+	macro := KeyMacro{Name: "hi", Repeat: 1, Steps: steps}
+	if err := macro.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	if got := macro.Summary(); got != "Left Shift+H I , Space T H E R E Left Shift+1 Enter" {
+		t.Fatalf("summary = %q", got)
+	}
+	// Every printable ASCII character has a key, and they are all distinct strokes.
+	seen := map[[2]int]rune{}
+	for r := rune(' '); r <= '~'; r++ {
+		usage, shift, ok := KeyStrokeForRune(r)
+		if !ok {
+			t.Errorf("%q has no key", r)
+			continue
+		}
+		key := [2]int{int(usage), 0}
+		if shift {
+			key[1] = 1
+		}
+		if other, dup := seen[key]; dup {
+			t.Errorf("%q and %q map to the same stroke", r, other)
+		}
+		seen[key] = r
+	}
+	if _, skipped := TypeText("é"); skipped != 1 {
+		t.Fatal("a character with no US key should be skipped and counted")
+	}
+}

@@ -43,7 +43,7 @@ asks the device which product it is. OpenBitdo does the same for the three contr
 | Volume level 1-5 | yes | read: hardware; write: simulated |
 | Rename the profile | yes | hardware (first write of a name); rename of an existing profile simulated |
 | Erase the profile | yes | simulated |
-| Macros: 8 slots, any key, up to 200 steps, repeat count and interval | yes | simulated (list read: hardware). Built step by step; recording live key presses: no |
+| Macros: 8 slots, any key, up to 200 steps, repeat count and interval | yes | simulated (list read: hardware). Built step by step, or recorded by typing the text the macro should type |
 | Profile library on the computer: save, copy, export, import | yes | save and load readable profile files (`E` / `I` in the editor) |
 | Live view of the Super Button ports | yes | no |
 | Firmware update | yes | no (deferred) |
@@ -64,7 +64,7 @@ asks the device which product it is. OpenBitdo does the same for the three contr
 | Macros: 4 per slot, a trigger button, up to 200 steps, repeat and interval | yes | simulated. Built step by step; recording live input: no |
 | Motion (gyro) mapping: target stick, enabling button, hold or toggle, sensitivity, dead zone | yes | simulated |
 | Stick-ring lighting: off, tracing, fire ring, per-LED colours, speed | yes | simulated (colours by hex or swatch; no colour wheel) |
-| Stick and trigger calibration | yes | no |
+| Stick and trigger calibration | no (the vendor application calibrates only the N64 controller and stick module) | n/a |
 | Profile library on the computer | yes | save and load one slot as a readable profile file |
 | Reached under the shared ID 0x310b | yes (only this way) | simulated: the device is asked which product it is and gets that product's editor |
 | Firmware update | yes | no (deferred) |

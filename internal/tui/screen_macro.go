@@ -45,6 +45,9 @@ type macroEditor struct {
 	pickFilter string
 	pickCursor int
 	problem    string
+	// recording is true while typed characters are being turned into
+	// key taps.
+	recording bool
 }
 
 func macrosEqual(a, b map[byte]core.KeyMacro) bool {
@@ -107,6 +110,29 @@ func (m Model) updateMacroEditor(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	e := &m.mapping.kb.macro
 	e.problem = ""
 	switch {
+	case e.recording:
+		var text string
+		switch msg.Type {
+		case tea.KeyEsc:
+			e.recording = false
+			return m, nil
+		case tea.KeyEnter:
+			text = "\n"
+		case tea.KeyTab:
+			text = "\t"
+		case tea.KeyBackspace:
+			text = "\b"
+		case tea.KeyRunes, tea.KeySpace:
+			text = string(msg.Runes)
+		}
+		steps, skipped := core.TypeText(text)
+		if skipped > 0 {
+			e.problem = "That character has no key on a US layout, so it was left out."
+		}
+		if len(steps) > 0 {
+			e.insert(steps...)
+		}
+		return m, nil
 	case e.picking:
 		choices := e.keyChoices()
 		switch msg.Type {
@@ -182,6 +208,8 @@ func (m Model) updateMacroEditor(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		e.startPick(macroAddRelease)
 	case "w":
 		e.insert(core.KeyMacroStep{Kind: core.StepWait, Millis: 50})
+	case "R":
+		e.recording = true
 	case "backspace", "delete":
 		if stepIndex >= 0 && stepIndex < steps {
 			e.macro.Steps = append(e.macro.Steps[:stepIndex], e.macro.Steps[stepIndex+1:]...)
@@ -273,7 +301,9 @@ func (m Model) macroPanel(panel devicePanel, text int) devicePanel {
 
 	panel.add(-1, stylePanelTitle.Render(truncate("Macro on "+e.key.Name, text)))
 	summary := e.macro.Summary()
-	if len(e.macro.Steps) == 0 {
+	if e.recording {
+		summary = "RECORDING: type what the macro should type; esc to stop"
+	} else if len(e.macro.Steps) == 0 {
 		summary = "empty: a adds a key tap, w a pause"
 	}
 	panel.add(-1, styleFaint.Render(truncate(summary, text)), "")

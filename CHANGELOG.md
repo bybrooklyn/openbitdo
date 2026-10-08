@@ -15,6 +15,8 @@ All notable changes to OpenBitdo are tracked here.
   pauses, with a repeat count and a pause between repeats. A macro that would leave a key held is
   refused. On a real keyboard this stays behind advanced mode until a macro write has been
   confirmed on hardware.
+- Retro 108 macros can be recorded: `R` in the macro editor turns what you type into key taps,
+  holding Shift where a character needs it.
 - Profile and macro names are written the way the vendor's application writes them, so each
   program can read names the other wrote.
 - A controller wired or in XInput mode enumerates under an ID several products share (0x310b).

@@ -248,3 +248,42 @@ func TypeKeys(pauseMillis int, usages ...byte) []KeyMacroStep {
 	}
 	return steps
 }
+
+// KeyStrokeForRune is the key that types r on a US layout, and whether
+// Shift is held with it.
+func KeyStrokeForRune(r rune) (usage byte, shift bool, ok bool) {
+	const plain = "abcdefghijklmnopqrstuvwxyz1234567890\n\x1b\b\t -=[]\\\x00;'`,./"
+	const shifted = "ABCDEFGHIJKLMNOPQRSTUVWXYZ!@#$%^&*()\x00\x00\x00\x00\x00_+{}|\x00:\"~<>?"
+	if r == 0 {
+		return 0, false, false
+	}
+	if i := strings.IndexRune(plain, r); i >= 0 {
+		return byte(0x04 + i), false, true
+	}
+	if i := strings.IndexRune(shifted, r); i >= 0 {
+		return byte(0x04 + i), true, true
+	}
+	return 0, false, false
+}
+
+// TypeText builds the steps that type text: each character a key tap, with
+// Left Shift held around the ones that need it. Characters with no key on
+// a US layout are skipped; skipped reports how many.
+func TypeText(text string) (steps []KeyMacroStep, skipped int) {
+	const leftShift = 0xe1
+	for _, r := range text {
+		usage, shift, ok := KeyStrokeForRune(r)
+		if !ok {
+			skipped++
+			continue
+		}
+		if shift {
+			steps = append(steps, KeyMacroStep{Kind: StepPress, Usage: leftShift})
+		}
+		steps = append(steps, KeyMacroStep{Kind: StepPress, Usage: usage}, KeyMacroStep{Kind: StepRelease, Usage: usage})
+		if shift {
+			steps = append(steps, KeyMacroStep{Kind: StepRelease, Usage: leftShift})
+		}
+	}
+	return steps, skipped
+}
