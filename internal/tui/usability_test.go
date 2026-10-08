@@ -171,7 +171,7 @@ func TestUnreachableDeviceIsShownAsSuchAndOffersNothing(t *testing.T) {
 	keyboard := core.AppDevice{
 		VidPid: protocol.VidPid{VID: 0x2dc8, PID: 0x5209}, Name: "PID_108JP", DisplayName: "Retro 108 Keyboard",
 		SupportTier: protocol.TierFull, Capability: protocol.DeviceProfileFor(protocol.VidPid{VID: 0x2dc8, PID: 0x5209}).Capability,
-		ConfigChannel: core.ChannelAbsent,
+		ConfigChannel: core.ChannelAbsent, WorksAs: core.RoleKeyboard,
 	}
 	next, cmd := m.Update(devicesLoadedMsg{devices: []core.AppDevice{keyboard}})
 	m = next.(Model)
@@ -182,7 +182,7 @@ func TestUnreachableDeviceIsShownAsSuchAndOffersNothing(t *testing.T) {
 	}
 
 	plain := ansi.Strip(m.View())
-	for _, want := range []string{"CAN'T CONNECT", "not in a mode OpenBitdo can talk to", "another connection", "nothing OpenBitdo can do"} {
+	for _, want := range []string{"TYPING", "Working as a keyboard", "work as normal", "can show it, but not change it"} {
 		if !strings.Contains(plain, want) {
 			t.Fatalf("expected %q:\n%s", want, plain)
 		}
@@ -441,15 +441,24 @@ func TestLeavingADirtyMappingDraftAsksThenContinues(t *testing.T) {
 
 func TestVerdictSeparatesWorkingFromLimited(t *testing.T) {
 	responding := core.DeviceHealth{State: core.HealthResponding, Answered: 5, Total: 12}
-	if got := verdictFor(responding, true).word; got != "Working" {
+	if got := verdictFor(responding, true, core.RoleUnknown).word; got != "Working" {
 		t.Fatalf("a device whose settings can be changed is Working, got %q", got)
 	}
 	// Answering some checks is not the same as being usable.
-	if got := verdictFor(responding, false).word; got != "Limited" {
+	if got := verdictFor(responding, false, core.RoleUnknown).word; got != "Limited" {
 		t.Fatalf("a device that can only be read is Limited, got %q", got)
 	}
-	if got := verdictFor(core.DeviceHealth{State: core.HealthNoChannel}, false).word; got != "Can't connect" {
+	noChannel := core.DeviceHealth{State: core.HealthNoChannel}
+	if got := verdictFor(noChannel, false, core.RoleUnknown).word; got != "Can't connect" {
 		t.Fatalf("unexpected verdict for an unreachable device: %q", got)
+	}
+	// A device that is plainly doing its job is not "can't connect", even
+	// though its settings are out of reach.
+	if got := verdictFor(noChannel, false, core.RoleGamepad); got.word != "Playing" || !strings.Contains(got.sentence, "Working as a controller") {
+		t.Fatalf("unexpected verdict for a gamepad-mode controller: %+v", got)
+	}
+	if got := verdictFor(noChannel, false, core.RoleKeyboard); got.word != "Typing" || !strings.Contains(got.sentence, "Working as a keyboard") {
+		t.Fatalf("unexpected verdict for a keyboard: %+v", got)
 	}
 }
 

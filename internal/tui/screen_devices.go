@@ -145,7 +145,19 @@ type verdict struct {
 // verdictFor turns what is known about a device into a verdict. canChange
 // says whether any setting on it can be changed right now; a device that
 // answers but can only be read is "Limited", not "Working".
-func verdictFor(h core.DeviceHealth, canChange bool) verdict {
+func verdictFor(h core.DeviceHealth, canChange bool, worksAs core.DeviceRole) verdict {
+	if h.State == core.HealthNoChannel {
+		// No way to configure it in this mode, but it is very likely doing
+		// its job. Lead with that; "can't connect" would be wrong.
+		switch worksAs {
+		case core.RoleGamepad:
+			return verdict{IconTierCandidate, styleBadgeCandidate, "Playing",
+				"Working as a controller. Its settings can't be reached in this mode."}
+		case core.RoleKeyboard:
+			return verdict{IconTierCandidate, styleBadgeCandidate, "Typing",
+				"Working as a keyboard. OpenBitdo doesn't know how to reach its settings yet."}
+		}
+	}
 	switch h.State {
 	case core.HealthResponding:
 		if canChange {
@@ -180,7 +192,19 @@ func (m Model) deviceVerdict(device core.AppDevice) verdict {
 			canChange = true
 		}
 	}
-	return verdictFor(health, canChange)
+	return verdictFor(health, canChange, device.WorksAs)
+}
+
+// noChannelAdvice says what would let OpenBitdo configure a device that has
+// no configuration interface right now.
+func noChannelAdvice(device core.AppDevice) string {
+	switch device.WorksAs {
+	case core.RoleGamepad:
+		return "Controllers keep their settings behind a separate mode. If yours has a mode switch or a wireless adapter, try the other position or connection and it will show up here again."
+	case core.RoleKeyboard:
+		return "Its buttons and keys work as normal. Changing what they do needs commands OpenBitdo hasn't learned for this keyboard yet."
+	}
+	return "If it has another connection (a wireless adapter, Bluetooth), try that one."
 }
 
 // permissionFixLines is the fix for HealthNoPermission, kept as separate
@@ -537,7 +561,7 @@ func (m Model) overviewPanel(height int) devicePanel {
 		}
 	case core.HealthNoChannel:
 		panel.add(-1, "")
-		panel.addWrapped(-1, styleFaint, "If it has another connection (a wireless adapter, Bluetooth), try that one.", text)
+		panel.addWrapped(-1, styleFaint, noChannelAdvice(device), text)
 	case core.HealthError:
 		if health.Err != nil {
 			panel.addWrapped(-1, styleFaint, health.Err.Error(), text)
@@ -593,7 +617,7 @@ func (m Model) overviewPanel(height int) devicePanel {
 		// Listing each one again would only bury it.
 		if len(can) == 0 {
 			panel.add(-1, "")
-			panel.addWrapped(-1, styleFaint, "Until then there is nothing OpenBitdo can do with it.", text)
+			panel.addWrapped(-1, styleFaint, "Until then OpenBitdo can show it, but not change it.", text)
 		}
 		notYet = nil
 	}

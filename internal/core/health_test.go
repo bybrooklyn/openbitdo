@@ -44,6 +44,29 @@ func TestListDevicesReportsNamesAndConfigChannel(t *testing.T) {
 	if got := byPID[0x5209]; got.DisplayName != "Retro 108 Keyboard" || got.ConfigChannel != ChannelAbsent {
 		t.Fatalf("unexpected keyboard: %+v", got)
 	}
+	// It cannot be configured, but it is a working keyboard, and that is
+	// what the user should be told first.
+	if got := byPID[0x5209].WorksAs; got != RoleKeyboard {
+		t.Fatalf("expected the keyboard to be recognised as one, got %v", got)
+	}
+}
+
+// An Ultimate 2 in its gamepad mode (0x6012) exposes one HID interface, a
+// Generic Desktop gamepad, and no configuration interface.
+func TestGamepadModeDeviceIsAWorkingGamepadWithNoConfigChannel(t *testing.T) {
+	c := New(Config{})
+	pad := protocol.VidPid{VID: 0x2dc8, PID: 0x6012}
+	c.enumerateDevices = func() []protocol.EnumeratedDevice {
+		return []protocol.EnumeratedDevice{{VidPid: pad, Product: "8BitDo 8BitDo Ultimate 2 Wireless Controller for PC", Serial: "22EC9EA4DF", Path: "/dev/hidraw10", UsagePage: 0x01, Usage: 0x05}}
+	}
+	listDevices := c.ListDevices
+	devices, err := listDevices(context.Background())
+	if err != nil || len(devices) != 1 {
+		t.Fatalf("expected one device, got %+v err=%v", devices, err)
+	}
+	if got := devices[0]; got.WorksAs != RoleGamepad || got.ConfigChannel != ChannelAbsent || got.DisplayName != "Ultimate 2 Wireless Controller for PC" {
+		t.Fatalf("unexpected device: %+v", got)
+	}
 }
 
 func TestConfigChannelIsUnknownWhenAnInterfaceHasNoUsageMetadata(t *testing.T) {

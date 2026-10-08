@@ -25,7 +25,19 @@ type AppDevice struct {
 	// ConfigChannel says whether the connected device exposes the HID
 	// interface configuration commands travel over.
 	ConfigChannel ChannelState
+	// WorksAs is what the device is doing for the computer right now,
+	// independent of whether OpenBitdo can configure it.
+	WorksAs DeviceRole
 }
+
+// DeviceRole is the kind of input device the operating system sees.
+type DeviceRole int
+
+const (
+	RoleUnknown DeviceRole = iota
+	RoleGamepad
+	RoleKeyboard
+)
 
 // ChannelState is whether a device's configuration interface was found.
 type ChannelState int

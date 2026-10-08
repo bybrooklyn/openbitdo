@@ -109,6 +109,7 @@ func (c *OpenBitdoCore) ListDevices(ctx context.Context) ([]AppDevice, error) {
 
 	enumerated := c.enumerateDevices()
 	channels := configChannelStates(enumerated)
+	roles := deviceRoles(enumerated)
 	devices := addressableEnumeratedDevices(enumerated)
 	out := make([]AppDevice, 0, len(devices))
 	for _, d := range devices {
@@ -121,9 +122,32 @@ func (c *OpenBitdoCore) ListDevices(ctx context.Context) ([]AppDevice, error) {
 			SupportLevel: p.SupportLevel, SupportTier: p.SupportTier,
 			ProtocolFamily: p.ProtocolFamily, Capability: p.Capability, Evidence: p.Evidence,
 			Serial: d.Serial, Connected: true, ConfigChannel: channels[d.VidPid],
+			WorksAs: roles[d.VidPid],
 		})
 	}
 	return out, nil
+}
+
+// deviceRoles works out, per VID/PID, what the device presents itself as:
+// a Generic Desktop gamepad/joystick or keyboard interface (HID usage page
+// 0x01, usages 0x04/0x05 and 0x06). A device in a mode with no configuration
+// interface is usually still one of these, and working.
+func deviceRoles(devices []protocol.EnumeratedDevice) map[protocol.VidPid]DeviceRole {
+	roles := make(map[protocol.VidPid]DeviceRole)
+	for _, d := range devices {
+		if d.UsagePage != 0x01 {
+			continue
+		}
+		switch d.Usage {
+		case 0x04, 0x05:
+			roles[d.VidPid] = RoleGamepad
+		case 0x06:
+			if roles[d.VidPid] == RoleUnknown {
+				roles[d.VidPid] = RoleKeyboard
+			}
+		}
+	}
+	return roles
 }
 
 // configChannelStates works out, per VID/PID, whether any enumerated
