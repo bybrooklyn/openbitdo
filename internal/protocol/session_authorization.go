@@ -78,6 +78,7 @@ var candidateUnlockableWrites = map[CommandID]bool{
 	CommandU2SetLightEffect:           true,
 	CommandU2MacroWrite:               true,
 	CommandU2MacroErase:               true,
+	CommandArcadeProSetSync:           true,
 	CommandJp108WriteDedicatedMapping: true,
 	CommandJp108WriteFeatureFlags:     true,
 	CommandJp108WriteVoice:            true,

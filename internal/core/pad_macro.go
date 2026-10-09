@@ -141,14 +141,18 @@ func padMacroTrigger(target PadTarget) bool {
 }
 
 // Validate reports the first reason a controller could not hold the macro.
-func (m PadMacro) Validate() error {
+func (m PadMacro) Validate() error { return m.validate(padMacroTrigger) }
+
+// validate is Validate with the model's own idea of which buttons can play
+// a macro.
+func (m PadMacro) validate(canTrigger func(PadTarget) bool) error {
 	if m.Empty() {
 		return nil
 	}
 	if len(m.Steps) > PadMacroMaxSteps {
 		return fmt.Errorf("a macro holds at most %d steps, this one has %d", PadMacroMaxSteps, len(m.Steps))
 	}
-	if !padMacroTrigger(m.Trigger) {
+	if !canTrigger(m.Trigger) {
 		return fmt.Errorf("%s cannot play a macro", PadMotionButtonName(m.Trigger))
 	}
 	if _, err := encodePadName(m.Name); err != nil {
@@ -224,7 +228,7 @@ func encodePadMacroSection(layout padLayout, platform byte, macros [PadMacros]Pa
 // from macro storage.
 func readPadMacros(ctx context.Context, session *protocol.DeviceSession, record []byte, layout padLayout, platform byte) ([PadSlots][PadMacros]PadMacro, error) {
 	var macros [PadSlots][PadMacros]PadMacro
-	for slot := 0; slot < PadSlots; slot++ {
+	for slot := 0; slot < layout.slots; slot++ {
 		section := record[layout.macros+slot*padMacroSection:][:padMacroSection]
 		if binary.LittleEndian.Uint32(section) != padInUse {
 			continue
@@ -233,7 +237,7 @@ func readPadMacros(ctx context.Context, session *protocol.DeviceSession, record 
 			header := section[8+j*padMacroHeader:][:padMacroHeader]
 			count := int(binary.LittleEndian.Uint16(header[34:]))
 			trigger := layout.wireTrigger(PadTarget(binary.LittleEndian.Uint32(header[40:])))
-			if count == 0 || count > PadMacroMaxSteps || !padMacroTrigger(trigger) {
+			if count == 0 || count > PadMacroMaxSteps || !layout.macroTrigger(trigger) {
 				continue
 			}
 			data, err := session.U2ReadMacroData(ctx, platform, byte(slot), j*protocol.U2MacroRegion, count*padMacroStepBytes)
@@ -287,6 +291,12 @@ func writePadMacroSteps(ctx context.Context, session *protocol.DeviceSession, pl
 		}
 	}
 	return nil
+}
+
+// macroTrigger reports whether a button can play a macro on this model: an
+// Arcade Controller Pro adds its fifth extra button.
+func (l padLayout) macroTrigger(target PadTarget) bool {
+	return padMacroTrigger(target) || (l.arcadePro() && target == padArcadeP5)
 }
 
 // wireTrigger converts a macro trigger between this program's numbering

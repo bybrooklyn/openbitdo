@@ -23,6 +23,17 @@ type U2Simulator struct {
 	ReportsPID uint16
 	// Physical is the platform the mode switch selects.
 	Physical byte
+	// PlatformOffset is where a record keeps its platform; zero means
+	// 0x10, where a three-slot record has it.
+	PlatformOffset int
+	// ArcadeMode, when not zero, is the byte the arcade mode query answers
+	// with in place of the one Physical implies.
+	ArcadeMode byte
+	// Sync is whether an Arcade Controller Pro's configuration session is
+	// marked as started; SwitchReport is the last state its report switch
+	// was sent.
+	Sync         bool
+	SwitchReport uint16
 	// Records holds the stored record per platform, created zeroed on
 	// first use.
 	Records map[byte][]byte
@@ -70,7 +81,11 @@ func (u *U2Simulator) Record(platform byte) []byte {
 			size = U2RecordSize
 		}
 		record := make([]byte, size)
-		binary.LittleEndian.PutUint16(record[0x10:], uint16(platform))
+		at := u.PlatformOffset
+		if at == 0 {
+			at = 0x10
+		}
+		binary.LittleEndian.PutUint16(record[at:], uint16(platform))
 		u.Records[platform] = record
 	}
 	return u.Records[platform]
@@ -170,7 +185,16 @@ func (u *U2Simulator) Write(data []byte) (int, error) {
 		if u.Physical == U2PlatformXInput {
 			mode = 2
 		}
+		if u.ArcadeMode != 0 {
+			mode = u.ArcadeMode
+		}
 		u.reply(cmd, 1, []byte{mode})
+	case u2CmdArcadeProSync:
+		u.Sync = arg != 0
+		u.reply(cmd, 0, nil)
+	case u2CmdArcadeProInput:
+		u.SwitchReport = arg
+		u.reply(cmd, 0, nil)
 	case u2CmdGetLight:
 		u.reply(cmd, 1, []byte{u.Light})
 	case u2CmdSetLight:
