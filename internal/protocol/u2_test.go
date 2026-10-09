@@ -77,7 +77,8 @@ func TestU2RecordReadIsChunkedAndComplete(t *testing.T) {
 		t.Fatalf("expected 36 read requests, got %d", n)
 	}
 	second := pad.Frames[before+1]
-	if want, _ := hex.DecodeString("8104020000002d000000380600002d000000"); !bytes.Equal(second[:18], want) {
+	// It carries 45 filler bytes and their crc, as the vendor's software sends.
+	if want, _ := hex.DecodeString("8104020000002d005b4f380600002d000000"); !bytes.Equal(second[:18], want) || second[18] != 0xcc || second[62] != 0xcc {
 		t.Fatalf("second read request = % x", second[:18])
 	}
 }

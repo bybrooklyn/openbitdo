@@ -146,7 +146,7 @@ func u2FramingFor(pid uint16) u2Framing {
 }
 
 // u2Bare and u2Carrying are the two ways a request is built; see u2Framing.
-// A model that takes the direct wrapper is sent the same frame either way.
+// Both wrappers build them the same way.
 const (
 	u2Bare     = false
 	u2Carrying = true
@@ -157,7 +157,19 @@ const (
 func (s *DeviceSession) u2Request(template []byte, carrying bool, arg uint16, data []byte, length int, total, offset uint32) []byte {
 	framing := u2FramingFor(s.target.PID)
 	if framing == u2FramingDirect {
-		return u2Frame(template, arg, data, length, total, offset)
+		if !carrying {
+			return u2Frame(template, arg, data, length, total, offset)
+		}
+		// As the vendor's software sends it: len bytes always follow, the
+		// data when writing and filler when reading, with their crc.
+		body := make([]byte, length)
+		for i := range body {
+			body[i] = u2ReadFiller
+		}
+		copy(body, data)
+		frame := u2Frame(template, arg, body, length, total, offset)
+		binary.LittleEndian.PutUint16(frame[8:], u2CRC(body))
+		return frame
 	}
 	frame := make([]byte, len(template))
 	frame[0], frame[2] = template[0], template[1]

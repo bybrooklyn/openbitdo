@@ -3,6 +3,7 @@ package protocol
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"encoding/hex"
 	"reflect"
 	"strings"
@@ -180,8 +181,8 @@ func TestCountedFramesAreForTheUltimateBTAlone(t *testing.T) {
 		t.Fatal("a counted-framed controller answered a direct request")
 	}
 
-	// Every other product is sent exactly what it was sent before there was
-	// a second wrapper.
+	// Every other product keeps the direct wrapper, and carries the same
+	// filler and crc inside it.
 	for _, pid := range []uint16{0x6012, 0x6013, 0x600f, 0x6011, 0x6009, 0x600b, 0x600c, ArcadeProPID} {
 		if u2FramingFor(pid) != u2FramingDirect {
 			t.Errorf("%#04x must keep the direct wrapper", pid)
@@ -192,14 +193,18 @@ func TestCountedFramesAreForTheUltimateBTAlone(t *testing.T) {
 	if _, err := session.U2ReadRecord(ctx, 0x14); err != nil {
 		t.Fatal(err)
 	}
-	if want := wantFrame(t, "81 04 0200 0000 1400 0000 14000000 00000000", 0, 0); !bytes.Equal(pad.Frames[len(pad.Frames)-1], want) {
-		t.Fatalf("an Ultimate 2's read changed: % x", pad.Frames[len(pad.Frames)-1][:20])
+	filler := bytes.Repeat([]byte{0xcc}, 0x14)
+	read := pad.Frames[len(pad.Frames)-1]
+	if want, _ := hex.DecodeString("810402000000140000001400000000000000"); !bytes.Equal(append(append([]byte{}, read[:8]...), read[10:18]...), append(append([]byte{}, want[:8]...), want[10:18]...)) ||
+		binary.LittleEndian.Uint16(read[8:]) != u2CRC(filler) || !bytes.Equal(read[18:18+0x14], filler) || read[18+0x14] != 0 {
+		t.Fatalf("an Ultimate 2's read request = % x", read[:40])
 	}
 	if err := session.U2SelectPlatform(ctx, U2PlatformXInput); err != nil {
 		t.Fatal(err)
 	}
-	if want := wantFrame(t, "81 04 1400 0300", 0, 0); !bytes.Equal(pad.Frames[len(pad.Frames)-1], want) {
-		t.Fatalf("an Ultimate 2's platform select changed: % x", pad.Frames[len(pad.Frames)-1][:20])
+	// Nothing carried: the crc of no bytes.
+	if want, _ := hex.DecodeString("8104140003000000ffff"); !bytes.Equal(pad.Frames[len(pad.Frames)-1][:10], want) {
+		t.Fatalf("an Ultimate 2's platform select = % x", pad.Frames[len(pad.Frames)-1][:20])
 	}
 }
 
