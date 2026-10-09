@@ -4,7 +4,11 @@ package protocol
 
 // PidRow is one row of the PID registry, generated from docs/spec/pid_matrix.csv.
 type PidRow struct {
-	Name           string
+	Name string
+	// DisplayName is the user-facing product name from
+	// docs/spec/device_name_catalog.md; empty when the catalog has only a
+	// placeholder for this PID.
+	DisplayName    string
 	Pid            uint16
 	SupportLevel   SupportLevel
 	SupportTier    SupportTier
@@ -50,6 +54,20 @@ func (r CommandRow) EvidenceConfidence() SupportEvidence {
 	}
 	return EvidenceInferred
 }
+
+// ArcadeProPID is the Arcade Controller Pro. It also enumerates as
+// ArcadeProAltPID, which the vendor's software treats as the same product.
+const (
+	ArcadeProPID    uint16 = 0x2062
+	ArcadeProAltPID uint16 = 0x20aa
+)
+
+// UltimateBTPID is the first-generation Ultimate Bluetooth Controller, and
+// UltimateBTAdapterPID the adapter it comes with.
+const (
+	UltimateBTPID        uint16 = 0x6007
+	UltimateBTAdapterPID uint16 = 0x3106
+)
 
 // FindPID looks up a PID registry row by PID.
 func FindPID(pid uint16) (PidRow, bool) {
@@ -115,6 +133,14 @@ var jpCandidateDiagPIDs = map[uint16]bool{
 // expose U2 slot/button-map reads ahead of full confirmation (0x3105, 0x301a).
 var pidWithSlotConfigCandidate = map[uint16]bool{0x3105: true, 0x301a: true}
 
+// recordKeyboardPIDs are the keyboards that keep their profile in one
+// record (see kbrecord.go) and their 2.4G receivers: Retro 87 Xbox edition,
+// Retro 87 UK, Retro 68 and the Riviera keyboard. The Riviera is listed for
+// completeness; while its tier is detect-only it is granted nothing.
+var recordKeyboardPIDs = map[uint16]bool{
+	0x2028: true, 0x202e: true, 0x3026: true, 0x3027: true, 0x203a: true, 0x2049: true, 0x205a: true,
+}
+
 // DefaultCapabilityFor derives a PID's capability set from its tier, PID,
 // and protocol family. Ported 1:1 from registry.rs's default_capability_for,
 // including every per-PID special case.
@@ -123,17 +149,33 @@ func DefaultCapabilityFor(pid uint16, tier SupportTier, family ProtocolFamily) P
 		return IdentifyOnlyCapability()
 	}
 
+	// A mouse takes the mouse commands and nothing else: the vendor library
+	// sends it none of the other families'. While its tier is detect-only
+	// it is granted nothing, like everything else.
+	if mousePIDs[pid] {
+		return PidCapability{SupportsMouse: true}
+	}
+	// An Arcade Controller Pro is granted its profile and nothing else:
+	// nothing is known here of how it updates its firmware. While its tier
+	// is detect-only it is granted nothing, like everything else.
+	if pid == ArcadeProPID {
+		return PidCapability{SupportsU2SlotConfig: true}
+	}
+
 	if tier == TierCandidateReadOnly {
+		record := recordKeyboardPIDs[pid]
 		switch {
 		case standardCandidateReadDiagPIDs[pid] && !pidWithSlotConfigCandidate[pid]:
-			return PidCapability{SupportsMode: true, SupportsProfileRW: true}
+			return PidCapability{SupportsMode: true, SupportsProfileRW: true, SupportsRecordKeyboard: record}
 		case pidWithSlotConfigCandidate[pid]:
 			return PidCapability{
 				SupportsMode: true, SupportsProfileRW: true,
 				SupportsU2SlotConfig: true, SupportsU2ButtonMap: true,
 			}
 		case jpCandidateDiagPIDs[pid]:
-			return PidCapability{SupportsJP108DedicatedMap: true}
+			// A record keyboard does not take the Retro 108's 33-byte
+			// commands; the vendor library never sends it one.
+			return PidCapability{SupportsJP108DedicatedMap: !record, SupportsRecordKeyboard: record}
 		}
 	}
 
@@ -155,8 +197,15 @@ func DefaultCapabilityFor(pid uint16, tier SupportTier, family ProtocolFamily) P
 		cap.SupportsProfileRW = false
 	}
 	cap.SupportsJP108DedicatedMap = false
-	cap.SupportsU2SlotConfig = false
+	// A Pro 3 and an Arcade Controller keep their settings in the same kind
+	// of record as an Ultimate 2, but update their firmware the standard way.
+	// So does a first-generation Ultimate Bluetooth, reached directly or
+	// through its adapter; which of the record's commands it takes is
+	// narrowed in isCommandAllowedForDevice.
+	cap.SupportsU2SlotConfig = pid == 0x6009 || pid == 0x600b || pid == UltimateBTPID || pid == UltimateBTAdapterPID
 	cap.SupportsU2ButtonMap = false
+	cap.SupportsRecordKeyboard = false
+	cap.SupportsMouse = false
 	return cap
 }
 
@@ -174,6 +223,7 @@ func DeviceProfileFor(target VidPid) DeviceProfile {
 		return DeviceProfile{
 			VidPid:         target,
 			Name:           row.Name,
+			DisplayName:    row.DisplayName,
 			SupportLevel:   row.SupportLevel,
 			SupportTier:    row.SupportTier,
 			ProtocolFamily: row.ProtocolFamily,

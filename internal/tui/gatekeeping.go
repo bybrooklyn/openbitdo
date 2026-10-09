@@ -8,8 +8,8 @@ import (
 // This file ports the exact blocked-action gating semantics from the prior
 // Rust TUI's state.rs (dashboard_firmware_disabled_reason,
 // dashboard_mapping_disabled_reason, dashboard_unlock_disabled_reason) —
-// same messages, same precedence order. The screen layout around them is
-// new; the safety semantics are not.
+// same conditions, same precedence order. The wording of a reason is free
+// to change; which condition wins is not.
 
 // firmwareDisabledReason returns why firmware update is blocked for device,
 // or "" if it's available.
@@ -32,15 +32,14 @@ func firmwareDisabledReason(device core.AppDevice, firmwareAvailable, unsafeAckn
 
 // mappingDisabledReason returns why the mapping editor is blocked for
 // device, or "" if it's available.
-func mappingDisabledReason(device core.AppDevice, mockMode, writeLockUntilRestart bool) string {
-	hasMapping := device.Capability.SupportsJP108DedicatedMap ||
-		(device.Capability.SupportsU2ButtonMap && device.Capability.SupportsU2SlotConfig)
+func mappingDisabledReason(device core.AppDevice, mockMode, advancedMode, writeLockUntilRestart bool) string {
+	hasMapping := device.Capability.SupportsJP108DedicatedMap || device.Capability.SupportsU2SlotConfig
 	switch {
 	case device.SupportTier != protocol.TierFull:
-		return "Blocked until read/write/readback confirmation"
+		return "this model is not confirmed for writing yet"
 	case !hasMapping:
-		return "No confirmed mapping editor for this PID"
-	case device.Capability.SupportsU2ButtonMap && !mockMode:
+		return "there is no mapping editor for this model yet"
+	case device.Capability.SupportsU2SlotConfig && !mockMode && !advancedMode:
 		return "button-map framing not hardware-confirmed"
 	case writeLockUntilRestart:
 		return "Write locked until restart"
@@ -64,22 +63,4 @@ func candidateUnlockDisabledReason(device core.AppDevice, advancedMode, acknowle
 	default:
 		return ""
 	}
-}
-
-// blockedLinesForDevice returns the beginner-facing bullet list of what's
-// blocked for device and why, shown on the device detail panel.
-func blockedLinesForDevice(device core.AppDevice, firmwareAvailable, mockMode, unsafeAcknowledged, advancedMode, acknowledgedRisk, writeLockUntilRestart bool) []string {
-	var lines []string
-	if reason := firmwareDisabledReason(device, firmwareAvailable, unsafeAcknowledged, writeLockUntilRestart); reason != "" {
-		lines = append(lines, "Firmware update: "+reason)
-	}
-	if reason := mappingDisabledReason(device, mockMode, writeLockUntilRestart); reason != "" {
-		lines = append(lines, "Mapping editor: "+reason)
-	}
-	if device.SupportTier == protocol.TierCandidateReadOnly {
-		if reason := candidateUnlockDisabledReason(device, advancedMode, acknowledgedRisk, writeLockUntilRestart); reason != "" {
-			lines = append(lines, "Guarded write probe: "+reason)
-		}
-	}
-	return lines
 }

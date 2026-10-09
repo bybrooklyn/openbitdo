@@ -17,6 +17,7 @@ func (m Model) updateRecovery(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch key.String() {
 		case "r":
 			if m.recoveryHasBackup && !m.recoveryRestoreDone {
+				m.recoveryRestoreErr = nil
 				return m, cmdRestoreBackup(m.ctx, m.core, m.recoveryBackupID)
 			}
 		case "q":
@@ -28,24 +29,25 @@ func (m Model) updateRecovery(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) viewRecovery(height int) string {
+	text := max(1, m.width-4)
 	var b strings.Builder
-	b.WriteString(styleDanger.Render("Write lock active") + "\n\n")
-	b.WriteString(styleBody.Render(m.recoveryReason) + "\n\n")
-	b.WriteString(styleBody.Render("To protect your device, further writes, mapping, and firmware\n"+
-		"operations are disabled for the rest of this session. Restart\n"+
-		"OpenBitdo once you're ready to try again.") + "\n\n")
+	b.WriteString(styleDanger.Render("Writes are locked for this session") + "\n\n")
+	b.WriteString(wrapStyled(styleBody, m.recoveryReason, text) + "\n\n")
+	b.WriteString(wrapStyled(styleBody, "To protect your device, mapping, firmware and every other write is disabled until you restart OpenBitdo. Nothing else in the app is available; that is deliberate.", text) + "\n\n")
 
 	if m.recoveryHasBackup {
 		switch {
 		case m.recoveryRestoreDone:
-			b.WriteString(stylePositive.Render("Backup restored.") + "\n\n")
+			b.WriteString(stylePositive.Render("Backup restored. You can quit and restart now.") + "\n\n")
 		case m.recoveryRestoreErr != nil:
-			b.WriteString(styleDanger.Render("Restore failed: "+m.recoveryRestoreErr.Error()) + "\n\n")
+			b.WriteString(styleDanger.Render("Restoring the backup failed.") + "\n")
+			b.WriteString(wrapStyled(styleFaint, m.recoveryRestoreErr.Error(), text) + "\n\n")
+			b.WriteString(styleKey.Render("r") + " try the restore again\n\n")
 		default:
-			b.WriteString(styleKey.Render("r") + " restore the last known-good backup\n\n")
+			b.WriteString(styleKey.Render("r") + " restore the backup taken before the failed write\n\n")
 		}
 	} else {
-		b.WriteString(styleFaint.Render("No backup is available to restore for this failure.") + "\n\n")
+		b.WriteString(wrapStyled(styleFaint, "No backup is available to restore for this failure.", text) + "\n\n")
 	}
 	b.WriteString(styleKey.Render("q") + " quit")
 

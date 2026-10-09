@@ -11,8 +11,8 @@ import (
 )
 
 // fetchReportDescriptor reads a HID device's report descriptor from the
-// kernel's hidraw sysfs export. karalabe/hid's Linux backend gives device
-// paths of the form "/dev/hidrawN"; the matching descriptor lives at
+// kernel's hidraw sysfs export. enumerateNavDevices gives device paths of
+// the form "/dev/hidrawN"; the matching descriptor lives at
 // /sys/class/hidraw/hidrawN/device/report_descriptor.
 func fetchReportDescriptor(info hid.DeviceInfo) ([]byte, error) {
 	name := filepath.Base(info.Path)

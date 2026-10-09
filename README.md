@@ -7,11 +7,12 @@ OpenBitdo is unofficial and not affiliated with 8BitDo. Device writes always car
 
 ## What OpenBitdo Does Today
 
-- Detect connected 8BitDo devices and explain their current support level.
-- Run diagnostics and save support reports.
-- Show beginner-facing status, works-now, blocked, and next-step guidance for every selected device.
-- Edit supported mappings for the currently confirmed JP108 flow.
-- Preview Ultimate 2 mapping in mock mode only; real Ultimate 2 mapping is blocked with the reason `button-map framing not hardware-confirmed`.
+- Detect connected 8BitDo devices and give each a plain verdict: working, limited (it can be read but not changed), can't connect, or no access.
+- Check the connection, and view, copy or save the report.
+- Say for every device what you can do with it now, and what you can't do yet and why.
+- Retro 108 keyboard: assign any of its 111 keys and buttons (A, B, K1-K8 included) to a key with an optional modifier, a media key or a mouse action; set the Win / Alt+Tab / Alt+F4 locks and the volume level; rename or erase the profile.
+- Ultimate 2 controller: a full profile editor (three slots, button map with back paddles and extra buttons, stick and trigger ranges, vibration, option switches) runs against a simulated controller in mock mode. On a real controller it is blocked with the reason `button-map framing not hardware-confirmed` unless advanced mode is on, because that exchange has not been confirmed on hardware yet.
+- Tell a plugged-in 2.4G receiver whose controller is switched off from a working controller.
 - Show Firmware Update as disabled and deferred in `v0.0.3`; activating it does not download firmware, preflight firmware, or open a device session.
 - Keep unconfirmed devices in safe read-only or detect-only paths.
 - Navigate with a keyboard, mouse, or an 8BitDo controller when the OS exposes that controller as a standard HID gamepad (`usagePage=0x0001`, `usage=0x0005`).
@@ -31,10 +32,10 @@ Contributors: [`justfile`](justfile) has common dev commands (`just build`, `jus
 
 1. Launch `openbitdo`.
 2. If you do not have hardware attached yet, launch `openbitdo --mock` to preview the interface.
-3. Pick a controller from the grouped dashboard: supported, read-only candidate, or detect-only.
-4. Run `Diagnose` first. Diagnostics are the safe path for every detected 8BitDo device.
-5. Save the TOML support report when a device is blocked, experimental, or behaving unexpectedly.
-6. Follow the `Status`, `Works now`, `Blocked`, and `Next step` guidance before attempting mapping work.
+3. Your devices are listed down the left with a verdict each. The right side shows the selected one in four sections: **Overview** (what you can and can't do), **Checks** (what the device answered), **Mapping**, and **Buttons** (press anything on a controller to see which button number it is).
+4. Move between sections with `tab` (or `1`-`4`) and between devices with `d`. `↑↓` and `enter` act inside the section you are in.
+5. Checks only read from the device. Open the report there (`v`) and copy or save it when a device is limited or behaving unexpectedly.
+6. Press `?` anywhere for the keys that work there.
 
 OpenBitdo enables mouse support for clicking and scrolling, which by default
 intercepts click-drag so your terminal can't use it for normal text
@@ -66,6 +67,8 @@ When a device is not fully supported, run diagnostics and share the generated TO
 
 A non-destructive Ultimate 2 qualification was run for `v0.0.3` and did not pass. On the unit tested (`0x2dc8:0x6013`) the controller exposes only its vendor configuration interface and no Generic Desktop Gamepad interface, so controller navigation has nothing to read from, and every safe-read diagnostic writes successfully but reads back no data. Both results were traced to device/protocol behavior rather than defects in this project. The measured results, the reasoning, and how to re-run the qualification are recorded in [docs/RC_CHECKLIST.md](docs/RC_CHECKLIST.md). Keyboard and mouse navigation are unaffected.
 
+A later Linux run against the same controller and a Retro 108 keyboard is recorded in [docs/clean-room-evidence/hardware_run_linux_2026-10-08.md](docs/clean-room-evidence/hardware_run_linux_2026-10-08.md). Over hidraw the Ultimate 2 answers 4 of the 12 safe reads, so the empty reads above do not reproduce on Linux; it still exposes no gamepad interface. The Retro 108 did not answer the protocol documented at the time. Its own framing has since been worked out and confirmed on that keyboard, so OpenBitdo now reads it and can assign its ten dedicated buttons (A, B, K1-K8). Assignments are acknowledged and read back, and the A and B buttons were seen sending the assigned keys. The keyboard only uses a mapping while its Profile button is on.
+
 ## Shell Completions
 
 Completion scripts for the CLI's flags live in [completions/](completions/):
@@ -76,12 +79,14 @@ Completion scripts for the CLI's flags live in [completions/](completions/):
 | zsh | Copy `completions/openbitdo.zsh` as `_openbitdo` onto a directory in your `$fpath`, added before `compinit` runs |
 | fish | Copy `completions/openbitdo.fish` into `~/.config/fish/completions/` |
 
-Linux archives and the AUR package include the udev rule and completions. After installing the udev rule, reload rules and replug the controller before expecting non-root HID access:
+Linux archives and the AUR package include the udev rule and completions. OpenBitdo opens the kernel's hidraw node for a device (`/dev/hidrawN`), so the rule, `70-openbitdo.rules`, grants the logged-in user access to hidraw nodes of 8BitDo devices. After installing it, reload rules and replug the device before expecting non-root access:
 
 ```sh
 sudo udevadm control --reload-rules
 sudo udevadm trigger
 ```
+
+Building from source? Install the rule yourself with `sudo cp packaging/linux/70-openbitdo.rules /etc/udev/rules.d/`. If a device shows "no permission" in the app, this is the fix.
 
 ## macOS Packaging Caveat
 
@@ -103,7 +108,7 @@ Release support contract:
 - Linux `x86_64` and `aarch64`: Ubuntu 22.04-era glibc or newer.
 - macOS arm64: deployment target macOS 13; unsigned and non-notarized.
 - Firmware: unavailable.
-- Ultimate 2 mapping: mock preview only.
+- Ultimate 2 mapping: mock preview only; on real hardware behind advanced mode and unconfirmed.
 - Controller navigation: available only when the OS exposes a standard HID gamepad interface.
 
 ## License

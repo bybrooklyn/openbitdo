@@ -5,7 +5,10 @@ This document summarizes the sanitized protocol model used by the clean-room run
 ## Wire Model
 
 - HID-like command transport
-- primary 64-byte reports for `Standard64`, `DInput`, and `JpHandshake`
+- primary 64-byte reports for `Standard64` and `DInput`
+- JP108 keyboards (`0x5209`): 33-byte reports, request on report `0x52`, reply on report `0x54`,
+  on the HID interface with usage page `0x008c`; see
+  `docs/clean-room-evidence/dossiers/5209/jp108_hid.toml`
 - variable-length reports only where firmware or boot phases require them
 - little-endian multi-byte numbers
 
@@ -35,6 +38,8 @@ This document summarizes the sanitized protocol model used by the clean-room run
 - `Core`
 - `JP108Dedicated`
 - `Ultimate2Core`
+- `RecordKeyboard`
+- `Mouse`
 - `Firmware`
 - `CoreDiag`
 - `ModeProfileRead`

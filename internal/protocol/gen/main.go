@@ -34,6 +34,7 @@ type commandRow struct {
 
 type pidRow struct {
 	name           string
+	displayName    string
 	pid            uint16
 	supportLevel   string
 	protocolFamily string
@@ -51,7 +52,7 @@ var validSupportLevel = map[string]bool{"full": true, "detect-only": true}
 var validSupportTier = map[string]bool{"full": true, "candidate-readonly": true, "detect-only": true}
 
 func main() {
-	specDir := flag.String("spec-dir", "../../docs/spec", "directory containing command_matrix.csv and pid_matrix.csv")
+	specDir := flag.String("spec-dir", "../../docs/spec", "directory containing command_matrix.csv, pid_matrix.csv and device_name_catalog.md")
 	out := flag.String("out", "registry_generated.go", "output Go file path")
 	flag.Parse()
 
@@ -62,6 +63,14 @@ func main() {
 	pids, err := readPidMatrix(filepath.Join(*specDir, "pid_matrix.csv"))
 	if err != nil {
 		fatalf("reading pid_matrix.csv: %v", err)
+	}
+
+	displayNames, err := readDisplayNames(filepath.Join(*specDir, "device_name_catalog.md"))
+	if err != nil {
+		fatalf("reading device_name_catalog.md: %v", err)
+	}
+	for i := range pids {
+		pids[i].displayName = displayNames[pids[i].pid]
 	}
 
 	src, err := renderGo(commands, commandOrder, pids)
@@ -226,6 +235,44 @@ func readPidMatrix(path string) ([]pidRow, error) {
 	return rows, nil
 }
 
+// readDisplayNames reads the user-facing name of each PID from the catalog's
+// Markdown table, whose columns are
+// canonical_pid_name | pid_hex | display_name_en | ...
+// A name the catalog itself marks as a placeholder ("Unconfirmed ...") is
+// left out, so the UI falls back to something shorter than the placeholder.
+func readDisplayNames(path string) (map[uint16]string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	names := map[uint16]string{}
+	for _, line := range strings.Split(string(data), "\n") {
+		if !strings.HasPrefix(line, "| PID_") {
+			continue
+		}
+		cells := strings.Split(line, "|")
+		if len(cells) < 4 {
+			return nil, fmt.Errorf("malformed catalog row: %q", line)
+		}
+		pid, err := strconv.ParseUint(strings.TrimPrefix(strings.TrimSpace(cells[2]), "0x"), 16, 16)
+		if err != nil {
+			return nil, fmt.Errorf("catalog row %q: bad pid_hex: %v", strings.TrimSpace(cells[1]), err)
+		}
+		name := strings.TrimSpace(cells[3])
+		if name == "" || strings.HasPrefix(name, "Unconfirmed") || strings.HasPrefix(name, "No Device") {
+			continue
+		}
+		if _, dup := names[uint16(pid)]; dup {
+			continue // alias rows repeat a PID; the first row is canonical
+		}
+		names[uint16(pid)] = name
+	}
+	if len(names) == 0 {
+		return nil, errors.New("no device rows found")
+	}
+	return names, nil
+}
+
 func columnIndex(header []string) map[string]int {
 	idx := make(map[string]int, len(header))
 	for i, name := range header {
@@ -248,12 +295,12 @@ func renderGo(commands []commandRow, commandOrder []string, pids []pidRow) ([]by
 	}
 	b.WriteString(")\n\n")
 
-	b.WriteString("// PIDRegistry is generated from docs/spec/pid_matrix.csv.\n")
+	b.WriteString("// PIDRegistry is generated from docs/spec/pid_matrix.csv, with display names from\n// docs/spec/device_name_catalog.md.\n")
 	b.WriteString("var PIDRegistry = []PidRow{\n")
 	for _, p := range pids {
 		fmt.Fprintf(&b,
-			"\t{Name: %q, Pid: %#04x, SupportLevel: %q, SupportTier: %q, ProtocolFamily: %q},\n",
-			p.name, p.pid, p.supportLevel, p.supportTier, p.protocolFamily,
+			"\t{Name: %q, DisplayName: %q, Pid: %#04x, SupportLevel: %q, SupportTier: %q, ProtocolFamily: %q},\n",
+			p.name, p.displayName, p.pid, p.supportLevel, p.supportTier, p.protocolFamily,
 		)
 	}
 	b.WriteString("}\n\n")

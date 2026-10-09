@@ -12,7 +12,7 @@ in a temporary release workspace and published to the AUR repository; they must
 not be checked into this repository.
 
 The release archive and AUR package install bash, fish, and zsh completions plus
-`99-openbitdo.rules`. After installing or upgrading the rule, reload udev and
+`70-openbitdo.rules`. After installing or upgrading the rule, reload udev and
 reconnect the controller:
 
 ```sh

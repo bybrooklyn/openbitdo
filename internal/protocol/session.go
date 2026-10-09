@@ -2,6 +2,7 @@ package protocol
 
 import (
 	"context"
+	"errors"
 	"fmt"
 )
 
@@ -159,6 +160,40 @@ func NewDeviceSession(ctx context.Context, transport Transport, target VidPid, c
 	}, nil
 }
 
+// NewDeviceSessionAs opens the device enumerated as openAs and talks to it
+// as product. A controller plugged in by cable, or its receiver in XInput
+// mode, enumerates under an id several products share; once it has said
+// which product it is, it takes that product's commands.
+func NewDeviceSessionAs(ctx context.Context, transport Transport, openAs, product VidPid, config SessionConfig) (*DeviceSession, error) {
+	if err := transport.Open(ctx, openAs); err != nil {
+		return nil, err
+	}
+	return &DeviceSession{
+		transport: transport,
+		target:    product,
+		profile:   DeviceProfileFor(product),
+		config:    config,
+	}, nil
+}
+
+// SharedControllerPID is the id a Pro 3, Ultimate 2, Ultimate 2 Bluetooth
+// or Arcade Controller enumerates under when wired or in XInput mode.
+const SharedControllerPID uint16 = 0x310b
+
+// ProductBehindSharedID asks a device enumerated under the shared
+// controller id which product it is. The answer is the product's own id,
+// or its receiver's.
+func (s *DeviceSession) ProductBehindSharedID(ctx context.Context) (uint16, error) {
+	resp, err := s.SendCommand(ctx, CommandGetReportRevision, nil)
+	if err != nil {
+		return 0, err
+	}
+	if len(resp.Raw) < 24 {
+		return 0, errMalformedResponse(CommandGetReportRevision, len(resp.Raw))
+	}
+	return uint16(resp.Raw[22]) | uint16(resp.Raw[23])<<8, nil
+}
+
 func (s *DeviceSession) Profile() DeviceProfile { return s.profile }
 
 func (s *DeviceSession) Trace() []CommandExecutionReport { return s.trace }
@@ -229,6 +264,30 @@ func (s *DeviceSession) DiagProbe(ctx context.Context) DiagProbeResult {
 	}
 }
 
+// notAStandaloneCheck are read-class commands that are a step of a larger
+// read rather than a question with an answer of their own: sent bare, as a
+// diagnostic check would, they pause the controller's input reports, switch
+// the addressed record, or ask for zero bytes, or name no key.
+var notAStandaloneCheck = map[CommandID]bool{
+	CommandU2SetReportState: true, CommandU2SelectPlatform: true, CommandU2RecordRead: true,
+	// These ask about one key's macro; with no key named there is nothing
+	// to ask.
+	CommandJp108ReadMacroName: true, CommandJp108ReadMacroValue: true,
+	// Answered only by a controller that is on; the profile read asks it.
+	CommandU2GetLightEffect: true, CommandU2MacroRead: true, CommandArcadeGetMode: true,
+	// Sent bare, this would switch an Arcade Controller Pro's reports.
+	CommandArcadeProSwitchReport: true,
+	// A record keyboard's reads name a length and an offset; bare, they
+	// ask for nothing. The first only turns key reports off.
+	CommandKbRecordSetReportMode: true, CommandKbRecordRead: true,
+	CommandKbRecordMacroRead: true, CommandKbRecordLightsRead: true,
+	// A mouse's name, buttons and macros are asked for a part at a time,
+	// and a Riviera mouse's record by length and offset. The one-byte
+	// settings, DPI stages and polling rate are whole questions.
+	CommandMouseReadProfileName: true, CommandMouseReadButtons: true,
+	CommandMouseReadMacro: true, CommandMouseRecordRead: true,
+}
+
 type diagCheckPlan struct {
 	command    CommandID
 	policy     RuntimePolicy
@@ -238,13 +297,13 @@ type diagCheckPlan struct {
 func (s *DeviceSession) diagCommandsToRun() []diagCheckPlan {
 	var plans []diagCheckPlan
 	for _, row := range CommandRegistry {
-		if row.SafetyClass != SafeRead {
+		if row.SafetyClass != SafeRead || notAStandaloneCheck[row.ID] {
 			continue
 		}
 		if !CommandAppliesToPID(row, s.target.PID) {
 			continue
 		}
-		if !isCommandAllowedByFamily(s.profile.ProtocolFamily, row.ID) || !isCommandAllowedByCapability(s.profile.Capability, row.ID) {
+		if !isCommandAllowedForDevice(s.target, s.profile.ProtocolFamily, row.ID) || !isCommandAllowedByCapability(s.profile.Capability, row.ID) {
 			continue
 		}
 		if s.profile.SupportTier == TierCandidateReadOnly &&
@@ -278,9 +337,30 @@ func (s *DeviceSession) runDiagCheck(ctx context.Context, command CommandID, pol
 
 	resp, err := s.SendCommand(ctx, command, nil)
 	if err == nil {
-		return s.diagSuccessStatus(command, policy, confidence, resp.ParsedFields, s.lastExecution, diagSuccessDetail(command, resp.ParsedFields))
+		return s.diagSuccessStatus(command, policy, confidence, resp.ParsedFields, s.lastExecution, s.diagIdentityDetail(command, resp.ParsedFields))
 	}
 	return s.diagFailureStatus(command, policy, confidence, err, s.lastExecution, "")
+}
+
+// diagIdentityDetail words a passed check, cross-checking any PID the reply
+// carries against the PID the OS enumerated. On an Ultimate 2 (0x6013) the
+// GetPid reply's PID field holds unrelated, changing data and the PID arrives
+// in the GetReportRevision reply instead, so a PID is only stated as the
+// device's own when it actually matches.
+func (s *DeviceSession) diagIdentityDetail(command CommandID, facts map[string]uint32) string {
+	switch command {
+	case CommandGetPid:
+		if pid, ok := facts["detected_pid"]; ok && uint16(pid) != s.target.PID {
+			return fmt.Sprintf("answered; the reply does not carry this device's product ID (field reads %#04x)", pid)
+		}
+	case CommandGetReportRevision:
+		detail := diagSuccessDetail(command, facts)
+		if pid, ok := facts["reported_pid"]; ok && uint16(pid) == s.target.PID {
+			return fmt.Sprintf("%s; device reports pid %#04x", detail, pid)
+		}
+		return detail
+	}
+	return diagSuccessDetail(command, facts)
 }
 
 func (s *DeviceSession) runDiagModeCheck(ctx context.Context, policy RuntimePolicy, confidence SupportEvidence) DiagCommandStatus {
@@ -361,10 +441,7 @@ func (s *DeviceSession) diagFailureStatus(command CommandID, policy RuntimePolic
 
 func errorCode(err error) ErrorCode {
 	var pe *Error
-	if e, ok := err.(*Error); ok {
-		pe = e
-	}
-	if pe == nil {
+	if !errors.As(err, &pe) {
 		return ""
 	}
 	return pe.Code()

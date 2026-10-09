@@ -12,6 +12,7 @@ failure_signatures = ["timeout", "malformed response", "unsupported for pid"]
 evidence_source = "static"
 confidence = "inferred"
 requirement_ids = ["REQ-U2-001", "REQ-DR-001", "REQ-DR-002"]
+superseded_by = "DOS-6012-U2-ADV: these frames were never answered by hardware and are no longer sent"
 class_family = "Ultimate2_4Advance2 / Ultimate2_4Advance2UI dispatch"
 notes = "Advanced theme/sixaxis/deep macro controls remain intentionally hidden"
 

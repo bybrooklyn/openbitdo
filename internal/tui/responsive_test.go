@@ -42,7 +42,8 @@ func assertResponsiveFrame(t *testing.T, m Model, want ...string) {
 			t.Fatalf("expected %q in %dx%d frame:\n%s", s, m.width, m.height, plain)
 		}
 	}
-	footer := ansi.Strip(lines[len(lines)-1])
+	// The last row is the frame's bottom edge; the footer sits just above it.
+	footer := ansi.Strip(lines[len(lines)-2])
 	if !strings.Contains(footer, "? help") || !strings.Contains(footer, "q quit") {
 		t.Fatalf("footer must stay one-line and retain ?/q hints, got %q in:\n%s", footer, plain)
 	}
@@ -98,36 +99,42 @@ func responsiveJP108MappingModel(t *testing.T, width, height int) Model {
 	t.Helper()
 	m, _ := responsiveModel(t, width, height)
 	m.screen = screenMapping
-	m.mapping = mappingState{
-		device: core.AppDevice{Name: "JP108", VidPid: protocol.VidPid{VID: 0x2dc8, PID: 0x5203}},
-		kind:   core.KindJP108,
-	}
-	for i := 0; i < 18; i++ {
-		m.mapping.jp108Loaded = append(m.mapping.jp108Loaded, core.DedicatedButtonMapping{Button: core.DedicatedButtonID(i), TargetHIDUsage: 0x0004})
-		m.mapping.jp108Draft = append(m.mapping.jp108Draft, core.DedicatedButtonMapping{Button: core.DedicatedButtonID(i), TargetHIDUsage: 0x0004})
-	}
+	m.mapping = keyboardMapping()
 	return m
 }
 
-func responsiveU2MappingModel(t *testing.T, width, height int) Model {
+func TestOverviewEveryActionReachableAndClickableAt60x18(t *testing.T) {
+	m, c := responsiveModel(t, 60, 18)
+	m = loadDevicesAndDrain(t, m, c)
+	items := m.availableActions()
+	if len(items) < 3 {
+		t.Fatalf("expected the default device to offer at least three actions, got %d", len(items))
+	}
+
+	for i, item := range items {
+		m.devices.actionIdx = i
+		view := ansi.Strip(m.View())
+		if !strings.Contains(view, "› "+item.label) {
+			t.Fatalf("selected action %d %q not visible at 60x18:\n%s", i, item.label, view)
+		}
+		row := renderedRowContaining(t, m.View(), "› "+item.label)
+		probe := m
+		probe.devices.actionIdx = 0
+		next, _ := probe.Update(tea.MouseMsg{
+			Button: tea.MouseButtonLeft, Action: tea.MouseActionPress,
+			X: m.width - 20, Y: row,
+		})
+		if got := next.(Model); got.devices.actionIdx != i && got.screen == screenDevices {
+			t.Fatalf("clicking %q selected action %d, want %d", item.label, got.devices.actionIdx, i)
+		}
+	}
+}
+
+func responsivePadModel(t *testing.T, width, height int) Model {
 	t.Helper()
 	m, _ := responsiveModel(t, width, height)
 	m.screen = screenMapping
-	profile := core.U2CoreProfile{Slot: core.U2Slot1}
-	for _, button := range core.AllU2Buttons {
-		profile.Mappings = append(profile.Mappings, core.U2ButtonMapping{Button: button, Target: core.U2FuncA})
-	}
-	for _, paddle := range core.AllU2Paddles {
-		profile.PaddleMappings = append(profile.PaddleMappings, core.U2PaddleMapping{Paddle: paddle, Target: core.U2FuncNone})
-	}
-	m.mapping = mappingState{
-		device:   core.AppDevice{Name: "Ultimate2", VidPid: protocol.VidPid{VID: 0x2dc8, PID: 0x6012}},
-		kind:     core.KindUltimate2,
-		u2Loaded: profile,
-		u2Draft:  cloneU2Profile(profile),
-	}
-	m.mapping.cursor = len(profile.Mappings) + len(profile.PaddleMappings) - 1
-	m.ensureMappingCursorVisible()
+	m.mapping = padMapping()
 	return m
 }
 
@@ -135,7 +142,7 @@ func TestResponsiveEveryScreenCriticalContentAndFooter(t *testing.T) {
 	for _, size := range responsiveSizes {
 		t.Run(size.name+"/diagnostics-detail", func(t *testing.T) {
 			m := responsiveDiagModel(t, size.width, size.height, false)
-			assertResponsiveFrame(t, m, "Diagnostics:", "Checks:", "Detail", "command=")
+			assertResponsiveFrame(t, m, "checks answered", "All checks", "command ")
 			next, _ := m.Update(tea.MouseMsg{Button: tea.MouseButtonWheelDown})
 			m = next.(Model)
 			if m.diag.cursor != 11 {
@@ -145,14 +152,14 @@ func TestResponsiveEveryScreenCriticalContentAndFooter(t *testing.T) {
 
 		t.Run(size.name+"/diagnostics-support-request", func(t *testing.T) {
 			m := responsiveDiagModel(t, size.width, size.height, true)
-			next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("s")})
+			next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("v")})
 			m = next.(Model)
-			assertResponsiveFrame(t, m, "Support request", "esc to go back")
+			assertResponsiveFrame(t, m, "Report:", "c copy", "w save", "esc back")
 		})
 
 		t.Run(size.name+"/jp108-mapping-actions", func(t *testing.T) {
 			m := responsiveJP108MappingModel(t, size.width, size.height)
-			assertResponsiveFrame(t, m, "JP108", "Apply", "Undo", "Reset")
+			assertResponsiveFrame(t, m, "Key mapping", "Apply", "Undo", "Reset")
 			for _, cursor := range []int{m.mapping.rowCount() - 3, m.mapping.rowCount() - 2, m.mapping.rowCount() - 1} {
 				m.mapping.cursor = cursor
 				next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
@@ -163,11 +170,11 @@ func TestResponsiveEveryScreenCriticalContentAndFooter(t *testing.T) {
 			}
 		})
 
-		t.Run(size.name+"/u2-long-mapping-actions", func(t *testing.T) {
-			m := responsiveU2MappingModel(t, size.width, size.height)
-			assertResponsiveFrame(t, m, "Ultimate2", "Apply", "Undo", "Reset", "more above")
+		t.Run(size.name+"/pad-profile-actions", func(t *testing.T) {
+			m := responsivePadModel(t, size.width, size.height)
+			assertResponsiveFrame(t, m, "Controller profile", "Apply", "Undo", "Reset")
 			m.mapping.cursor = m.mapping.rowCount() - 1
-			m.ensureMappingCursorVisible()
+			m.ensurePadCursorVisible()
 			assertResponsiveFrame(t, m, "Reset")
 		})
 
@@ -177,17 +184,17 @@ func TestResponsiveEveryScreenCriticalContentAndFooter(t *testing.T) {
 			for i := 0; i < 16; i++ {
 				m.navNotes = append(m.navNotes, fmt.Sprintf("pid=0x%04x: gamepad nav active with a deliberately long note", 0x6000+i))
 			}
-			assertResponsiveFrame(t, m, "Settings", "Advanced Mode", "Report Save Mode", "Build")
+			assertResponsiveFrame(t, m, "Settings", "Advanced mode", "Save reports", "Recent activity")
 			if m.settingsInfoMaxOffset() > 0 {
 				next, _ := m.Update(tea.MouseMsg{Button: tea.MouseButtonWheelDown})
 				m = next.(Model)
 				if m.settingsInfoOffset == 0 {
 					t.Fatal("settings wheel must scroll secondary paths/navigation information")
 				}
-				assertResponsiveFrame(t, m, "more above", "Gamepad Navigation")
+				assertResponsiveFrame(t, m, "pgup/pgdn to scroll", "Controller navigation")
 			}
-			settingsRow := renderedRowContaining(t, m.View(), "Report Save Mode:")
-			next, _ := m.Update(tea.MouseMsg{Button: tea.MouseButtonLeft, Action: tea.MouseActionPress, X: 4, Y: settingsRow})
+			settingsRow := renderedRowContaining(t, m.View(), "Save reports")
+			next, _ := m.Update(tea.MouseMsg{Button: tea.MouseButtonLeft, Action: tea.MouseActionPress, X: m.width - 20, Y: settingsRow})
 			m = next.(Model)
 			if m.settingsCursor != 1 {
 				t.Fatalf("settings report-save row must remain clickable, got cursor=%d", m.settingsCursor)
@@ -199,23 +206,25 @@ func TestResponsiveEveryScreenCriticalContentAndFooter(t *testing.T) {
 			m.screen = screenRecovery
 			m.recoveryReason = "write failed during guarded recovery"
 			m.recoveryHasBackup = true
-			assertResponsiveFrame(t, m, "Write lock active", "restore", "quit")
+			assertResponsiveFrame(t, m, "Writes are locked", "restore", "quit")
 		})
 
-		t.Run(size.name+"/deferred-firmware-dashboard", func(t *testing.T) {
+		t.Run(size.name+"/overview", func(t *testing.T) {
 			m, c := responsiveModel(t, size.width, size.height)
-			m = loadDevices(t, m, c)
-			m.devices.pane = paneActions
-			m.devices.actionIdx = 2
-			next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
-			m = next.(Model)
-			if calculateLayout(m.width, m.height).mode == layoutCompact {
-				assertResponsiveFrame(t, m, "Actions:", "Firmware Update (Deferred in 0.0.3)")
-			} else {
-				assertResponsiveFrame(t, m, "Firmware update: Deferred in 0.0.3")
-			}
-			if m.screen != screenDevices {
-				t.Fatalf("deferred firmware action should not leave dashboard, got screen=%v", m.screen)
+			m = loadDevicesAndDrain(t, m, c)
+			m, _ = m.navigate(screenDevices, 1) // Ultimate 2: remapping is blocked on real hardware
+			// The same shell at every size: the device list, the tabs and
+			// both halves of the answer to "what can I do?".
+			assertResponsiveFrame(t, m, "DEVICES", "Overview", "Checks", "Mapping", "LIMITED", "You can", "Not yet")
+		})
+
+		t.Run(size.name+"/mapping-unavailable", func(t *testing.T) {
+			m, c := responsiveModel(t, size.width, size.height)
+			m = loadDevicesAndDrain(t, m, c)
+			m, _ = m.navigate(screenMapping, 1)
+			assertResponsiveFrame(t, m, "isn't available yet", "button-map framing not")
+			if m.mapping.loading {
+				t.Fatal("an unavailable editor must not read from the device")
 			}
 		})
 
@@ -228,7 +237,7 @@ func TestResponsiveEveryScreenCriticalContentAndFooter(t *testing.T) {
 
 		t.Run(size.name+"/modal", func(t *testing.T) {
 			m, _ := responsiveModel(t, size.width, size.height)
-			m.modal = discardMappingModal(discardActionBack)
+			m.modal = discardMappingModal(discardMappingMsg{action: discardActionBack})
 			assertResponsiveFrame(t, m, "Discard mapping draft?", "Discard", "Cancel")
 			box, confirm, cancel := modalGeometry(m.modal, m.width, m.height)
 			next, _ := m.Update(tea.MouseMsg{Button: tea.MouseButtonLeft, Action: tea.MouseActionPress, X: box.x - 1, Y: box.y - 1})
@@ -241,46 +250,12 @@ func TestResponsiveEveryScreenCriticalContentAndFooter(t *testing.T) {
 			if m.modal.active {
 				t.Fatal("cancel button must dismiss modal")
 			}
-			m.modal = discardMappingModal(discardActionBack)
+			m.modal = discardMappingModal(discardMappingMsg{action: discardActionBack})
 			next, _ = m.Update(tea.MouseMsg{Button: tea.MouseButtonLeft, Action: tea.MouseActionPress, X: confirm.x, Y: confirm.y})
 			m = next.(Model)
 			if m.screen != screenDevices {
 				t.Fatalf("confirm should dispatch discard action back to devices, got screen=%v", m.screen)
 			}
 		})
-	}
-}
-
-func TestCompactActionsEveryRowVisibleAndClickableAt60x18(t *testing.T) {
-	m, c := responsiveModel(t, 60, 18)
-	m = loadDevices(t, m, c)
-	m.devices.pane = paneActions
-	items := m.actionsForSelectedDevice()
-	if len(items) < 5 {
-		t.Fatalf("expected compact action pane to expose at least five actions, got %d", len(items))
-	}
-
-	for i, item := range items {
-		m.devices.actionIdx = i
-		view := ansi.Strip(m.View())
-		label := item.label
-		if !strings.Contains(view, "› "+label) {
-			t.Fatalf("selected compact action %d %q not visible:\n%s", i, label, view)
-		}
-		if item.reason != "" && !strings.Contains(view, item.reason) {
-			t.Fatalf("disabled compact action %q should show reason %q:\n%s", label, item.reason, view)
-		}
-
-		row := renderedRowContaining(t, m.View(), "› "+label)
-		next, _ := m.Update(tea.MouseMsg{
-			Button: tea.MouseButtonLeft, Action: tea.MouseActionPress,
-			X: 3, Y: row,
-		})
-		clicked := next.(Model)
-		if item.reason != "" {
-			if clicked.screen != screenDevices || !strings.Contains(clicked.statusLine, item.reason) {
-				t.Fatalf("disabled compact click should stay on devices and expose reason, screen=%v status=%q", clicked.screen, clicked.statusLine)
-			}
-		}
 	}
 }

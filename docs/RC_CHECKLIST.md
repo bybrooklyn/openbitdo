@@ -47,7 +47,7 @@ The release toolchain is Go `1.27.0` for development checks, CI, and artifacts.
 | macOS support | arm64, deployment target macOS 13, unsigned and non-notarized |
 | Intel macOS | unsupported |
 | Firmware | unavailable in production; implementation kept only for isolated tests with injected ephemeral keys and a local server |
-| Ultimate 2 mapping | mock preview only; real hardware blocked because `button-map framing not hardware-confirmed` |
+| Ultimate 2 mapping | mock preview only; real hardware blocked because `button-map framing not hardware-confirmed` unless advanced mode is on (unconfirmed on hardware) |
 | JP108 mapping | in scope |
 | Controller navigation | available only when the OS exposes a standard HID gamepad interface; unverified on real hardware, see below |
 | Hardware CI fixtures | deferred |
@@ -125,6 +125,25 @@ OPENBITDO_MANUAL_PID=0x6013 go test ./internal/tui/...   -tags manual -run TestM
 If a future controller mode exposes a Generic Desktop Gamepad interface, record the mode and PID
 here and re-run both suites before restoring this gate to blocking.
 
+### Linux run after `v0.0.3`
+
+The qualification above was run on macOS. A Linux run on 2026-10-08, after the transport moved to
+hidraw, is recorded in `docs/clean-room-evidence/hardware_run_linux_2026-10-08.md`:
+
+| Requirement | Result on Linux |
+| --- | --- |
+| Device opens as the logged-in user | Pass, given a hidraw udev rule (`70-openbitdo.rules`) |
+| Vendor configuration channel present (Ultimate 2 `0x6013`) | Pass — usage page `0xffa0`, usage `0x0001` |
+| Safe-read diagnostics return real bytes (Ultimate 2) | **Partial** — 4 of 12 distinct reads answered, `transport_ready=true` |
+| Generic Desktop Gamepad usage present (Ultimate 2) | **Fail** — same single interface as on macOS |
+| Vendor configuration channel present (Retro 108 `0x5209`, USB) | **Fail** — no `0xffa0` interface; interface 2 is page `0x008c` with 32-byte reports |
+| No mapping writes, candidate probes, bootloader entry, or firmware writes | Pass — safe reads only |
+
+The keyboard row above is for the 64-byte framing documented at the time. With its own framing
+(`docs/clean-room-evidence/dossiers/5209/jp108_hid.toml`), the same keyboard answered every read
+and accepted and read back a profile name and two button assignments, and its A and B buttons
+then sent the assigned keys once the keyboard's Profile button was on.
+
 ## Distribution Gate
 
 - GitHub release assets are published successfully and match the exact 14-file manifest.
@@ -138,7 +157,7 @@ here and re-run both suites before restoring this gate to blocking.
 | Gate | Status | Notes |
 | --- | --- | --- |
 | Source branch | In progress | Work is on `release/v0.0.3`; merge to `main` is still required before tagging. |
-| Firmware production availability | Deferred | Public UI must keep Firmware Update disabled as `Deferred in 0.0.3`. |
+| Firmware production availability | Deferred | Public UI must label firmware `Deferred in 0.0.3` and offer no way to start it. |
 | Ultimate 2 real mapping | Deferred | Mock preview only until button-map framing is hardware-confirmed. |
 | GitHub release assets | Pending | Verify the exact `v0.0.3` 14-asset manifest after tag workflow completion. |
 | AUR publication | Pending | Verify `openbitdo-bin` updates to `0.0.3`. |

@@ -2,7 +2,9 @@ package protocol
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io/fs"
 	"runtime"
 	"sort"
 	"strings"
@@ -15,20 +17,53 @@ import (
 const (
 	vendorConfigUsagePage uint16 = 0xffa0
 	vendorConfigUsage     uint16 = 0x0001
+
+	// A JP108 keyboard's configuration interface declares usage page 0x8c
+	// (captured from a Retro 108, 0x5209), not the 0xffa0 page controllers use.
+	jp108ConfigUsagePage uint16 = 0x008c
+
+	// A Retro R8 mouse and its receiver are configured on usage page
+	// 0xff00, by the vendor library's choice of interface; not seen on a
+	// real one.
+	retroMouseConfigUsagePage uint16 = 0xff00
 )
 
-// linuxUdevHint is appended to a device-open failure on Linux. karalabe/hid
-// (see its Open() in hid_enabled.go) returns a hardcoded generic error on
-// any failure -- the underlying C library's errno is never surfaced to Go,
-// on any platform -- so this can't reliably distinguish "permission denied"
-// from "device busy" or any other cause. Rather than overclaim a precise
-// diagnosis it can't actually deliver, this is phrased as a likely cause and
-// a thing to try, not a certainty.
-const linuxUdevHint = ` (if this is a permission error: openbitdo talks to devices via libusb, ` +
-	`so a udev rule targeting the "usb" subsystem is usually the fix -- see ` +
-	`packaging/linux/99-openbitdo.rules, or add ` +
-	`'SUBSYSTEM=="usb", ATTR{idVendor}=="2dc8", TAG+="uaccess"' ` +
-	`to /etc/udev/rules.d/ and reconnect the device)`
+// configUsageFor is the usage page/usage of the HID interface configuration
+// commands travel over for a given device.
+func configUsageFor(target VidPid) (page, usage uint16) {
+	switch {
+	case jp108PIDs[target.PID], retroKeyboardPIDs[target.PID]:
+		return jp108ConfigUsagePage, vendorConfigUsage
+	case sharedConfigPIDs[target.PID]:
+		return sharedConfigUsagePage, vendorConfigUsage
+	case retroMousePIDs[target.PID]:
+		return retroMouseConfigUsagePage, vendorConfigUsage
+	}
+	return vendorConfigUsagePage, vendorConfigUsage
+}
+
+// sharedConfigUsagePage is the usage page of the configuration interface
+// of devices that enumerate under an id several products share, and of a
+// few newer products.
+const sharedConfigUsagePage = 0xff7a
+
+// sharedConfigPIDs are the devices whose configuration interface is on
+// sharedConfigUsagePage: the shared controller id, the Ultimate 2C's id,
+// the Arcade Controller Pro (under either of its ids), the GC Bluetooth
+// gamepad and the 64 2.4G controller.
+var sharedConfigPIDs = map[uint16]bool{0x310b: true, 0x310a: true, 0x2062: true, 0x20aa: true, 0x2084: true, 0x3004: true}
+
+// retroKeyboardPIDs are the other Retro keyboards and receivers whose
+// configuration interface is on the same usage page as the Retro 108's.
+var retroKeyboardPIDs = map[uint16]bool{0x5200: true, 0x5201: true, 0x520a: true, 0x520b: true, 0x520c: true}
+
+// linuxUdevHint is appended to a permission-denied open failure on Linux.
+// OpenBitdo opens the kernel's hidraw node for the device, so the rule has to
+// match the "hidraw" subsystem and sort before 73-seat-late.rules, which is
+// where udev turns the uaccess tag into an ACL.
+const linuxUdevHint = ` (your user cannot open this device: install ` +
+	`packaging/linux/70-openbitdo.rules into /etc/udev/rules.d/, run ` +
+	`'sudo udevadm control --reload-rules && sudo udevadm trigger', then reconnect the device)`
 
 func withLinuxOpenHint(err error) error {
 	return withOpenHintForGOOS(err, runtime.GOOS)
@@ -41,7 +76,18 @@ func withOpenHintForGOOS(err error, goos string) error {
 	if err == nil || goos != "linux" {
 		return err
 	}
-	return errTransport("%v%s", err, linuxUdevHint)
+	return &Error{code: CodePermissionDenied, message: fmt.Sprintf("%v%s", err, linuxUdevHint)}
+}
+
+// openError classifies a failed device open. The hidraw backend keeps the OS
+// error, so permission problems are reported as such instead of guessed at;
+// backends that only return an opaque error fall through to CodeTransport.
+func openError(target VidPid, err error) error {
+	base := errTransport("open failed for %s: %v", target, err)
+	if errors.Is(err, fs.ErrPermission) {
+		return withLinuxOpenHint(&Error{code: CodePermissionDenied, message: base.message})
+	}
+	return base
 }
 
 // EnumeratedDevice is one HID device discovered on the system.
@@ -59,12 +105,13 @@ type EnumeratedDevice struct {
 // IsVendorConfigInterface reports whether this logical HID interface is the
 // vendor control channel OpenBitdo may send configuration commands through.
 func (d EnumeratedDevice) IsVendorConfigInterface() bool {
-	return d.UsagePage == vendorConfigUsagePage && d.Usage == vendorConfigUsage
+	page, usage := configUsageFor(d.VidPid)
+	return d.UsagePage == page && d.Usage == usage
 }
 
 // EnumerateHIDDevices lists every connected HID device.
 func EnumerateHIDDevices() []EnumeratedDevice {
-	return enumeratedDevicesFromHIDInfos(hid.Enumerate(0, 0))
+	return enumeratedDevicesFromHIDInfos(enumerateHID(0, 0))
 }
 
 func enumeratedDevicesFromHIDInfos(infos []hid.DeviceInfo) []EnumeratedDevice {
@@ -85,14 +132,13 @@ func enumeratedDevicesFromHIDInfos(infos []hid.DeviceInfo) []EnumeratedDevice {
 }
 
 // IsDevicePresent re-enumerates to check whether target is still physically
-// connected. karalabe/hid gives no structured error types (see
-// withLinuxOpenHint's comment) and never will reliably distinguish "the
-// device was unplugged" from any other I/O failure by error string alone —
-// so rather than guess from an error message, this asks the OS directly.
+// connected. Not every backend gives structured errors that distinguish "the
+// device was unplugged" from any other I/O failure, so rather than guess from
+// an error message, this asks the OS directly.
 // Used after an operation fails, to tell a genuine disconnect apart from a
 // transient error on a device that's still there.
 func IsDevicePresent(target VidPid) bool {
-	for _, info := range hid.Enumerate(target.VID, target.PID) {
+	for _, info := range enumerateHID(target.VID, target.PID) {
 		if info.VendorID == target.VID && info.ProductID == target.PID {
 			return true
 		}
@@ -110,6 +156,14 @@ type hidDevice interface {
 	Close() error
 }
 
+// timedReader is implemented by device handles that can bound a read
+// themselves (hidraw on Linux). HidTransport.Read prefers it: nothing is left
+// blocked on the handle after a timeout, so a late reply stays queued for the
+// next read instead of being swallowed by an abandoned reader.
+type timedReader interface {
+	ReadTimeout(buf []byte, timeout time.Duration) (int, error)
+}
+
 // HidTransport is the real hidapi-backed Transport.
 type HidTransport struct {
 	mu        sync.Mutex
@@ -121,7 +175,7 @@ type HidTransport struct {
 
 // NewHidTransport returns an unopened HID transport.
 func NewHidTransport() *HidTransport {
-	return newHidTransport(hid.Enumerate, openHidDevice)
+	return newHidTransport(enumerateHID, openHidDevice)
 }
 
 func newHidTransport(enumerate func(uint16, uint16) []hid.DeviceInfo, open func(hid.DeviceInfo) (hidDevice, error)) *HidTransport {
@@ -129,7 +183,8 @@ func newHidTransport(enumerate func(uint16, uint16) []hid.DeviceInfo, open func(
 }
 
 func isVendorConfigInterface(info hid.DeviceInfo) bool {
-	return info.UsagePage == vendorConfigUsagePage && info.Usage == vendorConfigUsage
+	page, usage := configUsageFor(VidPid{VID: info.VendorID, PID: info.ProductID})
+	return info.UsagePage == page && info.Usage == usage
 }
 
 // selectVendorConfigInterface deterministically selects the vendor control
@@ -142,6 +197,7 @@ func selectVendorConfigInterface(target VidPid, infos []hid.DeviceInfo) (hid.Dev
 }
 
 func selectVendorConfigInterfaceForGOOS(target VidPid, infos []hid.DeviceInfo, goos string) (hid.DeviceInfo, error) {
+	wantPage, wantUsage := configUsageFor(target)
 	matches := make([]hid.DeviceInfo, 0, 1)
 	targetInfos := make([]hid.DeviceInfo, 0, len(infos))
 	available := make([]string, 0, len(infos))
@@ -177,15 +233,15 @@ func selectVendorConfigInterfaceForGOOS(target VidPid, infos []hid.DeviceInfo, g
 				}
 			}
 			if allUnknown {
-				return hid.DeviceInfo{}, errTransport(
+				return hid.DeviceInfo{}, errNoConfigInterface(
 					"ambiguous HID interfaces for %s: %d interfaces have unknown usage metadata; vendor configuration interface %#04x:%#04x cannot be selected safely; available: %s",
-					target, len(targetInfos), vendorConfigUsagePage, vendorConfigUsage, detail,
+					target, len(targetInfos), wantPage, wantUsage, detail,
 				)
 			}
 		}
-		return hid.DeviceInfo{}, errTransport(
+		return hid.DeviceInfo{}, errNoConfigInterface(
 			"no vendor configuration HID interface (usage page %#04x, usage %#04x) found for %s; available: %s",
-			vendorConfigUsagePage, vendorConfigUsage, target, detail)
+			wantPage, wantUsage, target, detail)
 	}
 	if goos == "darwin" && len(matches) > 1 {
 		// internal/machid re-matches by VID/PID/usage because macOS HID paths
@@ -227,7 +283,7 @@ func (h *HidTransport) Open(ctx context.Context, target VidPid) error {
 	}
 	enumerate := h.enumerate
 	if enumerate == nil {
-		enumerate = hid.Enumerate
+		enumerate = enumerateHID
 	}
 	open := h.open
 	if open == nil {
@@ -243,7 +299,7 @@ func (h *HidTransport) Open(ctx context.Context, target VidPid) error {
 	}
 	device, err := open(selected)
 	if err != nil {
-		return withLinuxOpenHint(errTransport("open failed for %s: %v", target, err))
+		return openError(target, err)
 	}
 
 	h.mu.Lock()
@@ -282,12 +338,11 @@ func (h *HidTransport) Write(data []byte) (int, error) {
 	return n, nil
 }
 
-// Read blocks for at most timeoutMs waiting for a report. karalabe/hid's
-// Device.Read has no native timeout, so the blocking read runs in its own
-// goroutine and this call races it against a timer/ctx. If the device never
-// responds the goroutine outlives this call (it exits once the device
-// eventually returns data, errors, or is Closed) — an inherent limitation of
-// the underlying library, not a leak this code introduces on the happy path.
+// Read blocks for at most timeoutMs waiting for a report. A handle that can
+// time out its own read is used directly. Otherwise (karalabe/hid has no
+// native timeout) the blocking read runs in its own goroutine and this call
+// races it against a timer/ctx; if the device never responds that goroutine
+// outlives this call until the device returns data, errors, or is Closed.
 func (h *HidTransport) Read(ctx context.Context, length int, timeoutMs uint64) ([]byte, error) {
 	h.mu.Lock()
 	device := h.device
@@ -295,6 +350,9 @@ func (h *HidTransport) Read(ctx context.Context, length int, timeoutMs uint64) (
 	h.mu.Unlock()
 	if device == nil {
 		return nil, errDeviceNotOpen(target)
+	}
+	if timed, ok := device.(timedReader); ok {
+		return readTimed(ctx, timed, length, time.Duration(timeoutMs)*time.Millisecond)
 	}
 
 	type result struct {
@@ -341,5 +399,60 @@ func (h *HidTransport) Read(ctx context.Context, length int, timeoutMs uint64) (
 		return nil, ErrTimeout
 	case <-ctx.Done():
 		return nil, ctx.Err()
+	}
+}
+
+// DrainInput discards reports the device has already queued. Only handles
+// that can time out their own read are drained; a blocking backend would
+// stall here on a quiet device.
+func (h *HidTransport) DrainInput() {
+	h.mu.Lock()
+	device := h.device
+	h.mu.Unlock()
+	timed, ok := device.(timedReader)
+	if !ok {
+		return
+	}
+	buf := make([]byte, 256)
+	for range maxDrainedReports {
+		if n, err := timed.ReadTimeout(buf, time.Millisecond); err != nil || n == 0 {
+			return
+		}
+	}
+}
+
+// maxDrainedReports bounds DrainInput against a device that never stops
+// sending (a gamepad interface streaming input reports).
+const maxDrainedReports = 64
+
+// readTimed reads one report from a handle that enforces its own timeout,
+// waking early if ctx is cancelled.
+func readTimed(ctx context.Context, device timedReader, length int, timeout time.Duration) ([]byte, error) {
+	return readTimedWith(ctx, device, length, timeout, isReadTimeout)
+}
+
+func readTimedWith(ctx context.Context, device timedReader, length int, timeout time.Duration, isTimeout func(error) bool) ([]byte, error) {
+	const slice = 50 * time.Millisecond
+	buf := make([]byte, length)
+	deadline := time.Now().Add(timeout)
+	for {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			return nil, ErrTimeout
+		}
+		n, err := device.ReadTimeout(buf, min(remaining, slice))
+		if isTimeout(err) {
+			continue
+		}
+		if err != nil {
+			return nil, errTransport("%v", err)
+		}
+		if n == 0 {
+			continue
+		}
+		return buf[:n], nil
 	}
 }

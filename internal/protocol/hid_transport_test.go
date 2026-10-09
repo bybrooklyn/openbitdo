@@ -3,8 +3,10 @@ package protocol
 import (
 	"context"
 	"errors"
+	"io/fs"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/karalabe/hid"
 )
@@ -13,7 +15,7 @@ func TestWithOpenHintForGOOSAddsHintOnlyOnLinux(t *testing.T) {
 	base := errors.New("open failed")
 
 	got := withOpenHintForGOOS(base, "linux")
-	if !strings.Contains(got.Error(), "udev rule") {
+	if !strings.Contains(got.Error(), "70-openbitdo.rules") {
 		t.Fatalf("expected the linux udev hint in the error, got %q", got.Error())
 	}
 	if !strings.Contains(got.Error(), base.Error()) {
@@ -187,5 +189,56 @@ func TestHidTransportOpenFailsWithoutVendorInterfaceBeforeOpen(t *testing.T) {
 	}
 	if openCalls != 0 {
 		t.Fatalf("opener was called %d times without a vendor interface", openCalls)
+	}
+}
+
+func TestOpenErrorClassifiesPermissionDenied(t *testing.T) {
+	target := VidPid{VID: 0x2dc8, PID: 0x6013}
+	denied := &fs.PathError{Op: "open", Path: "/dev/hidraw0", Err: fs.ErrPermission}
+
+	var perr *Error
+	if err := openError(target, denied); !errors.As(err, &perr) || perr.Code() != CodePermissionDenied {
+		t.Fatalf("expected CodePermissionDenied, got %v", err)
+	}
+	if err := openError(target, errors.New("device busy")); !errors.As(err, &perr) || perr.Code() != CodeTransport {
+		t.Fatalf("expected an unclassified open failure to stay CodeTransport, got %v", err)
+	}
+}
+
+// timedDevice answers ReadTimeout from a queue; an empty queue times out.
+type timedDevice struct {
+	syntheticHIDDevice
+	replies [][]byte
+	reads   int
+}
+
+var errFakeTimeout = errors.New("fake timeout")
+
+func (d *timedDevice) ReadTimeout(buf []byte, _ time.Duration) (int, error) {
+	d.reads++
+	if len(d.replies) == 0 {
+		return 0, errFakeTimeout
+	}
+	n := copy(buf, d.replies[0])
+	d.replies = d.replies[1:]
+	return n, nil
+}
+
+func TestReadTimedReturnsReportOrTimesOut(t *testing.T) {
+	isTimeout := func(err error) bool { return errors.Is(err, errFakeTimeout) }
+	device := &timedDevice{replies: [][]byte{{0x02, 0x05}}}
+
+	got, err := readTimedWith(context.Background(), device, 64, 200*time.Millisecond, isTimeout)
+	if err != nil || len(got) != 2 || got[0] != 0x02 {
+		t.Fatalf("expected the queued report, got %v err=%v", got, err)
+	}
+	if _, err := readTimedWith(context.Background(), device, 64, 20*time.Millisecond, isTimeout); !errors.Is(err, ErrTimeout) {
+		t.Fatalf("expected ErrTimeout from a silent device, got %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := readTimedWith(ctx, device, 64, time.Second, isTimeout); !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected a cancelled context to stop the read, got %v", err)
 	}
 }

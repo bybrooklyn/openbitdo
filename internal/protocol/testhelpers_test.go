@@ -76,12 +76,6 @@ func versionResponse(versionX100 uint16, beta byte) []byte {
 	return resp
 }
 
-func slotResponse(slot byte) []byte {
-	resp := make([]byte, 64)
-	resp[0], resp[1], resp[5] = 0x02, 0x05, slot
-	return resp
-}
-
 func okReadResponse() []byte {
 	resp := make([]byte, 64)
 	resp[0], resp[1] = 0x02, 0x05
