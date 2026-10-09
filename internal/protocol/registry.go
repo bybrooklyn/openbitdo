@@ -55,6 +55,13 @@ func (r CommandRow) EvidenceConfidence() SupportEvidence {
 	return EvidenceInferred
 }
 
+// ArcadeProPID is the Arcade Controller Pro. It also enumerates as
+// ArcadeProAltPID, which the vendor's software treats as the same product.
+const (
+	ArcadeProPID    uint16 = 0x2062
+	ArcadeProAltPID uint16 = 0x20aa
+)
+
 // FindPID looks up a PID registry row by PID.
 func FindPID(pid uint16) (PidRow, bool) {
 	for _, row := range PIDRegistry {
@@ -140,6 +147,12 @@ func DefaultCapabilityFor(pid uint16, tier SupportTier, family ProtocolFamily) P
 	// it is granted nothing, like everything else.
 	if mousePIDs[pid] {
 		return PidCapability{SupportsMouse: true}
+	}
+	// An Arcade Controller Pro is granted its profile and nothing else:
+	// nothing is known here of how it updates its firmware. While its tier
+	// is detect-only it is granted nothing, like everything else.
+	if pid == ArcadeProPID {
+		return PidCapability{SupportsU2SlotConfig: true}
 	}
 
 	if tier == TierCandidateReadOnly {

@@ -27,12 +27,14 @@ const (
 	u2CmdReportState    uint16 = 0x0007
 	u2CmdSelectPlatform uint16 = 0x0014
 	u2CmdSetLight       uint16 = 0x0040
+	u2CmdArcadeProSync  uint16 = 0x0016
 	u2CmdArcadeMode     uint16 = 0x0052
 	u2CmdGetLight       uint16 = 0x0041
 	u2CmdMacroRead      uint16 = 0x0102
 	u2CmdMacroWrite     uint16 = 0x0103
 	u2CmdMacroErase     uint16 = 0x0104
 	u2CmdPhysicalMode   uint16 = 0x0105
+	u2CmdArcadeProInput uint16 = 0x0106
 	u2CmdConnected      uint16 = 0x0120
 
 	// u2CommitArg is the argument a commit carries.
@@ -46,10 +48,13 @@ const (
 	// U2RecordSize is the size of an Ultimate 2's configuration record.
 	// Its siblings keep the same sections at the front and add their own:
 	// a Pro 3's record is Pro3RecordSize, an Ultimate 2 Bluetooth's
-	// U2BTRecordSize.
-	U2RecordSize   = 0x638
-	Pro3RecordSize = 0x92c
-	U2BTRecordSize = 0xad0
+	// U2BTRecordSize. An Arcade Controller Pro's is ArcadeProRecordSize: it
+	// has two slots where the others have three, so every section sits
+	// somewhere else.
+	U2RecordSize        = 0x638
+	Pro3RecordSize      = 0x92c
+	ArcadeProRecordSize = 0xa68
+	U2BTRecordSize      = 0xad0
 
 	// u2CommitTimeout is how long a commit may take: the controller writes
 	// its flash before it answers.
@@ -140,6 +145,10 @@ func u2CommandCode(command CommandID) (uint16, bool) {
 		return u2CmdArcadeMode, true
 	case CommandU2SetLightEffect:
 		return u2CmdSetLight, true
+	case CommandArcadeProSetSync:
+		return u2CmdArcadeProSync, true
+	case CommandArcadeProSwitchReport:
+		return u2CmdArcadeProInput, true
 	}
 	return 0, false
 }
@@ -236,7 +245,7 @@ func (s *DeviceSession) U2WriteRecordRange(ctx context.Context, record []byte, o
 	if err != nil {
 		return err
 	}
-	if n := len(record); n != U2RecordSize && n != Pro3RecordSize && n != U2BTRecordSize {
+	if n := len(record); n != U2RecordSize && n != Pro3RecordSize && n != U2BTRecordSize && n != ArcadeProRecordSize {
 		return errInvalidInput("%d bytes is not the size of any known configuration record", n)
 	}
 	if offset < 0 || length < 1 || offset+length > len(record) {
@@ -397,4 +406,69 @@ func (s *DeviceSession) ArcadePlatform(ctx context.Context) (byte, error) {
 		return U2PlatformXInput, nil
 	}
 	return U2PlatformSwitch, nil
+}
+
+// ArcadeProPlatform reads which platform record an Arcade Controller Pro is
+// using. It is asked as an Arcade Controller is and answers the same way (2
+// XInput; 0 or 4 Switch), but an answer that is none of those is refused
+// rather than taken for Switch: the vendor's software goes no further with
+// one, and choosing a record on a guess would edit the wrong one.
+func (s *DeviceSession) ArcadeProPlatform(ctx context.Context) (byte, error) {
+	resp, err := s.SendCommand(ctx, CommandArcadeGetMode, nil)
+	if err != nil {
+		return 0, err
+	}
+	if len(resp.Raw) <= u2DataOffset {
+		return 0, errMalformedResponse(CommandArcadeGetMode, len(resp.Raw))
+	}
+	switch mode := resp.Raw[u2DataOffset]; mode {
+	case 2:
+		return U2PlatformXInput, nil
+	case 0, 4:
+		return U2PlatformSwitch, nil
+	default:
+		return 0, errInvalidResponse(CommandArcadeGetMode, fmt.Sprintf("mode %d is neither XInput (2) nor Switch (0 or 4)", mode))
+	}
+}
+
+// ArcadeProSetSync tells an Arcade Controller Pro that a configuration
+// session is starting (true) or over (false). The vendor's software turns
+// it on once it has read the record and before it writes anything, and off
+// when it leaves; what the controller does with it is not known.
+func (s *DeviceSession) ArcadeProSetSync(ctx context.Context, on bool) error {
+	row, err := s.ensureCommandAllowed(CommandArcadeProSetSync)
+	if err != nil {
+		return err
+	}
+	// The command's group would let any controller with a record through.
+	if s.target.PID != ArcadeProPID {
+		return errUnsupportedForPid(CommandArcadeProSetSync, s.target.PID)
+	}
+	var arg uint16
+	if on {
+		arg = 1
+	}
+	_, err = s.sendRow(ctx, row, u2Frame(row.Request, arg, nil, 0, 0, 0))
+	return err
+}
+
+// ArcadeProSwitchReport sends an Arcade Controller Pro's own report switch
+// with state 0 or 1. The vendor's software sends 0 when it starts recording
+// a macro from the controller's live input and 1 when it stops; nothing
+// else uses it, and configuring does not need it (input reports are paused
+// with U2SetInputReports, as on the other controllers).
+func (s *DeviceSession) ArcadeProSwitchReport(ctx context.Context, state uint16) error {
+	row, err := s.ensureCommandAllowed(CommandArcadeProSwitchReport)
+	if err != nil {
+		return err
+	}
+	// The command's group would let any controller with a record through.
+	if s.target.PID != ArcadeProPID {
+		return errUnsupportedForPid(CommandArcadeProSwitchReport, s.target.PID)
+	}
+	if state > 1 {
+		return errInvalidInput("report switch state %d is not 0 or 1", state)
+	}
+	_, err = s.sendRow(ctx, row, u2Frame(row.Request, state, nil, 0, 0, 0))
+	return err
 }

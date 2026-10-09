@@ -19,33 +19,53 @@ import (
 // in docs/clean-room-evidence/dossiers/6012/u2_adv.toml.
 
 const (
-	// PadSlots is how many profile slots a controller holds.
+	// PadSlots is how many profile slots a controller holds at most. An
+	// Arcade Controller Pro holds two; see PadProfile.SlotCount.
 	PadSlots = 3
-	// PadButtons is how many inputs a slot's button map covers.
+	// PadButtons is how many inputs a slot's button map covers. An Arcade
+	// Controller Pro has two more; see PadSlot.ExtraButtons.
 	PadButtons = 22
 
 	padInUse = 0x20200911 // marks a slot or one of its sections as set
 
-	padOffFlags     = 0x000
-	padOffCRC       = 0x00c
-	padOffPlatform  = 0x010
-	padOffActive    = 0x012
-	padOffName      = 0x014 // 32 bytes per slot
-	padOffVibration = 0x074 // 12: flag, two float32
-	padOffSticks    = 0x098 // 8: flag, two (start, end)
-	padOffTriggers  = 0x0b0 // 8: flag, two (start, end)
-	padOffOptions   = 0x0c8 // 8: flag, option word
-	padOffButtons   = 0x0e0 // 92: flag, 22 targets
+	padOffFlags = 0x000 // one flag per slot
 
 	padMotionOff = 0x20190000 // the motion section's flag when motion is off
 
 	padNameLen = 32
 )
 
-// padLayout is where a controller model keeps the sections of its record
-// that follow the button map. The sections before it are in the same place
-// on every model.
+// padFront is the front of a record: the header and the sections every
+// model has, which follow one another in the same order everywhere. Where
+// each one starts depends on how many slots the record has, and how long
+// the button map is on how many inputs it covers.
+type padFront struct {
+	slots, inputs int
+	crc           int // u32; then the platform and the active slot, u16 each
+	platform      int
+	active        int
+	names         int // 32 bytes per slot
+	vibration     int // 12: flag, two float32
+	sticks        int // 8: flag, two (start, end)
+	triggers      int // 8: flag, two (start, end)
+	options       int // 8: flag, option word
+	buttons       int // flag, then one target per input
+}
+
+var (
+	padFrontThreeSlots = padFront{slots: 3, inputs: PadButtons, crc: 0x00c, platform: 0x010, active: 0x012,
+		names: 0x014, vibration: 0x074, sticks: 0x098, triggers: 0x0b0, options: 0x0c8, buttons: 0x0e0}
+	// An Arcade Controller Pro: two slots, 24 inputs.
+	padFrontTwoSlots = padFront{slots: 2, inputs: PadButtons + PadExtraButtons, crc: 0x008, platform: 0x00c, active: 0x00e,
+		names: 0x010, vibration: 0x050, sticks: 0x068, triggers: 0x078, options: 0x088, buttons: 0x098}
+)
+
+// buttonSection is the size of one slot's button map.
+func (f padFront) buttonSection() int { return 4 + f.inputs*4 }
+
+// padLayout is where a controller model keeps the sections of its record.
 type padLayout struct {
+	padFront
 	size int
 	// macros is the recorded-macro section: 216 bytes per slot.
 	macros int
@@ -59,14 +79,21 @@ type padLayout struct {
 	// vibration to tune, and a setting for opposite directions pressed at
 	// once instead.
 	arcade bool
+	// buttonLights (376 per slot) and combos (164 per slot): an Arcade
+	// Controller Pro's button lights and its buttons that press several at
+	// once; zero when the model has none.
+	buttonLights, combos int
 }
 
 var (
-	padLayoutU2   = padLayout{size: protocol.U2RecordSize, macros: 0x1f4, motion: 0x494, tracing: 0x4b8, fire: 0x4dc, custom: 0x50c}
-	padLayoutU2BT = padLayout{size: protocol.U2BTRecordSize, macros: 0x68c, motion: 0x92c, tracing: 0x950, fire: 0x974, custom: 0x9a4, swapPaddleTriggers: true}
-	padLayoutPro3 = padLayout{size: protocol.Pro3RecordSize, macros: 0x68c}
+	padLayoutU2   = padLayout{padFront: padFrontThreeSlots, size: protocol.U2RecordSize, macros: 0x1f4, motion: 0x494, tracing: 0x4b8, fire: 0x4dc, custom: 0x50c}
+	padLayoutU2BT = padLayout{padFront: padFrontThreeSlots, size: protocol.U2BTRecordSize, macros: 0x68c, motion: 0x92c, tracing: 0x950, fire: 0x974, custom: 0x9a4, swapPaddleTriggers: true}
+	padLayoutPro3 = padLayout{padFront: padFrontThreeSlots, size: protocol.Pro3RecordSize, macros: 0x68c}
 	// An Arcade Controller's record is laid out as a Pro 3's.
-	padLayoutArcade = padLayout{size: protocol.Pro3RecordSize, macros: 0x68c, arcade: true}
+	padLayoutArcade = padLayout{padFront: padFrontThreeSlots, size: protocol.Pro3RecordSize, macros: 0x68c, arcade: true}
+	// An Arcade Controller Pro's is its own: see pad_arcade_pro.go.
+	padLayoutArcadePro = padLayout{padFront: padFrontTwoSlots, size: protocol.ArcadeProRecordSize, macros: 0x470, arcade: true,
+		buttonLights: 0x630, combos: 0x920}
 )
 
 func padLayoutFor(vidPid protocol.VidPid) padLayout {
@@ -77,12 +104,17 @@ func padLayoutFor(vidPid protocol.VidPid) padLayout {
 		return padLayoutPro3
 	case 0x600b, 0x600c:
 		return padLayoutArcade
+	case arcadeProPID, arcadeProAltPID:
+		return padLayoutArcadePro
 	}
 	return padLayoutU2
 }
 
 func (l padLayout) hasMotion() bool { return l.motion != 0 }
 func (l padLayout) hasLights() bool { return l.tracing != 0 }
+
+// arcadePro: the model is an Arcade Controller Pro.
+func (l padLayout) arcadePro() bool { return l.combos != 0 }
 
 // PadTarget is what a controller input is assigned to: one value from the
 // controller's own function list (see PadTargets).
@@ -163,16 +195,27 @@ type PadSlot struct {
 	Options uint32
 	Motion  PadMotion
 	Lights  PadLights
+
+	// The rest is an Arcade Controller Pro's alone, and left at its zero
+	// value on every other model. ExtraButtons continues the button map,
+	// indexed as PadExtraInputs.
+	ExtraButtons [PadExtraButtons]PadTarget
+	Combos       [PadCombos]PadCombo
+	ButtonLights PadButtonLights
 }
 
 // PadProfile is a controller's configuration for one platform.
 type PadProfile struct {
 	// Platform is the platform bank this was read from.
 	Platform byte
-	// ActiveSlot is the slot the controller is using, 0-2. It is changed
-	// on the controller, not from here.
+	// ActiveSlot is the slot the controller is using, counted from 0. It
+	// is changed on the controller, not from here.
 	ActiveSlot int
-	Slots      [PadSlots]PadSlot
+	// SlotCount is how many of Slots (and of Macros) this model has: the
+	// first two on an Arcade Controller Pro, all three otherwise. The rest
+	// are not on the controller, and changing one is refused.
+	SlotCount int
+	Slots     [PadSlots]PadSlot
 	// LightEffect is the stick-ring effect in use: one of the
 	// protocol.U2Light* values. It belongs to the controller, not a slot.
 	LightEffect byte
@@ -185,6 +228,9 @@ type PadProfile struct {
 	// Arcade says this is a leverless arcade controller: no sticks,
 	// triggers or vibration to tune, and the opposite-directions setting.
 	Arcade bool
+	// ArcadePro says it is an Arcade Controller Pro: two slots, two more
+	// inputs, button lights and combos.
+	ArcadePro bool
 
 	// record is the raw record this was decoded from. Writes start from
 	// it so everything this program does not model is preserved.
@@ -254,39 +300,56 @@ func decodePadProfile(record []byte, layout padLayout) (PadProfile, error) {
 		return PadProfile{}, fmt.Errorf("configuration record is %d bytes, expected %d", len(record), layout.size)
 	}
 	profile := PadProfile{
-		Platform:   byte(binary.LittleEndian.Uint16(record[padOffPlatform:])),
-		ActiveSlot: int(binary.LittleEndian.Uint16(record[padOffActive:])),
+		Platform:   byte(binary.LittleEndian.Uint16(record[layout.platform:])),
+		ActiveSlot: int(binary.LittleEndian.Uint16(record[layout.active:])),
+		SlotCount:  layout.slots,
 		record:     append([]byte(nil), record...),
 		layout:     layout, HasMotion: layout.hasMotion(), HasLights: layout.hasLights(), Arcade: layout.arcade,
+		ArcadePro: layout.arcadePro(),
 	}
-	if profile.ActiveSlot >= PadSlots {
+	if profile.ActiveSlot >= layout.slots {
 		profile.ActiveSlot = 0
 	}
 	for i := range profile.Slots {
 		slot := defaultPadSlot(profile.Platform)
+		if i >= layout.slots {
+			// Not on this model: left as a slot with nothing set.
+			profile.Slots[i] = slot
+			continue
+		}
 		slot.InUse = flagAt(record, padOffFlags+i*4)
 		if slot.InUse {
-			slot.Name = decodePadName(record[padOffName+i*padNameLen:][:padNameLen])
+			slot.Name = decodePadName(record[layout.names+i*padNameLen:][:padNameLen])
+		}
+		if layout.arcadePro() {
+			slot.ExtraButtons = defaultPadExtraButtons()
 		}
 		// Each section counts only when its own flag says it is set.
-		if at := padOffButtons + i*92; flagAt(record, at) {
+		if at := layout.buttons + i*layout.buttonSection(); flagAt(record, at) {
 			for b := range slot.Buttons {
 				slot.Buttons[b] = PadTarget(binary.LittleEndian.Uint32(record[at+4+b*4:]))
 			}
+			for b := PadButtons; b < layout.inputs; b++ {
+				slot.ExtraButtons[b-PadButtons] = PadTarget(binary.LittleEndian.Uint32(record[at+4+b*4:]))
+			}
 		}
-		if at := padOffSticks + i*8; flagAt(record, at) {
+		if layout.arcadePro() {
+			slot.ButtonLights = decodePadButtonLights(record[layout.buttonLights+i*padButtonLightSection:][:padButtonLightSection])
+			slot.Combos = decodePadCombos(record[layout.combos+i*padComboSection:][:padComboSection])
+		}
+		if at := layout.sticks + i*8; flagAt(record, at) {
 			slot.LeftStick = PadRange{record[at+4], record[at+5]}
 			slot.RightStick = PadRange{record[at+6], record[at+7]}
 		}
-		if at := padOffTriggers + i*8; flagAt(record, at) {
+		if at := layout.triggers + i*8; flagAt(record, at) {
 			slot.LeftTrigger = PadRange{record[at+4], record[at+5]}
 			slot.RightTrigger = PadRange{record[at+6], record[at+7]}
 		}
-		if at := padOffVibration + i*12; flagAt(record, at) {
+		if at := layout.vibration + i*12; flagAt(record, at) {
 			slot.VibrationLeft = vibrationLevel(math.Float32frombits(binary.LittleEndian.Uint32(record[at+4:])))
 			slot.VibrationRight = vibrationLevel(math.Float32frombits(binary.LittleEndian.Uint32(record[at+8:])))
 		}
-		if at := padOffOptions + i*8; flagAt(record, at) {
+		if at := layout.options + i*8; flagAt(record, at) {
 			slot.Options = binary.LittleEndian.Uint32(record[at+4:])
 		}
 		if at := layout.motion + i*12; layout.hasMotion() && flagAt(record, at) && record[at+11] != PadMotionOff {
@@ -358,9 +421,16 @@ type padRange struct{ offset, length int }
 // encodePadSlot writes slot i into record and returns the spans it changed.
 // A section equal to what the record already decodes to is left alone, so
 // applying an unedited profile writes nothing.
-func encodePadSlot(record []byte, layout padLayout, i int, slot, was PadSlot) ([]padRange, error) {
+func encodePadSlot(record []byte, layout padLayout, platform byte, i int, slot, was PadSlot) ([]padRange, error) {
 	if err := slot.validate(); err != nil {
 		return nil, err
+	}
+	if layout.arcadePro() {
+		if err := validateArcadeProSlot(platform, slot, was); err != nil {
+			return nil, err
+		}
+	} else if slot.ExtraButtons != was.ExtraButtons || slot.Combos != was.Combos || slot.ButtonLights != was.ButtonLights {
+		return nil, fmt.Errorf("this controller has no extra inputs, combos or button lights")
 	}
 	var changed []padRange
 	put := func(offset int, section []byte) {
@@ -373,31 +443,49 @@ func encodePadSlot(record []byte, layout padLayout, i int, slot, was PadSlot) ([
 
 	if slot.Name != was.Name {
 		name, _ := encodePadName(slot.Name)
-		put(padOffName+i*padNameLen, name)
+		put(layout.names+i*padNameLen, name)
 	}
-	if slot.Buttons != was.Buttons {
+	if slot.Buttons != was.Buttons || slot.ExtraButtons != was.ExtraButtons {
 		section := append([]byte(nil), flag...)
 		for _, target := range slot.Buttons {
 			section = binary.LittleEndian.AppendUint32(section, uint32(target))
 		}
-		put(padOffButtons+i*92, section)
+		for _, target := range slot.ExtraButtons[:layout.inputs-PadButtons] {
+			section = binary.LittleEndian.AppendUint32(section, uint32(target))
+		}
+		put(layout.buttons+i*layout.buttonSection(), section)
+	}
+	if layout.arcadePro() {
+		at := layout.buttonLights + i*padButtonLightSection
+		if l, w := slot.ButtonLights, was.ButtonLights; l.tables() != w.tables() {
+			// The flag and the tables; the effect byte is written below,
+			// and the last byte is not this program's to set.
+			put(at, flag)
+			put(at+5, l.encodeTables())
+		}
+		if slot.ButtonLights.Effect != was.ButtonLights.Effect {
+			put(at+4, []byte{slot.ButtonLights.Effect})
+		}
+		if slot.Combos != was.Combos {
+			put(layout.combos+i*padComboSection, encodePadCombos(slot.Combos))
+		}
 	}
 	if slot.LeftStick != was.LeftStick || slot.RightStick != was.RightStick {
-		put(padOffSticks+i*8, append(append([]byte(nil), flag...),
+		put(layout.sticks+i*8, append(append([]byte(nil), flag...),
 			slot.LeftStick.Start, slot.LeftStick.End, slot.RightStick.Start, slot.RightStick.End))
 	}
 	if slot.LeftTrigger != was.LeftTrigger || slot.RightTrigger != was.RightTrigger {
-		put(padOffTriggers+i*8, append(append([]byte(nil), flag...),
+		put(layout.triggers+i*8, append(append([]byte(nil), flag...),
 			slot.LeftTrigger.Start, slot.LeftTrigger.End, slot.RightTrigger.Start, slot.RightTrigger.End))
 	}
 	if slot.VibrationLeft != was.VibrationLeft || slot.VibrationRight != was.VibrationRight {
 		section := append([]byte(nil), flag...)
 		section = binary.LittleEndian.AppendUint32(section, math.Float32bits(float32(slot.VibrationLeft)*0.2))
 		section = binary.LittleEndian.AppendUint32(section, math.Float32bits(float32(slot.VibrationRight)*0.2))
-		put(padOffVibration+i*12, section)
+		put(layout.vibration+i*12, section)
 	}
 	if slot.Options != was.Options {
-		put(padOffOptions+i*8, binary.LittleEndian.AppendUint32(append([]byte(nil), flag...), slot.Options))
+		put(layout.options+i*8, binary.LittleEndian.AppendUint32(append([]byte(nil), flag...), slot.Options))
 	}
 	if socd := slot.Options & PadSOCDMask; socd&(socd-1) != 0 || (socd != 0 && !layout.arcade) {
 		return nil, fmt.Errorf("the opposite-directions setting takes one choice, on an arcade controller only")
@@ -463,6 +551,11 @@ func PadAddressOf(device AppDevice) PadAddress {
 func (a PadAddress) product() protocol.VidPid {
 	if a.Product.PID != 0 {
 		return a.Product
+	}
+	// An Arcade Controller Pro has a second id of its own, which the
+	// vendor's software treats as the first.
+	if a.Enumerated.PID == arcadeProAltPID {
+		return protocol.VidPid{VID: a.Enumerated.VID, PID: arcadeProPID}
 	}
 	return a.Enumerated
 }
@@ -595,19 +688,30 @@ func (c *OpenBitdoCore) PadApplyAt(ctx context.Context, addr PadAddress, edited 
 	record := append([]byte(nil), before.record...)
 	var spans []padRange
 	for i := range edited.Slots {
-		changed, err := encodePadSlot(record, layout, i, edited.Slots[i], before.Slots[i])
+		if i >= layout.slots {
+			if edited.Slots[i] != before.Slots[i] || !reflect.DeepEqual(edited.Macros[i], before.Macros[i]) {
+				return WriteRecoveryReport{}, errInvalidState("slot %d: this controller has %d profile slots", i+1, layout.slots)
+			}
+			continue
+		}
+		changed, err := encodePadSlot(record, layout, platform, i, edited.Slots[i], before.Slots[i])
 		if err != nil {
 			return WriteRecoveryReport{}, errInvalidState("slot %d: %v", i+1, err)
+		}
+		if layout.arcadePro() {
+			if err := validateArcadeProMacros(edited.Slots[i], edited.Macros[i]); err != nil {
+				return WriteRecoveryReport{}, errInvalidState("slot %d: %v", i+1, err)
+			}
 		}
 		spans = append(spans, changed...)
 	}
 	macroSlots := map[int]bool{}
-	for slot := range edited.Macros {
+	for slot := 0; slot < layout.slots; slot++ {
 		if reflect.DeepEqual(edited.Macros[slot], before.Macros[slot]) {
 			continue
 		}
 		for j, macro := range edited.Macros[slot] {
-			if err := macro.Validate(); err != nil {
+			if err := macro.validate(layout.macroTrigger); err != nil {
 				return WriteRecoveryReport{}, errInvalidState("slot %d macro %d: %v", slot+1, j+1, err)
 			}
 		}
@@ -628,6 +732,13 @@ func (c *OpenBitdoCore) PadApplyAt(ctx context.Context, addr PadAddress, edited 
 	if len(spans) == 0 && len(macroSlots) == 0 && effect == before.LightEffect {
 		report.WriteApplied = true
 		return report, nil
+	}
+	if layout.arcadePro() {
+		endSync, err := beginArcadeProSync(ctx, session)
+		if err != nil {
+			return report, err
+		}
+		defer endSync()
 	}
 
 	var applyErr error
@@ -700,10 +811,10 @@ func (c *OpenBitdoCore) restorePadBackup(ctx context.Context, addr PadAddress, b
 		return err
 	}
 	defer done()
-	if byte(binary.LittleEndian.Uint16(backup[padOffPlatform:])) != platform {
+	layout := padLayoutFor(vidPid)
+	if len(backup) > layout.active && byte(binary.LittleEndian.Uint16(backup[layout.platform:])) != platform {
 		return errInvalidState("this backup is for the other position of the controller's mode switch")
 	}
-	layout := padLayoutFor(vidPid)
 	if len(backup) != layout.size {
 		return errInvalidState("this backup is for a different controller model")
 	}
@@ -712,14 +823,14 @@ func (c *OpenBitdoCore) restorePadBackup(ctx context.Context, addr PadAddress, b
 		return errProtocol(perr)
 	}
 	// Runs of differing bytes, leaving the header's crc, platform and
-	// active slot (0x0c-0x13) to the controller.
+	// active slot (the eight bytes before the names) to the controller.
 	var spans []padRange
 	for i := 0; i < len(backup); i++ {
-		if (i >= padOffCRC && i < padOffName) || current[i] == backup[i] {
+		if (i >= layout.crc && i < layout.names) || current[i] == backup[i] {
 			continue
 		}
 		start := i
-		for i < len(backup) && current[i] != backup[i] && (i < padOffCRC || i >= padOffName) {
+		for i < len(backup) && current[i] != backup[i] && (i < layout.crc || i >= layout.names) {
 			i++
 		}
 		spans = append(spans, padRange{start, i - start})
@@ -728,7 +839,14 @@ func (c *OpenBitdoCore) restorePadBackup(ctx context.Context, addr PadAddress, b
 	if err2 != nil {
 		return errProtocol(err2)
 	}
-	for slot := 0; slot < PadSlots; slot++ {
+	if layout.arcadePro() {
+		endSync, err := beginArcadeProSync(ctx, session)
+		if err != nil {
+			return err
+		}
+		defer endSync()
+	}
+	for slot := 0; slot < layout.slots; slot++ {
 		if err := writePadMacroSteps(ctx, session, platform, slot, macros[slot], now[slot]); err != nil {
 			return errProtocol(err)
 		}
@@ -789,6 +907,8 @@ func PadMotionButtonName(target PadTarget) string {
 		return "Extra button L4"
 	case padMotionP4:
 		return "Extra button R4"
+	case padArcadeP5:
+		return "Extra button P5"
 	}
 	return target.String()
 }
@@ -801,6 +921,9 @@ func padPlatform(ctx context.Context, session *protocol.DeviceSession, addr PadA
 	vidPid := addr.product()
 	if vidPid.PID == 0x600b || vidPid.PID == 0x600c {
 		return session.ArcadePlatform(ctx)
+	}
+	if vidPid.PID == arcadeProPID {
+		return session.ArcadeProPlatform(ctx)
 	}
 	isU2 := vidPid.PID == 0x6012 || vidPid.PID == 0x6013
 	// Under the shared id a Pro 3 or Ultimate 2 Bluetooth is in XInput

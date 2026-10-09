@@ -3,7 +3,7 @@
 dossier_id = "DOS-6012-U2-ADV"
 pid_hex = "0x6012"
 operation_group = "Ultimate2Core"
-command_id = ["U2GetConnected", "U2GetPhysicalMode", "U2SetReportState", "U2SelectPlatform", "U2RecordRead", "U2RecordWrite", "U2Commit", "U2GetLightEffect", "U2SetLightEffect", "U2MacroRead", "U2MacroWrite", "U2MacroErase"]
+command_id = ["U2GetConnected", "U2GetPhysicalMode", "U2SetReportState", "U2SelectPlatform", "U2RecordRead", "U2RecordWrite", "U2Commit", "U2GetLightEffect", "U2SetLightEffect", "U2MacroRead", "U2MacroWrite", "U2MacroErase", "ArcadeGetMode", "ArcadeProSetSync", "ArcadeProSwitchReport"]
 request_shape = "64-byte output report 0x81: 81 04, then a 16-byte header (cmd u16, arg u16, len u16, crc u16, total u32, offset u32), then up to 45 data bytes"
 response_shape = "64-byte input report 0x02: 02 04, then a 16-byte header (04 00, cmd u16 echoed, len u16, crc u16, two u32), then data from byte 18"
 validator_rules = ["byte0 == 0x02", "byte1 == 0x04", "bytes 2-3 == 04 00", "bytes 4-5 echo the request's cmd"]
@@ -97,6 +97,31 @@ pro_3 = "0x6009: record of 0x92c bytes. Sections up to the button map are in the
 ultimate_2_bluetooth = "0x600f: record of 0xad0 bytes: as the Pro 3 to 0x92c, then motion at 0x92c, tracing 0x950, fire ring 0x974, per-LED 0x9a4. Reached directly it always uses the Switch record. P1 and P2 are numbered the other way round as macro triggers. Resuming input reports takes arg 0xaa01."
 arcade_controller = "0x600b (receiver 0x600c): record laid out as the Pro 3's. Its platform is asked with 81 00 52 (reply data byte 0: 2 XInput, 0 or 4 Switch). The feature word's bits 0x10000, 0x20000 and 0x40000 choose up-wins, first-pressed-wins and last-pressed-wins for opposite directions; none set means neither registers."
 hardware = "no"
+
+# Arcade Controller Pro. Worked out the same way as the rest of this file
+# (static analysis of the vendor's Windows application V1.37 and its native
+# library, in a scratch directory outside this repository); wire facts only.
+# No hardware has been tried: every entry here is inferred.
+[arcade_controller_pro]
+pids = "0x2062; it also enumerates as 0x20aa, which the vendor software treats as 0x2062. Configuration interface: usage page 0xff7a, usage 0x0001"
+framing = "as the rest of this file: 81 04 header with CRC-16/MODBUS, record read cmd 2, write cmd 1 (total = 0xa68), commit cmd 6 arg 0x0123, select platform cmd 0x14, input reports paused and resumed with cmd 7 (arg 0 and 1)"
+record = "0xa68 bytes, little-endian, two slots"
+layout = "0x000 flag u32 x2; 0x008 crc u32; 0x00c platform u16; 0x00e active slot u16; 0x010 name 32 bytes x2; 0x050 rumble 12 x2; 0x068 sticks 8 x2; 0x078 triggers 8 x2; 0x088 feature word 8 x2; 0x098 button map 100 x2 (flag u32 + 24 x u32); 0x160 hot-key macros 392 x2; 0x470 recorded macros 216 x2; 0x620 xinput rumble 8 x2; 0x630 button lights 376 x2; 0x920 combos 164 x2"
+layout_evidence = "record size from the whole-record read and write; rumble, sticks, triggers, feature word, button map entry (slot * 100 + 0x9c + index * 4), macro name (0x478 + slot * 216 + macro * 52), lights (slot * 376 + 0x630) and combos (slot * 164 + 0x920) each from the vendor library's single-section write; the name write puts the slot flag at slot * 4, the name at 0x10 + slot * 32 and four bytes at 0x008. The hot-key macro and xinput rumble offsets follow from the sizes of their neighbours"
+button_map = "24 entries: A, B, X, Y, L1, R1, L2, R2, L3, R3, Select, Start, Star, Home, Up, Down, Left, Right, P1, P2, P3, P4, P5, Screenshot button. Target codes as the other controllers'. The vendor software offers every button but Star and Home (which it does not remap) the face, shoulder, trigger, stick-click, Select, Start, d-pad, left-stick and right-stick direction targets and none; the Screenshot button also 0x00010000, and on the Switch record 0x00400000 (screenshot)"
+button_defaults = "as the other controllers' (A/B and X/Y trade places on XInput; Star is screenshot on Switch); P1-P5 none; Screenshot button 0x00400000. The vendor software holds conflicting default tables for Star and, on XInput, for the Screenshot button"
+platform = "asked with 81 00 52 as the Arcade Controller is; reply data byte 0: 2 selects the XInput record (platform 3), 0 or 4 the Switch record (platform 0). On any other value the vendor software sets no mode. It sends 81 05 21 (version and body colour) before this query; that probe is not needed for the answer"
+socd = "feature word bits as the Arcade Controller's: 0x10000 up wins, 0x20000 first pressed wins, 0x40000 last pressed wins"
+lights = "per slot, 376 bytes, byte-packed: flag u32; effect u8 (0 cycle, 1 echo press, 2 breathing, 3 fixed, 4 flow, 5 ripple, 6 off); 7 x 13 brightness bytes 0-100 (one row per effect); 7 x 13 colours as r, g, b bytes; four speed bytes 1-10 (index 1 breathing, 2 flow, 3 ripple, 0 cycle); two effect-brightness bytes 0-100 (index 0 breathing, 1 cycle); one reserved byte. The 13 lights, in order: P5, Y, B, Up, Left, X, A, Down, R1, R2, Right, L1, L2. Defaults in the vendor software: brightness 100, colour ff0000, speed 5"
+light_effect = "the effect in use is read as the one byte at 0x634 (the first slot's effect byte) and set by writing that byte and committing; the vendor software sets 1-6 only and does not touch the section flag when it does"
+combos = "per slot, 164 bytes: flag u32, then five entries of 32 bytes: flag u32, the code of the button the combo is on, six codes of the buttons it presses (0 ends them). Used entries are packed from the first; unused ones are zero. Codes of the buttons a combo can be on: the button's own target code, P1 0x02000000, P2 0x04000000, P3 0x00200000, P4 0x40000000, P5 0x00100000, Screenshot button 0x00400000. A combo presses face buttons, shoulders, triggers, stick clicks, Select and Start only"
+macros = "storage addressed as the other controllers' (arg = platform << 8 | slot); headers at 0x470 + slot * 216 in the same format. P5 (0x00100000) can also play a macro"
+sync = "cmd 0x0016, arg 1 or 0, no data; reply echoes the cmd. The vendor software sends 1 after reading the record and macros on connecting, before any write, and 0 on leaving. What the controller does with it is not known"
+report_switch = "cmd 0x0106, arg 0 or 1, no data; reply echoes the cmd. Sent only around recording a macro from live input (0 at the start, 1 at the end). The Arcade Controller has the same command"
+active_slot = "the vendor library's current-slot query reads the first 0x14 bytes and takes the u16 at 0x12, as it does for three-slot records; on this record 0x12 is inside the first slot's name and the active slot is at 0x00e"
+not_covered = "background image upload and factory reset (81 04 25 01) are separate commands, not part of the record"
+hardware = "no"
+confidence = "inferred"
 
 [record]
 size = "0x638 bytes, little-endian, three slots"
