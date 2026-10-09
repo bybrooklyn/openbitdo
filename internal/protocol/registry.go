@@ -62,6 +62,13 @@ const (
 	ArcadeProAltPID uint16 = 0x20aa
 )
 
+// UltimateBTPID is the first-generation Ultimate Bluetooth Controller, and
+// UltimateBTAdapterPID the adapter it comes with.
+const (
+	UltimateBTPID        uint16 = 0x6007
+	UltimateBTAdapterPID uint16 = 0x3106
+)
+
 // FindPID looks up a PID registry row by PID.
 func FindPID(pid uint16) (PidRow, bool) {
 	for _, row := range PIDRegistry {
@@ -192,7 +199,10 @@ func DefaultCapabilityFor(pid uint16, tier SupportTier, family ProtocolFamily) P
 	cap.SupportsJP108DedicatedMap = false
 	// A Pro 3 and an Arcade Controller keep their settings in the same kind
 	// of record as an Ultimate 2, but update their firmware the standard way.
-	cap.SupportsU2SlotConfig = pid == 0x6009 || pid == 0x600b
+	// So does a first-generation Ultimate Bluetooth, reached directly or
+	// through its adapter; which of the record's commands it takes is
+	// narrowed in isCommandAllowedForDevice.
+	cap.SupportsU2SlotConfig = pid == 0x6009 || pid == 0x600b || pid == UltimateBTPID || pid == UltimateBTAdapterPID
 	cap.SupportsU2ButtonMap = false
 	cap.SupportsRecordKeyboard = false
 	cap.SupportsMouse = false

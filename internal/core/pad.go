@@ -55,6 +55,10 @@ type padFront struct {
 var (
 	padFrontThreeSlots = padFront{slots: 3, inputs: PadButtons, crc: 0x00c, platform: 0x010, active: 0x012,
 		names: 0x014, vibration: 0x074, sticks: 0x098, triggers: 0x0b0, options: 0x0c8, buttons: 0x0e0}
+	// A first-generation Ultimate Bluetooth: 20 inputs, so everything after
+	// the button map sits earlier than on the other three-slot models.
+	padFrontTwentyInputs = padFront{slots: 3, inputs: PadButtons - 2, crc: 0x00c, platform: 0x010, active: 0x012,
+		names: 0x014, vibration: 0x074, sticks: 0x098, triggers: 0x0b0, options: 0x0c8, buttons: 0x0e0}
 	// An Arcade Controller Pro: two slots, 24 inputs.
 	padFrontTwoSlots = padFront{slots: 2, inputs: PadButtons + PadExtraButtons, crc: 0x008, platform: 0x00c, active: 0x00e,
 		names: 0x010, vibration: 0x050, sticks: 0x068, triggers: 0x078, options: 0x088, buttons: 0x098}
@@ -83,6 +87,9 @@ type padLayout struct {
 	// Controller Pro's button lights and its buttons that press several at
 	// once; zero when the model has none.
 	buttonLights, combos int
+	// ultimateBT: a first-generation Ultimate Bluetooth; see
+	// pad_ultimate_bt.go for everything that sets it apart.
+	ultimateBT bool
 }
 
 var (
@@ -94,6 +101,9 @@ var (
 	// An Arcade Controller Pro's is its own: see pad_arcade_pro.go.
 	padLayoutArcadePro = padLayout{padFront: padFrontTwoSlots, size: protocol.ArcadeProRecordSize, macros: 0x470, arcade: true,
 		buttonLights: 0x630, combos: 0x920}
+	// A first-generation Ultimate Bluetooth's: hot-key macros at 0x1dc,
+	// recorded macros at 0x674, xinput rumble at 0x8fc.
+	padLayoutUltimateBT = padLayout{padFront: padFrontTwentyInputs, size: protocol.UltimateBTRecordSize, macros: 0x674, ultimateBT: true}
 )
 
 func padLayoutFor(vidPid protocol.VidPid) padLayout {
@@ -106,6 +116,8 @@ func padLayoutFor(vidPid protocol.VidPid) padLayout {
 		return padLayoutArcade
 	case arcadeProPID, arcadeProAltPID:
 		return padLayoutArcadePro
+	case protocol.UltimateBTPID, protocol.UltimateBTAdapterPID:
+		return padLayoutUltimateBT
 	}
 	return padLayoutU2
 }
@@ -231,6 +243,13 @@ type PadProfile struct {
 	// ArcadePro says it is an Arcade Controller Pro: two slots, two more
 	// inputs, button lights and combos.
 	ArcadePro bool
+	// UltimateBT says it is a first-generation Ultimate Bluetooth; see
+	// PadUltimateBTTargets for what its buttons can be assigned.
+	UltimateBT bool
+	// ButtonCount is how many of a slot's Buttons this model has: the
+	// first 20 on a first-generation Ultimate Bluetooth, which has no L4
+	// or R4, and all of them otherwise. Changing one past it is refused.
+	ButtonCount int
 
 	// record is the raw record this was decoded from. Writes start from
 	// it so everything this program does not model is preserved.
@@ -305,13 +324,13 @@ func decodePadProfile(record []byte, layout padLayout) (PadProfile, error) {
 		SlotCount:  layout.slots,
 		record:     append([]byte(nil), record...),
 		layout:     layout, HasMotion: layout.hasMotion(), HasLights: layout.hasLights(), Arcade: layout.arcade,
-		ArcadePro: layout.arcadePro(),
+		ArcadePro: layout.arcadePro(), UltimateBT: layout.ultimateBT, ButtonCount: min(layout.inputs, PadButtons),
 	}
 	if profile.ActiveSlot >= layout.slots {
 		profile.ActiveSlot = 0
 	}
 	for i := range profile.Slots {
-		slot := defaultPadSlot(profile.Platform)
+		slot := layout.defaultSlot(profile.Platform)
 		if i >= layout.slots {
 			// Not on this model: left as a slot with nothing set.
 			profile.Slots[i] = slot
@@ -326,8 +345,8 @@ func decodePadProfile(record []byte, layout padLayout) (PadProfile, error) {
 		}
 		// Each section counts only when its own flag says it is set.
 		if at := layout.buttons + i*layout.buttonSection(); flagAt(record, at) {
-			for b := range slot.Buttons {
-				slot.Buttons[b] = PadTarget(binary.LittleEndian.Uint32(record[at+4+b*4:]))
+			for b := 0; b < min(layout.inputs, PadButtons); b++ {
+				slot.Buttons[layout.stored(b)] = PadTarget(binary.LittleEndian.Uint32(record[at+4+b*4:]))
 			}
 			for b := PadButtons; b < layout.inputs; b++ {
 				slot.ExtraButtons[b-PadButtons] = PadTarget(binary.LittleEndian.Uint32(record[at+4+b*4:]))
@@ -432,6 +451,11 @@ func encodePadSlot(record []byte, layout padLayout, platform byte, i int, slot, 
 	} else if slot.ExtraButtons != was.ExtraButtons || slot.Combos != was.Combos || slot.ButtonLights != was.ButtonLights {
 		return nil, fmt.Errorf("this controller has no extra inputs, combos or button lights")
 	}
+	if layout.ultimateBT {
+		if err := validateUltimateBTSlot(platform, slot, was); err != nil {
+			return nil, err
+		}
+	}
 	var changed []padRange
 	put := func(offset int, section []byte) {
 		if !bytes.Equal(record[offset:offset+len(section)], section) {
@@ -447,10 +471,10 @@ func encodePadSlot(record []byte, layout padLayout, platform byte, i int, slot, 
 	}
 	if slot.Buttons != was.Buttons || slot.ExtraButtons != was.ExtraButtons {
 		section := append([]byte(nil), flag...)
-		for _, target := range slot.Buttons {
-			section = binary.LittleEndian.AppendUint32(section, uint32(target))
+		for b := 0; b < min(layout.inputs, PadButtons); b++ {
+			section = binary.LittleEndian.AppendUint32(section, uint32(slot.Buttons[layout.stored(b)]))
 		}
-		for _, target := range slot.ExtraButtons[:layout.inputs-PadButtons] {
+		for _, target := range slot.ExtraButtons[:max(0, layout.inputs-PadButtons)] {
 			section = binary.LittleEndian.AppendUint32(section, uint32(target))
 		}
 		put(layout.buttons+i*layout.buttonSection(), section)
@@ -570,10 +594,20 @@ func supportsPadProfile(vidPid protocol.VidPid) bool {
 // padSession opens a session and gets the controller ready to exchange its
 // record: checks it is connected, pauses its input reports and selects the
 // platform its mode switch is on. done resumes input reports and closes.
-func (c *OpenBitdoCore) padSession(ctx context.Context, addr PadAddress) (session *protocol.DeviceSession, platform byte, done func(), err error) {
+// chosen is the platform asked for on a model that leaves the choice to its
+// user (see PadPlatformChoices), or padPlatformUnchosen.
+func (c *OpenBitdoCore) padSession(ctx context.Context, addr PadAddress, chosen int) (session *protocol.DeviceSession, platform byte, done func(), err error) {
 	vidPid := addr.product()
 	if !supportsPadProfile(vidPid) {
 		return nil, 0, nil, errPolicyDenied(ReasonUnsupportedPid, "controller profiles are not supported for %s", vidPid)
+	}
+	choosing := padLayoutFor(vidPid).ultimateBT
+	if choosing {
+		// Refused before anything is sent: there is nothing to ask the
+		// controller that would settle it.
+		if err := checkPadPlatformChoice(chosen); err != nil {
+			return nil, 0, nil, err
+		}
 	}
 	config := protocol.SessionConfig{
 		AllowUnsafe: true, BrickRiskAck: true, Experimental: true,
@@ -605,7 +639,11 @@ func (c *OpenBitdoCore) padSession(ctx context.Context, addr PadAddress) (sessio
 		_ = session.U2SetInputReports(context.WithoutCancel(ctx), true)
 		_ = session.Close()
 	}
-	platform, perr = padPlatform(ctx, session, addr)
+	if choosing {
+		platform = byte(chosen)
+	} else {
+		platform, perr = padPlatform(ctx, session, addr)
+	}
 	if perr == nil {
 		perr = session.U2SelectPlatform(ctx, platform)
 	}
@@ -625,18 +663,26 @@ func (c *OpenBitdoCore) PadReadProfile(ctx context.Context, vidPid protocol.VidP
 // PadReadProfileAt is PadReadProfile for a controller that may have been
 // reached under the shared controller id.
 func (c *OpenBitdoCore) PadReadProfileAt(ctx context.Context, addr PadAddress) (PadProfile, error) {
-	session, _, done, err := c.padSession(ctx, addr)
+	return c.padReadProfile(ctx, addr, padPlatformUnchosen)
+}
+
+func (c *OpenBitdoCore) padReadProfile(ctx context.Context, addr PadAddress, chosen int) (PadProfile, error) {
+	session, platform, done, err := c.padSession(ctx, addr, chosen)
 	if err != nil {
 		return PadProfile{}, err
 	}
 	defer done()
-	return readPadProfile(ctx, session, padLayoutFor(addr.product()))
+	return readPadProfile(ctx, session, padLayoutFor(addr.product()), platform)
 }
 
-func readPadProfile(ctx context.Context, session *protocol.DeviceSession, layout padLayout) (PadProfile, error) {
+// readPadProfile reads the record of the platform that was selected.
+func readPadProfile(ctx context.Context, session *protocol.DeviceSession, layout padLayout, platform byte) (PadProfile, error) {
 	record, err := session.U2ReadRecord(ctx, layout.size)
 	if err != nil {
 		return PadProfile{}, errProtocol(err)
+	}
+	if err := layout.holdsPlatform(record, platform); err != nil {
+		return PadProfile{}, err
 	}
 	profile, err := decodePadProfile(record, layout)
 	if err != nil {
@@ -671,7 +717,13 @@ func (c *OpenBitdoCore) PadApplyAt(ctx context.Context, addr PadAddress, edited 
 		return WriteRecoveryReport{}, errPolicyDenied(ReasonUnsupportedPid,
 			"writing controller profiles is not hardware-confirmed yet; turn on advanced mode to try it")
 	}
-	session, platform, done, err := c.padSession(ctx, addr)
+	layout := padLayoutFor(vidPid)
+	chosen := padPlatformUnchosen
+	if layout.ultimateBT {
+		// The profile says which platform's record it was read from.
+		chosen = int(edited.Platform)
+	}
+	session, platform, done, err := c.padSession(ctx, addr, chosen)
 	if err != nil {
 		return WriteRecoveryReport{}, err
 	}
@@ -680,8 +732,7 @@ func (c *OpenBitdoCore) PadApplyAt(ctx context.Context, addr PadAddress, edited 
 		return WriteRecoveryReport{}, errInvalidState("the controller's mode switch moved since this profile was read; reload it")
 	}
 
-	layout := padLayoutFor(vidPid)
-	before, err := readPadProfile(ctx, session, layout)
+	before, err := readPadProfile(ctx, session, layout, platform)
 	if err != nil {
 		return WriteRecoveryReport{}, err
 	}
@@ -745,11 +796,11 @@ func (c *OpenBitdoCore) PadApplyAt(ctx context.Context, addr PadAddress, edited 
 	// Steps go first: a header must never describe steps that are not there.
 	for slot := 0; slot < PadSlots && applyErr == nil; slot++ {
 		if macroSlots[slot] {
-			applyErr = writePadMacroSteps(ctx, session, platform, slot, edited.Macros[slot], before.Macros[slot])
+			applyErr = writePadMacroSteps(ctx, session, layout, platform, slot, edited.Macros[slot], before.Macros[slot])
 		}
 	}
 	if applyErr == nil && len(spans) > 0 {
-		applyErr = writePadSpans(ctx, session, record, spans)
+		applyErr = writePadSpans(ctx, session, layout, record, spans)
 	}
 	if applyErr == nil && effect != before.LightEffect {
 		applyErr = setPadLightEffect(ctx, session, effect)
@@ -761,11 +812,11 @@ func (c *OpenBitdoCore) PadApplyAt(ctx context.Context, addr PadAddress, edited 
 	report.RollbackAttempted, report.WriteError = true, applyErr.Error()
 	var rollbackErr error
 	if len(spans) > 0 {
-		rollbackErr = writePadSpans(ctx, session, before.record, spans)
+		rollbackErr = writePadSpans(ctx, session, layout, before.record, spans)
 	}
 	for slot := 0; slot < PadSlots && rollbackErr == nil; slot++ {
 		if macroSlots[slot] {
-			rollbackErr = writePadMacroSteps(ctx, session, platform, slot, before.Macros[slot], edited.Macros[slot])
+			rollbackErr = writePadMacroSteps(ctx, session, layout, platform, slot, before.Macros[slot], edited.Macros[slot])
 		}
 	}
 	if rollbackErr == nil && effect != before.LightEffect {
@@ -780,9 +831,14 @@ func (c *OpenBitdoCore) PadApplyAt(ctx context.Context, addr PadAddress, edited 
 }
 
 // writePadSpans writes the given spans of record, commits, and checks the
-// controller now holds them.
-func writePadSpans(ctx context.Context, session *protocol.DeviceSession, record []byte, spans []padRange) error {
-	for _, span := range spans {
+// controller now holds them. A model that is only ever sent its whole
+// record gets all of it; the spans are still what is checked.
+func writePadSpans(ctx context.Context, session *protocol.DeviceSession, layout padLayout, record []byte, spans []padRange) error {
+	sent := spans
+	if layout.ultimateBT {
+		sent = []padRange{{0, len(record)}}
+	}
+	for _, span := range sent {
 		if err := session.U2WriteRecordRange(ctx, record, span.offset, span.length); err != nil {
 			return fmt.Errorf("write at %#x: %w", span.offset, err)
 		}
@@ -806,12 +862,20 @@ func writePadSpans(ctx context.Context, session *protocol.DeviceSession, record 
 // record now differs from it.
 func (c *OpenBitdoCore) restorePadBackup(ctx context.Context, addr PadAddress, backup []byte, macros [PadSlots][PadMacros]PadMacro) error {
 	vidPid := addr.product()
-	session, platform, done, err := c.padSession(ctx, addr)
+	layout := padLayoutFor(vidPid)
+	chosen := padPlatformUnchosen
+	if layout.ultimateBT {
+		// The backup says which platform's record it is.
+		if len(backup) != layout.size {
+			return errInvalidState("this backup is for a different controller model")
+		}
+		chosen = int(binary.LittleEndian.Uint16(backup[layout.platform:]))
+	}
+	session, platform, done, err := c.padSession(ctx, addr, chosen)
 	if err != nil {
 		return err
 	}
 	defer done()
-	layout := padLayoutFor(vidPid)
 	if len(backup) > layout.active && byte(binary.LittleEndian.Uint16(backup[layout.platform:])) != platform {
 		return errInvalidState("this backup is for the other position of the controller's mode switch")
 	}
@@ -822,6 +886,13 @@ func (c *OpenBitdoCore) restorePadBackup(ctx context.Context, addr PadAddress, b
 	if perr != nil {
 		return errProtocol(perr)
 	}
+	if err := layout.holdsPlatform(current, platform); err != nil {
+		return err
+	}
+	// The header's crc, platform and active slot stay the controller's, in
+	// what is written as in what is compared.
+	backup = append([]byte(nil), backup...)
+	copy(backup[layout.crc:layout.names], current[layout.crc:layout.names])
 	// Runs of differing bytes, leaving the header's crc, platform and
 	// active slot (the eight bytes before the names) to the controller.
 	var spans []padRange
@@ -847,14 +918,14 @@ func (c *OpenBitdoCore) restorePadBackup(ctx context.Context, addr PadAddress, b
 		defer endSync()
 	}
 	for slot := 0; slot < layout.slots; slot++ {
-		if err := writePadMacroSteps(ctx, session, platform, slot, macros[slot], now[slot]); err != nil {
+		if err := writePadMacroSteps(ctx, session, layout, platform, slot, macros[slot], now[slot]); err != nil {
 			return errProtocol(err)
 		}
 	}
 	if len(spans) == 0 {
 		return nil
 	}
-	if err := writePadSpans(ctx, session, backup, spans); err != nil {
+	if err := writePadSpans(ctx, session, layout, backup, spans); err != nil {
 		return errProtocol(err)
 	}
 	return nil

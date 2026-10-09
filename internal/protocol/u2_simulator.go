@@ -26,6 +26,12 @@ type U2Simulator struct {
 	// PlatformOffset is where a record keeps its platform; zero means
 	// 0x10, where a three-slot record has it.
 	PlatformOffset int
+	// Counted makes it a first-generation Ultimate Bluetooth: it takes
+	// requests in the counted wrapper (81 n 04 ...) and no others, and
+	// ignores one whose count does not cover what it says it carries.
+	// NoCRC makes it accept a write whose crc is zero, as through that
+	// controller's adapter.
+	Counted, NoCRC bool
 	// ArcadeMode, when not zero, is the byte the arcade mode query answers
 	// with in place of the one Physical implies.
 	ArcadeMode byte
@@ -106,6 +112,21 @@ func (u *U2Simulator) Write(data []byte) (int, error) {
 		return 0, errTransport("simulator not open")
 	}
 	u.Frames = append(u.Frames, append([]byte(nil), data...))
+	if u.Counted {
+		// Unwrap to the direct form the rest of this function reads.
+		if len(data) != 64 || data[0] != 0x81 || data[2] != 0x04 || data[1] < 1+u2HeaderLen || int(data[1]) > len(data)-2 {
+			return len(data), nil
+		}
+		direct := make([]byte, 64)
+		direct[0] = 0x81
+		copy(direct[1:], data[2:2+int(data[1])])
+		if cmd := binary.LittleEndian.Uint16(direct[2:]); cmd == u2CmdWrite || cmd == u2CmdMacroWrite {
+			if int(data[1]) != 1+u2HeaderLen+int(binary.LittleEndian.Uint16(direct[6:])) {
+				return len(data), nil
+			}
+		}
+		data = direct
+	}
 	// Every request starts 81 04, except the arcade mode query: 81 00 52.
 	arcadeQuery := len(data) == 64 && data[1] == 0 && data[2] == 0x52
 	if len(data) != 64 || data[0] != 0x81 || (data[1] != 0x04 && !arcadeQuery) {
@@ -161,7 +182,7 @@ func (u *U2Simulator) Write(data []byte) (int, error) {
 			break
 		}
 		chunk := data[u2DataOffset : u2DataOffset+length]
-		if u2CRC(chunk) != crc {
+		if u2CRC(chunk) != crc && (!u.NoCRC || crc != 0) {
 			u.BadCRCs++
 			break
 		}
@@ -218,7 +239,7 @@ func (u *U2Simulator) Write(data []byte) (int, error) {
 			break
 		}
 		chunk := data[u2DataOffset : u2DataOffset+length]
-		if u2CRC(chunk) != crc {
+		if u2CRC(chunk) != crc && (!u.NoCRC || crc != 0) {
 			u.BadCRCs++
 			break
 		}

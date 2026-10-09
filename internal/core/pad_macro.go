@@ -176,24 +176,54 @@ func (m PadMacro) validate(canTrigger func(PadTarget) bool) error {
 	return nil
 }
 
-func (m PadMacro) encodeSteps() []byte {
+// padMacroTriggerBits are the two triggers as a step's button bits.
+const padMacroTriggerBits = uint16(PadL2 | PadR2)
+
+// encodeSteps is the macro's steps as macro storage holds them. With
+// analogTriggers the triggers are stored as full analog values (L2 in the
+// high byte, R2 in the low) in place of their button bits.
+func (m PadMacro) encodeSteps(analogTriggers bool) []byte {
 	out := make([]byte, 0, len(m.Steps)*padMacroStepBytes)
 	for _, step := range m.Steps {
+		buttons, triggers := step.Buttons, uint16(0)
+		if analogTriggers {
+			if buttons&uint16(PadL2) != 0 {
+				triggers |= 0xff00
+			}
+			if buttons&uint16(PadR2) != 0 {
+				triggers |= 0x00ff
+			}
+			buttons &^= padMacroTriggerBits
+		}
 		out = binary.LittleEndian.AppendUint16(out, uint16(step.Millis))
-		out = binary.LittleEndian.AppendUint16(out, step.Buttons)
-		out = binary.LittleEndian.AppendUint16(out, 0) // analog trigger values: unused, triggers are button bits
+		out = binary.LittleEndian.AppendUint16(out, buttons)
+		out = binary.LittleEndian.AppendUint16(out, triggers) // zero unless analogTriggers: triggers are button bits
 		out = binary.LittleEndian.AppendUint16(out, uint16(step.Left))
 		out = binary.LittleEndian.AppendUint16(out, uint16(step.Right))
 	}
 	return out
 }
 
-func decodePadMacroSteps(data []byte) []PadMacroStep {
+func decodePadMacroSteps(data []byte, analogTriggers bool) []PadMacroStep {
 	steps := make([]PadMacroStep, 0, len(data)/padMacroStepBytes)
 	for i := 0; i+padMacroStepBytes <= len(data); i += padMacroStepBytes {
+		buttons := binary.LittleEndian.Uint16(data[i+2:])
+		if analogTriggers {
+			// The trigger bits mean nothing here; only the three values the
+			// vendor's software writes are read as a trigger held.
+			buttons &^= padMacroTriggerBits
+			switch binary.LittleEndian.Uint16(data[i+4:]) {
+			case 0xffff:
+				buttons |= padMacroTriggerBits
+			case 0xff00:
+				buttons |= uint16(PadL2)
+			case 0x00ff:
+				buttons |= uint16(PadR2)
+			}
+		}
 		steps = append(steps, PadMacroStep{
 			Millis:  int(binary.LittleEndian.Uint16(data[i:])),
-			Buttons: binary.LittleEndian.Uint16(data[i+2:]),
+			Buttons: buttons,
 			Left:    PadStick(binary.LittleEndian.Uint16(data[i+6:])),
 			Right:   PadStick(binary.LittleEndian.Uint16(data[i+8:])),
 		})
@@ -221,6 +251,10 @@ func encodePadMacroSection(layout padLayout, platform byte, macros [PadMacros]Pa
 		binary.LittleEndian.PutUint32(header[44:], uint32(macro.Repeat))
 		binary.LittleEndian.PutUint32(header[48:], uint32(macro.IntervalMillis))
 	}
+	if layout.ultimateBT {
+		// The vendor's software always gives this model's count as four.
+		section[4] = PadMacros
+	}
 	return section
 }
 
@@ -245,7 +279,8 @@ func readPadMacros(ctx context.Context, session *protocol.DeviceSession, record 
 				return macros, fmt.Errorf("slot %d macro %d: %w", slot+1, j+1, err)
 			}
 			macros[slot][j] = PadMacro{
-				Name: decodePadName(header[:padNameLen]), Trigger: trigger, Steps: decodePadMacroSteps(data),
+				Name: decodePadName(header[:padNameLen]), Trigger: trigger,
+				Steps:          decodePadMacroSteps(data, layout.analogMacroTriggers(platform)),
 				Repeat:         int(binary.LittleEndian.Uint32(header[44:])),
 				IntervalMillis: int(binary.LittleEndian.Uint32(header[48:])),
 			}
@@ -256,8 +291,9 @@ func readPadMacros(ctx context.Context, session *protocol.DeviceSession, record 
 
 // writePadMacroSteps erases and rewrites the storage of each macro in slot
 // that differs from was, commits, and reads the steps back.
-func writePadMacroSteps(ctx context.Context, session *protocol.DeviceSession, platform byte, slot int, now, was [PadMacros]PadMacro) error {
+func writePadMacroSteps(ctx context.Context, session *protocol.DeviceSession, layout padLayout, platform byte, slot int, now, was [PadMacros]PadMacro) error {
 	wrote := false
+	analog := layout.analogMacroTriggers(platform)
 	for j := range now {
 		if reflect.DeepEqual(now[j].Steps, was[j].Steps) || now[j].Empty() {
 			continue
@@ -266,7 +302,7 @@ func writePadMacroSteps(ctx context.Context, session *protocol.DeviceSession, pl
 		if err := session.U2EraseMacroData(ctx, platform, byte(slot), offset, protocol.U2MacroRegion); err != nil {
 			return fmt.Errorf("macro %d: erase: %w", j+1, err)
 		}
-		if err := session.U2WriteMacroData(ctx, platform, byte(slot), offset, now[j].encodeSteps()); err != nil {
+		if err := session.U2WriteMacroData(ctx, platform, byte(slot), offset, layout.macroStorage(now[j].encodeSteps(analog))); err != nil {
 			return fmt.Errorf("macro %d: %w", j+1, err)
 		}
 		wrote = true
@@ -281,7 +317,7 @@ func writePadMacroSteps(ctx context.Context, session *protocol.DeviceSession, pl
 		if reflect.DeepEqual(now[j].Steps, was[j].Steps) || now[j].Empty() {
 			continue
 		}
-		want := now[j].encodeSteps()
+		want := now[j].encodeSteps(analog)
 		got, err := session.U2ReadMacroData(ctx, platform, byte(slot), j*protocol.U2MacroRegion, len(want))
 		if err != nil {
 			return fmt.Errorf("macro %d: readback failed: %w", j+1, err)
@@ -296,6 +332,10 @@ func writePadMacroSteps(ctx context.Context, session *protocol.DeviceSession, pl
 // macroTrigger reports whether a button can play a macro on this model: an
 // Arcade Controller Pro adds its fifth extra button.
 func (l padLayout) macroTrigger(target PadTarget) bool {
+	if l.ultimateBT {
+		// No L4 or R4 to play one from.
+		return padMacroTrigger(target) && target != padMotionP3 && target != padMotionP4
+	}
 	return padMacroTrigger(target) || (l.arcadePro() && target == padArcadeP5)
 }
 

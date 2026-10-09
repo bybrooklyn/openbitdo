@@ -123,6 +123,32 @@ not_covered = "background image upload and factory reset (81 04 25 01) are separ
 hardware = "no"
 confidence = "inferred"
 
+# Ultimate Bluetooth Controller, first generation. Worked out the same way as
+# the rest of this file (static analysis of the vendor's Windows application
+# V1.37 and its native library, in a scratch directory outside this
+# repository); wire facts only. No hardware has been tried: every entry here
+# is inferred.
+[ultimate_bluetooth_first_generation]
+pids = "0x6007 is the controller; 0x3106 is its adapter. The vendor library's device list applies no usage filter to 0x6007 and does not list 0x3106, so the configuration interface is assumed to be the usual one (usage page 0xffa0, usage 0x0001)"
+framing = "a count follows the report id and everything else sits one byte later: 81 n 04, then the same 16-byte header (cmd u16, arg u16, len u16, crc u16, total u32, offset u32), then up to 45 data bytes. n counts the bytes after it: the 04, the header and the data. Replies are laid out as the rest of this file's"
+request_kinds = "bare requests (cmd 7, cmd 6, cmd 0x104) are the header alone with the crc zero and n = 0x11. Carrying requests (cmd 0x14, cmd 2, cmd 1, cmd 0x102, cmd 0x103) are followed by len bytes with the crc of those bytes: the data when writing, len bytes of 0xcc when reading; with len 0 the crc is that of no bytes, 0xffff"
+crc_by_pid = "the crc is computed when the library is set to 0x6007 and left zero when it is set to 0x3106, which the vendor application switches to once it has seen the adapter"
+commands = "cmd 7 arg 0 pauses and arg 1 resumes input reports (no keyed value); cmd 0x14 selects the platform record; cmd 2 reads; cmd 1 writes (total = 0x914); cmd 6 arg 0x0123 commits; macro storage is cmd 0x102, 0x103 and 0x104 addressed as the rest of this file's. The connection query, the mode-switch query and the light commands are not sent to it"
+platform = "there is no query: the user picks Switch (0) or XInput (3) and the application selects that record with cmd 0x14 before reading. The record read back carries the platform at 0x010"
+record = "0x914 bytes, little-endian, three slots"
+layout = "0x000 flag u32 x3; 0x00c crc u32; 0x010 platform u16; 0x012 active slot u16; 0x014 name 32 bytes x3; 0x074 rumble 12 x3; 0x098 sticks 8 x3; 0x0b0 triggers 8 x3; 0x0c8 feature word 8 x3; 0x0e0 button map 84 x3 (flag u32 + 20 x u32); 0x1dc hot-key macros 392 x3; 0x674 recorded macros 216 x3; 0x8fc xinput rumble 8 x3"
+layout_evidence = "record size from the whole-record read and write; the slot flag at slot * 4 and the name at 0x14 + slot * 32 from the library's name write; the active slot at 0x012 from its current-slot query; the first four button-map entries at 0x0e4 from what the read and write log. Everything from 0x074 to 0x0e0 is where the other three-slot records have it; the offsets after the button map follow from the sizes of the sections before them"
+button_map = "20 entries: B, A, Y, X, L1, R1, L2, R2, L3, R3, Select, Start, Star, Home, Up, Down, Left, Right, P1, P2. Target codes as the other controllers'. The application offers every button but Home (which it does not remap) the face, shoulder, trigger, stick-click, Select, Start, Home and d-pad targets and none; Star also right-stick directions, left-stick up, down and right, 0x00010000 and 0x01000000 (auto turbo)"
+button_defaults = "an unset map holds the same values in the same places as the other controllers' (0x2000, 0x1000, 0x10, 0x20 first on Switch; 0x1000, 0x2000, 0x20, 0x10 first on XInput; Star 0x00400000 on Switch, 0x00010000 otherwise; P1 and P2 none), so with this record's order A and B, and X and Y, trade functions on Switch and not on XInput"
+whole_record = "the application writes this record whole (cmd 1 in 45-byte steps from offset 0, then commit) after re-reading the active slot; the only partial write the library has for it is the name write, which is not followed by a commit"
+record_crc = "the value at 0x00c is CRC-16/MODBUS over all 0x914 bytes including the value already there"
+vibration = "rumble holds two float strengths, level / 5. The application edits them on the Switch record; on the XInput record it edits the xinput rumble range instead, except on firmware 1.04 beta 1 to 12"
+macros = "headers at 0x674 + slot * 216 in the format of the rest of this file, with the count byte always 4; steps in macro storage, written in whole 32-byte reports. On the XInput record a step holds L2 and R2 in its analog trigger word (0xff00 L2, 0x00ff R2, 0xffff both) and not as button bits; on the Switch record as button bits"
+report_state = "the application sends cmd 7 arg 0 before selecting the platform. Its read and write wrappers for this model send arg 1 before and arg 0 after, the reverse of the other models', but only when a flag is set that the application sets for another product's receiver"
+not_applied_by_vendor = "in V1.37 the control that would send this model's edits to the controller is not connected to anything: the application reads the record and macros but has no reachable write"
+hardware = "no"
+confidence = "inferred"
+
 [record]
 size = "0x638 bytes, little-endian, three slots"
 layout = "0x000 flag u32 x3; 0x00c crc u32; 0x010 platform u16; 0x012 active slot u16; 0x014 name 32 bytes x3; 0x074 rumble 12 x3; 0x098 sticks 8 x3; 0x0b0 triggers 8 x3; 0x0c8 feature word 8 x3; 0x0e0 button map 92 x3 (flag u32 + 22 x u32); 0x1f4 macros 216 x3; 0x47c xinput rumble 8 x3; 0x494 motion 12 x3; 0x4b8 dynamic theme 12 x3; 0x4dc wheel theme 16 x3; 0x50c per-LED theme 100 x3"
