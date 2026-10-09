@@ -195,6 +195,20 @@ var ds4BootAllowed = map[CommandID]bool{
 	CommandExitBootloader: true, CommandFirmwareChunk: true, CommandFirmwareCommit: true, CommandGetPid: true,
 }
 
+// ultimateBTPIDs are the first-generation Ultimate Bluetooth and its adapter.
+var ultimateBTPIDs = map[uint16]bool{UltimateBTPID: true, UltimateBTAdapterPID: true}
+
+// ultimateBTCommands are the controller-record commands the vendor's
+// software sends a first-generation Ultimate Bluetooth. It is not asked
+// whether it is connected or where a mode switch is, has no lights, and is
+// not an arcade controller; those requests also go out in a wrapper it does
+// not take (see u2Framing).
+var ultimateBTCommands = map[CommandID]bool{
+	CommandU2SetReportState: true, CommandU2SelectPlatform: true,
+	CommandU2RecordRead: true, CommandU2RecordWrite: true, CommandU2Commit: true,
+	CommandU2MacroRead: true, CommandU2MacroWrite: true, CommandU2MacroErase: true,
+}
+
 // isCommandAllowedForDevice is isCommandAllowedByFamily narrowed by what is
 // known about the specific device. A JP108 keyboard only takes its own
 // commands (and, once firmware is enabled, its own boot/firmware ones).
@@ -208,6 +222,9 @@ func isCommandAllowedForDevice(target VidPid, family ProtocolFamily, command Com
 			return true
 		}
 		return jp108Commands[command]
+	}
+	if _, record := u2CommandCode(command); (record || command == CommandU2SetReportState) && ultimateBTPIDs[target.PID] {
+		return ultimateBTCommands[command]
 	}
 	return isCommandAllowedByFamily(family, command)
 }

@@ -44,17 +44,21 @@ const (
 	u2MaxChunk = 45
 	// u2DataOffset is where a reply's data starts.
 	u2DataOffset = 18
+	// u2HeaderLen is the size of the header every request carries.
+	u2HeaderLen = 16
 
 	// U2RecordSize is the size of an Ultimate 2's configuration record.
 	// Its siblings keep the same sections at the front and add their own:
 	// a Pro 3's record is Pro3RecordSize, an Ultimate 2 Bluetooth's
 	// U2BTRecordSize. An Arcade Controller Pro's is ArcadeProRecordSize: it
 	// has two slots where the others have three, so every section sits
-	// somewhere else.
-	U2RecordSize        = 0x638
-	Pro3RecordSize      = 0x92c
-	ArcadeProRecordSize = 0xa68
-	U2BTRecordSize      = 0xad0
+	// somewhere else. A first-generation Ultimate Bluetooth's is
+	// UltimateBTRecordSize: its button map is two inputs shorter.
+	U2RecordSize         = 0x638
+	UltimateBTRecordSize = 0x914
+	Pro3RecordSize       = 0x92c
+	ArcadeProRecordSize  = 0xa68
+	U2BTRecordSize       = 0xad0
 
 	// u2CommitTimeout is how long a commit may take: the controller writes
 	// its flash before it answers.
@@ -98,6 +102,83 @@ func u2Frame(template []byte, arg uint16, data []byte, length int, total, offset
 	binary.LittleEndian.PutUint32(frame[10:], total)
 	binary.LittleEndian.PutUint32(frame[14:], offset)
 	copy(frame[u2DataOffset:], data)
+	return frame
+}
+
+// A first-generation Ultimate Bluetooth (UltimateBTPID) and its adapter
+// (UltimateBTAdapterPID) take the same header in a different wrapper: a
+// count follows the report id, and everything else sits one byte later.
+//
+//	request  81 n 04 | cmd u16 | arg u16 | len u16 | crc u16 | total u32 | offset u32 | data (up to 45 bytes)
+//
+// n counts the bytes after it: the 04, the 16-byte header and the data. The
+// vendor's software builds its requests two ways, and both are kept here
+// byte for byte because no controller has been tried with anything else:
+//
+//   - a bare request (pause or resume input reports, commit, erase) is the
+//     header alone, its crc zero;
+//   - a carrying request (select platform, read, write, and the macro read
+//     and write) is followed by len bytes, with the crc of those bytes: the
+//     data when it writes, and filler of 0xcc when it reads. With nothing to
+//     carry the crc is that of no bytes, 0xffff.
+//
+// The adapter is sent the same frames with the crc left zero. Replies are
+// laid out as every other controller's.
+type u2Framing byte
+
+const (
+	u2FramingDirect u2Framing = iota
+	u2FramingCounted
+	u2FramingCountedNoCRC
+)
+
+// u2ReadFiller is what a counted read request carries in place of data.
+const u2ReadFiller = 0xcc
+
+func u2FramingFor(pid uint16) u2Framing {
+	switch pid {
+	case UltimateBTPID:
+		return u2FramingCounted
+	case UltimateBTAdapterPID:
+		return u2FramingCountedNoCRC
+	}
+	return u2FramingDirect
+}
+
+// u2Bare and u2Carrying are the two ways a request is built; see u2Framing.
+// A model that takes the direct wrapper is sent the same frame either way.
+const (
+	u2Bare     = false
+	u2Carrying = true
+)
+
+// u2Request fills in a request for this session's controller from its row
+// template.
+func (s *DeviceSession) u2Request(template []byte, carrying bool, arg uint16, data []byte, length int, total, offset uint32) []byte {
+	framing := u2FramingFor(s.target.PID)
+	if framing == u2FramingDirect {
+		return u2Frame(template, arg, data, length, total, offset)
+	}
+	frame := make([]byte, len(template))
+	frame[0], frame[2] = template[0], template[1]
+	copy(frame[3:5], template[2:4])
+	binary.LittleEndian.PutUint16(frame[5:], arg)
+	binary.LittleEndian.PutUint16(frame[7:], uint16(length))
+	binary.LittleEndian.PutUint32(frame[11:], total)
+	binary.LittleEndian.PutUint32(frame[15:], offset)
+	carried := 0
+	if carrying {
+		carried = length
+		body := frame[u2DataOffset+1 : u2DataOffset+1+carried]
+		for i := range body {
+			body[i] = u2ReadFiller
+		}
+		copy(body, data)
+		if framing == u2FramingCounted {
+			binary.LittleEndian.PutUint16(frame[9:], u2CRC(body))
+		}
+	}
+	frame[1] = byte(1 + u2HeaderLen + carried)
 	return frame
 }
 
@@ -194,7 +275,7 @@ func (s *DeviceSession) U2SetInputReports(ctx context.Context, on bool) error {
 			arg = 0xaa01
 		}
 	}
-	_, err = s.sendRow(ctx, row, u2Frame(row.Request, arg, nil, 0, 0, 0))
+	_, err = s.sendRow(ctx, row, s.u2Request(row.Request, u2Bare, arg, nil, 0, 0, 0))
 	return err
 }
 
@@ -205,7 +286,7 @@ func (s *DeviceSession) U2SelectPlatform(ctx context.Context, platform byte) err
 	if err != nil {
 		return err
 	}
-	_, err = s.sendRow(ctx, row, u2Frame(row.Request, uint16(platform), nil, 0, 0, 0))
+	_, err = s.sendRow(ctx, row, s.u2Request(row.Request, u2Carrying, uint16(platform), nil, 0, 0, 0))
 	return err
 }
 
@@ -222,7 +303,7 @@ func (s *DeviceSession) U2ReadRecord(ctx context.Context, size int) ([]byte, err
 	record := make([]byte, 0, size)
 	for len(record) < size {
 		want := min(u2MaxChunk, size-len(record))
-		resp, err := s.sendRow(ctx, row, u2Frame(row.Request, 0, nil, want, uint32(size), uint32(len(record))))
+		resp, err := s.sendRow(ctx, row, s.u2Request(row.Request, u2Carrying, 0, nil, want, uint32(size), uint32(len(record))))
 		if err != nil {
 			return nil, err
 		}
@@ -245,7 +326,7 @@ func (s *DeviceSession) U2WriteRecordRange(ctx context.Context, record []byte, o
 	if err != nil {
 		return err
 	}
-	if n := len(record); n != U2RecordSize && n != Pro3RecordSize && n != U2BTRecordSize && n != ArcadeProRecordSize {
+	if n := len(record); n != U2RecordSize && n != Pro3RecordSize && n != U2BTRecordSize && n != ArcadeProRecordSize && n != UltimateBTRecordSize {
 		return errInvalidInput("%d bytes is not the size of any known configuration record", n)
 	}
 	if offset < 0 || length < 1 || offset+length > len(record) {
@@ -253,7 +334,7 @@ func (s *DeviceSession) U2WriteRecordRange(ctx context.Context, record []byte, o
 	}
 	for end := offset + length; offset < end; {
 		chunk := record[offset:min(end, offset+u2MaxChunk)]
-		resp, err := s.sendRow(ctx, row, u2Frame(row.Request, 0, chunk, len(chunk), uint32(len(record)), uint32(offset)))
+		resp, err := s.sendRow(ctx, row, s.u2Request(row.Request, u2Carrying, 0, chunk, len(chunk), uint32(len(record)), uint32(offset)))
 		if err != nil {
 			return err
 		}
@@ -274,7 +355,7 @@ func (s *DeviceSession) U2Commit(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	_, err = s.sendRow(ctx, row, u2Frame(row.Request, u2CommitArg, nil, 0, 0, 0))
+	_, err = s.sendRow(ctx, row, s.u2Request(row.Request, u2Bare, u2CommitArg, nil, 0, 0, 0))
 	return err
 }
 
@@ -342,7 +423,7 @@ func (s *DeviceSession) U2ReadMacroData(ctx context.Context, platform, slot byte
 	out := make([]byte, 0, length)
 	for len(out) < length {
 		want := min(u2MacroChunk, length-len(out))
-		resp, err := s.sendRow(ctx, row, u2Frame(row.Request, u2MacroArg(platform, slot), nil, want, uint32(length), uint32(offset+len(out))))
+		resp, err := s.sendRow(ctx, row, s.u2Request(row.Request, u2Carrying, u2MacroArg(platform, slot), nil, want, uint32(length), uint32(offset+len(out))))
 		if err != nil {
 			return nil, err
 		}
@@ -365,7 +446,7 @@ func (s *DeviceSession) U2EraseMacroData(ctx context.Context, platform, slot byt
 	if !u2MacroRangeOK(offset, length) {
 		return errInvalidInput("macro range %d+%d is outside a slot's macro storage", offset, length)
 	}
-	_, err = s.sendRow(ctx, row, u2Frame(row.Request, u2MacroArg(platform, slot), nil, length, 0, uint32(offset)))
+	_, err = s.sendRow(ctx, row, s.u2Request(row.Request, u2Bare, u2MacroArg(platform, slot), nil, length, 0, uint32(offset)))
 	return err
 }
 
@@ -382,7 +463,7 @@ func (s *DeviceSession) U2WriteMacroData(ctx context.Context, platform, slot byt
 	total := uint32(offset + len(data))
 	for sent := 0; sent < len(data); {
 		chunk := data[sent:min(len(data), sent+u2MacroChunk)]
-		resp, err := s.sendRow(ctx, row, u2Frame(row.Request, u2MacroArg(platform, slot), chunk, len(chunk), total, uint32(offset+sent)))
+		resp, err := s.sendRow(ctx, row, s.u2Request(row.Request, u2Carrying, u2MacroArg(platform, slot), chunk, len(chunk), total, uint32(offset+sent)))
 		if err != nil {
 			return err
 		}

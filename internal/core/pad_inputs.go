@@ -129,5 +129,5 @@ func (t PadTarget) String() string {
 // DefaultTarget is what input i does on this profile's platform when it has
 // no assignment.
 func (p PadProfile) DefaultTarget(i int) PadTarget {
-	return PadInputs[i].defaultFor(p.Platform)
+	return p.layout.defaultTarget(i, p.Platform)
 }
