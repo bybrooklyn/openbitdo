@@ -1,6 +1,7 @@
 # OpenBitdo
 
 ## AI DISCLOSURE
+
 AI models from Codex, Claude, and Opencode were used to assist in development of OpenBitdo,
 in fact the go/bubbletea rewrite was completed by a team of 4 agents.
 Regardless of the fact that this was written primarily by agents, i have done
