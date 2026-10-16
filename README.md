@@ -1,5 +1,11 @@
 # OpenBitdo
 
+## AI DISCLOSURE
+AI models from Codex, Claude, and Opencode were used to assist in development of OpenBitdo,
+in fact the go/bubbletea rewrite was completed by a team of 4 agents.
+Regardless of the fact that this was written primarily by agents, i have done
+my due diligence to ensure security in OpenBitdo.
+---
 OpenBitdo is a clean-room, beginner-first 8BitDo utility built around a modern terminal UI.
 It focuses on safe diagnostics first, clear support status, and blocked-action messaging for device flows that are still under investigation.
 
