@@ -146,7 +146,7 @@ jobs:
           /usr/bin/openbitdo --mock --diagnostics-dump >/tmp/aur-canary-diagnostics.toml
           test -s /tmp/aur-canary-diagnostics.toml
           installed_files="$(pacman -Ql openbitdo-bin)"
-          grep -Fq 'usr/lib/udev/rules.d/99-openbitdo.rules' <<<"$installed_files"
+          grep -Fq 'usr/lib/udev/rules.d/70-openbitdo.rules' <<<"$installed_files"
           grep -Fq 'usr/share/bash-completion/completions/openbitdo' <<<"$installed_files"
           grep -Fq 'usr/share/fish/vendor_completions.d/openbitdo.fish' <<<"$installed_files"
           grep -Fq 'usr/share/zsh/site-functions/_openbitdo' <<<"$installed_files"

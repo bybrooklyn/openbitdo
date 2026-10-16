@@ -394,37 +394,6 @@ func TestJP108MockMappingRoundtripSupportsBackupAndRestore(t *testing.T) {
 	}
 }
 
-func TestU2MockProfileRoundtripSupportsBackupAndRestore(t *testing.T) {
-	c := New(Config{MockMode: true})
-	target := protocol.VidPid{VID: 0x2dc8, PID: 0x6012}
-	ctx := context.Background()
-
-	profile, err := c.U2ReadCoreProfile(ctx, target, U2Slot1)
-	if err != nil {
-		t.Fatalf("read profile: %v", err)
-	}
-	if profile.Slot != U2Slot1 {
-		t.Fatalf("expected slot 1, got %v", profile.Slot)
-	}
-	if len(profile.Mappings) == 0 {
-		t.Fatal("expected non-empty mappings")
-	}
-	if len(profile.PaddleMappings) != len(AllU2Paddles) {
-		t.Fatalf("expected %d paddle mappings, got %d", len(AllU2Paddles), len(profile.PaddleMappings))
-	}
-
-	backupID, hasBackup, err := c.U2ApplyCoreProfile(ctx, target, U2Slot1, 1, []U2ButtonMapping{{Button: U2A, Target: U2FuncStart}}, 0.5, 0.5, true)
-	if err != nil {
-		t.Fatalf("apply profile: %v", err)
-	}
-	if !hasBackup {
-		t.Fatal("expected a backup id")
-	}
-	if err := c.RestoreBackup(ctx, backupID); err != nil {
-		t.Fatalf("restore backup: %v", err)
-	}
-}
-
 func TestGuidedButtonTestReturnsBeginnerGuidance(t *testing.T) {
 	c := New(Config{MockMode: true})
 	result, err := c.GuidedButtonTest(context.Background(), KindJP108, []string{"A -> Space", "K1 -> Enter"})

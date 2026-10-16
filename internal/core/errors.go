@@ -1,6 +1,7 @@
 package core
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/bybrooklyn/openbitdo/internal/protocol"
@@ -43,6 +44,13 @@ const (
 	// some I/O call returned an error. Lets the TUI show a clear
 	// disconnected state instead of a generic error.
 	KindDeviceDisconnected ErrorKind = "DeviceDisconnected"
+	// KindPermissionDenied means the OS refused this user access to the
+	// device node. The device is fine; the fix is on the host.
+	KindPermissionDenied ErrorKind = "PermissionDenied"
+	// KindNoConfigChannel means the device is connected but exposes no HID
+	// interface OpenBitdo's protocol can be sent through, so nothing beyond
+	// identifying it is possible.
+	KindNoConfigChannel ErrorKind = "NoConfigChannel"
 )
 
 // Error is internal/core's error type.
@@ -69,6 +77,10 @@ func (e *Error) Error() string {
 		return fmt.Sprintf("not found: %s", e.Message)
 	case KindDeviceDisconnected:
 		return fmt.Sprintf("device disconnected: %s", e.Message)
+	case KindPermissionDenied:
+		return fmt.Sprintf("permission denied: %s", e.Message)
+	case KindNoConfigChannel:
+		return fmt.Sprintf("no configuration channel: %s", e.Message)
 	default: // KindInvalidState
 		return fmt.Sprintf("invalid state: %s", e.Message)
 	}
@@ -84,8 +96,20 @@ func errIO(cause error) *Error {
 	return &Error{Kind: KindIO, Message: cause.Error(), Cause: cause}
 }
 
+// errProtocol wraps a protocol-layer failure, promoting the two causes a
+// user can act on differently (no access, no channel) to their own kind.
 func errProtocol(cause error) *Error {
-	return &Error{Kind: KindProtocol, Message: cause.Error(), Cause: cause}
+	kind := KindProtocol
+	var perr *protocol.Error
+	if errors.As(cause, &perr) {
+		switch perr.Code() {
+		case protocol.CodePermissionDenied:
+			kind = KindPermissionDenied
+		case protocol.CodeNoConfigInterface:
+			kind = KindNoConfigChannel
+		}
+	}
+	return &Error{Kind: kind, Message: cause.Error(), Cause: cause}
 }
 
 func errDownload(format string, a ...any) *Error {

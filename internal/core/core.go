@@ -40,12 +40,37 @@ type OpenBitdoCore struct {
 	// of real HID access, without needing physical hardware. Unset in normal
 	// use, where transport() falls back to protocol.NewHidTransport().
 	transportOverride protocol.Transport
+
+	// mockKeyboard and mockPad are the simulated devices mock mode talks
+	// to.
+	mockKeyboard *protocol.JP108Simulator
+	mockPad      *protocol.U2Simulator
+
+	// sharedProducts remembers, by serial, which product a device under
+	// the shared controller id said it is (0 when it could not say).
+	sharedMu       sync.Mutex
+	sharedProducts map[string]uint16
 }
 
+// transport is the transport for a keyboard-style device; see transportFor.
 func (c *OpenBitdoCore) transport() protocol.Transport {
+	return c.transportFor(protocol.VidPid{})
+}
+
+// transportFor is the transport to reach target through.
+func (c *OpenBitdoCore) transportFor(target protocol.VidPid) protocol.Transport {
 	var t protocol.Transport
 	if c.transportOverride != nil {
 		t = c.transportOverride
+	} else if c.config.MockMode {
+		// Mock mode has no hardware, but a device's profile is worth
+		// exploring: a simulated Retro 108 or Ultimate 2 stands in, so the
+		// real protocol code runs against it and edits persist for the
+		// session.
+		t = c.mockKeyboard
+		if supportsPadProfile(target) {
+			t = c.mockPad
+		}
 	} else {
 		t = protocol.NewHidTransport()
 	}
@@ -74,6 +99,8 @@ func New(config Config) *OpenBitdoCore {
 		diagCache:        make(map[diagCacheKey]DiagCacheEntry),
 		http:             &http.Client{},
 		enumerateDevices: protocol.EnumerateHIDDevices,
+		mockKeyboard:     &protocol.JP108Simulator{Volume: 3},
+		mockPad:          &protocol.U2Simulator{Physical: protocol.U2PlatformXInput},
 	}
 	c.advancedMode.Store(config.AdvancedMode)
 	return c
@@ -107,20 +134,90 @@ func (c *OpenBitdoCore) ListDevices(ctx context.Context) ([]AppDevice, error) {
 		}, nil
 	}
 
-	devices := addressableEnumeratedDevices(c.enumerateDevices())
+	enumerated := c.enumerateDevices()
+	channels := configChannelStates(enumerated)
+	roles := deviceRoles(enumerated)
+	devices := addressableEnumeratedDevices(enumerated)
 	out := make([]AppDevice, 0, len(devices))
 	for _, d := range devices {
 		if d.VidPid.VID != 0x2dc8 {
 			continue
 		}
 		p := protocol.DeviceProfileFor(d.VidPid)
-		out = append(out, AppDevice{
-			VidPid: d.VidPid, Name: p.Name, SupportLevel: p.SupportLevel, SupportTier: p.SupportTier,
+		device := AppDevice{
+			VidPid: d.VidPid, Name: p.Name, DisplayName: friendlyDeviceName(d.Product, p),
+			SupportLevel: p.SupportLevel, SupportTier: p.SupportTier,
 			ProtocolFamily: p.ProtocolFamily, Capability: p.Capability, Evidence: p.Evidence,
-			Serial: d.Serial, Connected: true,
-		})
+			Serial: d.Serial, Connected: true, ConfigChannel: channels[d.VidPid],
+			WorksAs: roles[d.VidPid],
+		}
+		if d.VidPid.PID == protocol.SharedControllerPID && device.ConfigChannel == ChannelPresent {
+			c.resolveSharedProduct(ctx, &device)
+		}
+		out = append(out, device)
 	}
 	return out, nil
+}
+
+// deviceRoles works out, per VID/PID, what the device presents itself as:
+// a Generic Desktop gamepad/joystick or keyboard interface (HID usage page
+// 0x01, usages 0x04/0x05 and 0x06). A device in a mode with no configuration
+// interface is usually still one of these, and working.
+func deviceRoles(devices []protocol.EnumeratedDevice) map[protocol.VidPid]DeviceRole {
+	roles := make(map[protocol.VidPid]DeviceRole)
+	for _, d := range devices {
+		if d.UsagePage != 0x01 {
+			continue
+		}
+		switch d.Usage {
+		case 0x04, 0x05:
+			roles[d.VidPid] = RoleGamepad
+		case 0x06:
+			if roles[d.VidPid] == RoleUnknown {
+				roles[d.VidPid] = RoleKeyboard
+			}
+		}
+	}
+	return roles
+}
+
+// configChannelStates works out, per VID/PID, whether any enumerated
+// interface is the vendor configuration interface. A device is only called
+// ChannelAbsent when every one of its interfaces reported usage metadata;
+// an interface with none (a platform that cannot read it) leaves the answer
+// unknown rather than wrongly ruling the device out.
+func configChannelStates(devices []protocol.EnumeratedDevice) map[protocol.VidPid]ChannelState {
+	states := make(map[protocol.VidPid]ChannelState)
+	undescribed := make(map[protocol.VidPid]bool)
+	for _, d := range devices {
+		switch {
+		case d.IsVendorConfigInterface():
+			states[d.VidPid] = ChannelPresent
+		case d.UsagePage == 0 && d.Usage == 0:
+			undescribed[d.VidPid] = true
+		}
+		if _, seen := states[d.VidPid]; !seen {
+			states[d.VidPid] = ChannelAbsent
+		}
+	}
+	for vidPid, state := range states {
+		if state == ChannelAbsent && undescribed[vidPid] {
+			states[vidPid] = ChannelUnknown
+		}
+	}
+	return states
+}
+
+// devicePresent re-enumerates to tell a device that was unplugged apart from
+// one that is still there but failed. It goes through enumerateDevices, the
+// same seam ListDevices uses, so a test's device set answers this too.
+func (c *OpenBitdoCore) devicePresent(target protocol.VidPid) bool {
+	for _, device := range c.enumerateDevices() {
+		if device.VidPid == target {
+			return true
+		}
+	}
+	return false
 }
 
 func stablePhysicalDeviceKey(device protocol.EnumeratedDevice) (string, bool) {
@@ -242,7 +339,7 @@ func (c *OpenBitdoCore) DiagProbe(ctx context.Context, target protocol.VidPid) (
 	session, err := protocol.NewDeviceSession(ctx, c.transport(), target,
 		protocol.SessionConfig{Experimental: true, RetryPolicy: protocol.DefaultRetryPolicy(), TimeoutProfile: protocol.DefaultTimeoutProfile(), TraceEnabled: true})
 	if err != nil {
-		if !protocol.IsDevicePresent(target) {
+		if !c.devicePresent(target) {
 			return protocol.DiagProbeResult{}, errDeviceDisconnected(target)
 		}
 		return protocol.DiagProbeResult{}, errProtocol(err)
@@ -300,13 +397,19 @@ func (c *OpenBitdoCore) BeginnerDiagSummary(device AppDevice, diag protocol.Diag
 	}
 	blockedHint := fmt.Sprintf("Blocked operations: %s.", c.blockedOperationSummary(device))
 
+	if total == 0 {
+		return "No diagnostic checks ran, so nothing is known about how this device responds. " + blockedHint
+	}
+
 	base := fmt.Sprintf("Checks: %d/%d passed. Confirmed checks: %d/%d passed. %s %s %s %s %s",
 		passed, total, confirmedOK, confirmedTotal, experimentalHint, statusHint, transportHint, blockedHint, familyHint)
 
-	switch device.SupportTier {
-	case protocol.TierFull:
-		return base + " This device is full-support."
-	case protocol.TierCandidateReadOnly:
+	switch {
+	case passed == 0:
+		return base + " The device did not answer any check, whatever its listed support tier."
+	case device.SupportTier == protocol.TierFull:
+		return base + " Listed support tier: full."
+	case device.SupportTier == protocol.TierCandidateReadOnly:
 		return base + " This device is candidate-readonly: update and mapping stay blocked until runtime + hardware confirmation."
 	default:
 		return base + " This device is detect-only: use diagnostics only."
@@ -352,4 +455,56 @@ func (c *OpenBitdoCore) sessionHandle(id FirmwareUpdateSessionID) (*firmwareSess
 		return nil, errNotFound("unknown session id: %s", id)
 	}
 	return handle, nil
+}
+
+// sharedProductAliases maps what a device under the shared id reports to
+// the product whose record it holds: a receiver stands for its controller.
+var sharedProductAliases = map[uint16]uint16{
+	0x6012: 0x6012, 0x6013: 0x6012, // Ultimate 2
+	0x6009: 0x6009, 0x600a: 0x6009, // Pro 3
+	0x600f: 0x600f, 0x6011: 0x600f, // Ultimate 2 Bluetooth
+	0x600b: 0x600b, 0x600c: 0x600b, // Arcade Controller
+}
+
+// resolveSharedProduct asks a device under the shared controller id which
+// product it is, once per serial, and gives the listing that product's
+// name and capabilities. A device that does not answer, or names a product
+// with no profile support here, is left as it was.
+func (c *OpenBitdoCore) resolveSharedProduct(ctx context.Context, device *AppDevice) {
+	c.sharedMu.Lock()
+	reported, known := c.sharedProducts[device.Serial]
+	c.sharedMu.Unlock()
+	if !known {
+		config := protocol.SessionConfig{RetryPolicy: protocol.DefaultRetryPolicy(), TimeoutProfile: protocol.DefaultTimeoutProfile()}
+		if session, err := protocol.NewDeviceSession(ctx, c.transportFor(device.VidPid), device.VidPid, config); err == nil {
+			reported, _ = session.ProductBehindSharedID(ctx)
+			_ = session.Close()
+		}
+		c.sharedMu.Lock()
+		if c.sharedProducts == nil {
+			c.sharedProducts = map[string]uint16{}
+		}
+		c.sharedProducts[device.Serial] = reported
+		c.sharedMu.Unlock()
+	}
+	product, ok := sharedProductAliases[reported]
+	if !ok {
+		return
+	}
+	device.Product = protocol.VidPid{VID: device.VidPid.VID, PID: product}
+	p := protocol.DeviceProfileFor(device.Product)
+	device.Name, device.DisplayName = p.Name, friendlyDeviceName("", p)
+	device.SupportLevel, device.SupportTier, device.Evidence = p.SupportLevel, p.SupportTier, p.Evidence
+	// Only the profile capability carries over: firmware and boot paths
+	// are not known to work through the shared id.
+	device.Capability = protocol.PidCapability{SupportsU2SlotConfig: p.Capability.SupportsU2SlotConfig}
+}
+
+// ForgetSharedProducts drops what devices under the shared id said they
+// were, so a rescan asks again. A controller swapped onto the same cable
+// keeps its predecessor's answer otherwise.
+func (c *OpenBitdoCore) ForgetSharedProducts() {
+	c.sharedMu.Lock()
+	c.sharedProducts = nil
+	c.sharedMu.Unlock()
 }

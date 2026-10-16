@@ -19,7 +19,7 @@ import (
 //     proof the device is live and answering requests at the USB layer.
 //  2. No command gets an actual response: this was true for GetPid (ruled
 //     out separately: no AppliesTo entry at all for PID 0x6012/0x6013),
-//     CommandU2GetCurrentSlot (Confidence:"inferred", so inconclusive on its
+//     a since-removed legacy Ultimate 2 slot read (inferred, so inconclusive on its
 //     own), and now GetMode despite being the strongest possible candidate.
 //     Both write-byte conventions (report ID stripped vs. kept in the
 //     payload) and repeated attempts with settle delays made no difference.

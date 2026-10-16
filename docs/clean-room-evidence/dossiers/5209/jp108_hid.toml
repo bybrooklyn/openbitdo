@@ -1,0 +1,155 @@
+# Sanitized dirty-room dossier, with hardware confirmation
+
+dossier_id = "DOS-5209-JP108-HID"
+pid_hex = "0x5209"
+operation_group = "JP108Dedicated"
+command_id = ["Jp108ReadDedicatedMappings", "Jp108WriteDedicatedMapping", "Jp108ReadFeatureFlags", "Jp108WriteFeatureFlags", "Jp108ReadProfileName", "Jp108WriteProfileName"]
+evidence_source = "static, then hardware"
+confidence = "confirmed"
+supersedes = "DOS-5209-JP108-Dedicated for framing: that dossier's 64-byte frames do not apply to this device"
+
+# How this was obtained. The framing and command bytes below were worked out
+# from static analysis of the vendor's Windows application (V1.37), in a
+# scratch directory outside this repository. No vendor code is reproduced
+# here; this file records wire facts only. Every command marked hardware =
+# "yes" was then sent to a real Retro 108 (0x5209, USB, firmware reporting
+# bcdDevice 1.13) on Linux over hidraw, and the reply recorded.
+
+[transport]
+interface = "the HID interface with usage page 0x008c, usage 0x0001 (USB interface 2)"
+request = "output report 0x52: the report id, then 32 data bytes (33 bytes written)"
+reply = "input report 0x54: the report id, then 32 data bytes"
+reply_shape = "a read is answered with the command byte echoed in data byte 0; a write is acknowledged with data bytes e4 08"
+not_used = "output reports 0xb2 and 0x51 and input report 0xb1 are declared by the interface but play no part in these commands; frames sent on 0xb2 drew no reply"
+timing = "replies arrive within a few milliseconds; the vendor flow waits 5-10 ms and retries up to 20-30 times"
+
+[commands.read_profile_name]
+request = "80"
+reply = "80, length in bytes, a more-flag byte, then the name as UTF-16LE (up to 29 bytes per report)"
+hardware = "yes"
+observed = "empty name (length 0) on a keyboard never configured; 80 12 00 then 'OpenBitdo' after it was written"
+
+[commands.write_profile_name]
+request = "70, length in bytes (at most 29 per report), more-flag, then the name as UTF-16LE"
+reply = "e4 08"
+hardware = "yes"
+notes = "The vendor flow writes length 0 first, which clears the stored profile, then the new name. A profile name is always written before mappings."
+clear_untested = "length 0 as a clear has not been sent to hardware"
+
+[commands.read_mapped_keys]
+request = "81"
+reply = "81, then (key id, type) pairs, zero-terminated; byte 31 non-zero means another report follows"
+hardware = "yes"
+observed = "81 with no pairs on an unconfigured keyboard; 81 e8 07 e9 07 after both buttons were assigned"
+runtime = "not used by OpenBitdo, which reads each button directly"
+
+[commands.read_mapping]
+request = "83, key id"
+reply = "83, key id, type, four value bytes"
+hardware = "yes"
+observed = "type 0 and zero value for every key on an unconfigured keyboard; 83 e9 07 00 76 after assigning the A button"
+
+[commands.write_mapping]
+request = "fa 03 0c 00 aa 09 71, key id, type, four value bytes"
+reply = "e4 08"
+hardware = "yes"
+types = "0x07 keyboard key, 0x0c media/consumer key, 0x01 mouse button"
+keyboard_value = "a modifier (usage 0xe0-0xe7) goes in the first value byte; any other key's usage goes in the second; all zero means no assignment"
+
+[commands.read_feature_flags]
+request = "88"
+reply = "88, then flag bytes"
+hardware = "yes"
+observed = "88 00 on an unconfigured keyboard"
+
+[commands.write_feature_flags]
+request = "78, flags"
+reply = "e4 08"
+hardware = "no"
+
+[commands.report_mode]
+request = "7b, mode"
+reply = "e4 08"
+hardware = "yes"
+notes = "The vendor flow sends 7b 00 when it opens the device. Sent once here and acknowledged. What it changes is not known, and the reads and writes above also worked in a later session without it."
+runtime = "not sent by OpenBitdo"
+
+[key_ids]
+# The ten dedicated buttons. The ids are not in order.
+A = 233
+B = 232
+K1 = 240
+K2 = 241
+K3 = 238
+K4 = 239
+K5 = 236
+K6 = 237
+K7 = 234
+K8 = 235
+ordinary_keys = "an ordinary key's id is its HID keyboard usage (letter A is 4, Enter is 40)"
+
+[effect]
+# Observed on the same keyboard, reading its key reports from hidraw while
+# the buttons were pressed.
+profile_button = "A stored mapping is only used while the keyboard's Profile button is on. With it off, an assigned A or B button sends nothing; with it on, it sends the assigned key."
+value_is_sent_verbatim = "A button assigned 0x76 sent usage 0x76 and one assigned 0x77 sent 0x77. The keyboard does not translate the value."
+f13 = "It follows that F13-F24 must be written as their HID usages, 0x68-0x73. The vendor table's 0x76-0x81 for those keys produce other usages (0x76 is Keyboard Menu, 0x77 Select), not F13-F24."
+where = "The A and B buttons are the two keys between right Alt and right Ctrl; the vendor manual calls them the Super buttons."
+profile_button_location = "Per the vendor manual (Retro-108-Mechanical-Keyboard.pdf, page 02): the control panel at the top left has, left to right, a mode switch, a volume knob, then three small buttons marked only with icons: Pair, Fast key mapping, Profile. Each has an indicator above it. The Profile button is the third and is not labelled with the word."
+fast_key_mapping = "The manual also describes assigning keys to a Super button on the keyboard itself, with no host software: press the Fast key mapping button, then hold up to six keys and press the Super button. This is separate from the profile mapping recorded here."
+
+[open_questions]
+voice = "The commands behind the vendor's volume setting are not identified. The Jp108ReadVoice/WriteVoice rows in command_matrix.csv still carry the old framing and are not sent to this device."
+adapter = "Nothing is known about the 2.4G adapter (0x520a)."
+long_names = "A name longer than 29 bytes spans several reports; only the single-report case was exercised."
+profile_state = "Whether the Profile button's state can be read or set from the host is not known. One vendor-page input report (id 0x11) was seen when a top-row button was pressed."
+
+# Macros. Static evidence only: none of the writes below has been sent to
+# hardware. The macro list read has, on a keyboard holding no macros.
+
+[retro_mechanical_keyboard]
+pid = "0x5200 takes the same commands on the same report and interface (usage page 0x008c)"
+key_ids = "ordinary keys by HID usage; modifiers LCtrl..RAlt are 100..106; A button 109, B button 108; K1..K8 are 116, 117, 114, 115, 112, 113, 110, 111; no numpad"
+f_keys = "F13..F24 as targets are 118..129, not the HID usages 104..115 a Retro 108 takes"
+hardware = "no"
+
+[names]
+encoding = "UTF-16, high byte first, as the vendor application writes profile and macro names; the keyboard stores the bytes as given"
+compatibility = "OpenBitdo wrote profile names low byte first before this was known; a stored name whose units all have a zero second byte is read that way"
+
+[commands.read_macro_list]
+request = "82"
+reply = "82, then seven four-byte entries (key id first, zero ends the list), then a byte that is non-zero when a second report carries the eighth entry"
+hardware = "yes"
+observed = "an empty list"
+
+[commands.read_macro_name]
+request = "84, key id"
+reply = "84, key id, length, more-flag, up to 28 name bytes per report"
+hardware = "no"
+
+[commands.read_macro_value]
+request = "86, key id"
+reply = "86, key id, more-flag, offset (two bytes), length, up to 26 value bytes per report"
+hardware = "no"
+
+[commands.write_macro_name]
+request = "74, key id, length, more-flag, name bytes (28 per report)"
+reply = "e4 08"
+hardware = "no"
+
+[commands.write_macro_value]
+request = "76, key id, more-flag, offset (two bytes), length, value bytes. A value of at most 25 bytes goes in one report declaring length 26; a longer one sends 25 bytes first, then 24 per report"
+reply = "e4 08, once, after the last report"
+hardware = "no"
+
+[commands.clear_macro]
+request = "77, key id, step count"
+reply = "e4 08"
+hardware = "no"
+
+[macro_value]
+header = "01, repeat count (1-99), 0x20 when the macro repeats until stopped (repeat count then 0), step count"
+steps = "three bytes each: 0f lo hi = wait in ms; 81 usage 00 = key down; 01 usage 00 = key up; 83 usage 00 = modifier down; 03 usage 00 = modifier up"
+interval = "the pause between repeats is stored as a final wait step"
+limits = "8 macros, one per key; 200 steps; waits and intervals up to 60000 ms"

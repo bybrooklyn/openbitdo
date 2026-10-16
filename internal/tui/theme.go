@@ -105,8 +105,17 @@ var (
 	// package doc comment above for why. Active/focused panels get an Accent
 	// bar; inactive ones get a dim neutral bar, same distinction the old
 	// rounded-box colors made, just expressed as a rule instead of a box.
-	stylePanel       = barred(theme.BorderDim)
-	stylePanelActive = barred(theme.Accent)
+	// The shell's frame gives the pane its edges, so a panel is just an
+	// indent: no rule of its own.
+	stylePanel = lipgloss.NewStyle().PaddingLeft(2)
+
+	// styleSection heads a group inside a panel ("You can", "Not yet"):
+	// quieter than stylePanelTitle, which names the panel itself.
+	styleSection = lipgloss.NewStyle().Foreground(theme.TextFaint).Bold(true)
+
+	// styleTab / styleTabActive are the tab titles above the pane.
+	styleTab       = lipgloss.NewStyle().Foreground(theme.TextFaint)
+	styleTabActive = lipgloss.NewStyle().Foreground(theme.Text).Bold(true)
 
 	// stylePanelTitle marks section/panel headings. Underlined, on top of
 	// Accent+Bold, specifically so it is never byte-identical to
@@ -152,15 +161,15 @@ var (
 	styleBadgeCandidate = lipgloss.NewStyle().Foreground(theme.Warning).Bold(true)
 	styleBadgeDetect    = lipgloss.NewStyle().Foreground(theme.TextFaint)
 
-	// styleModal: no border at all, matching opencode's actual dialog
-	// styling exactly (verified by reading dialog.tsx/dialog-confirm.tsx) —
-	// a solid Surface-colored panel floating on the dimmed backdrop
-	// (see compositeDimmed in modal.go). The danger/normal distinction is
-	// carried entirely by the title and button text color (see modal.go),
-	// not by a colored box outline — same as opencode's own confirm dialog.
+	// styleModal is a dialog floating over the dimmed screen: a filled
+	// panel with a border of its own, so its edge is still clear where the
+	// terminal shows no background colour.
 	styleModal = lipgloss.NewStyle().
 			Padding(1, 2).
-			Background(theme.Surface)
+			Background(theme.Surface).
+			Border(lipgloss.NormalBorder()).
+			BorderForeground(theme.Accent).
+			BorderBackground(theme.Surface)
 
 	// styleWarningBlock/stylePositiveBlock/styleAccentBlock/styleDangerBlock:
 	// left-bar treatment for block-level prose (tier explanations, firmware
@@ -189,14 +198,3 @@ const (
 	IconProgressFilled = "█"
 	IconProgressEmpty  = "░"
 )
-
-func supportTierBadge(label string, kind string) string {
-	switch kind {
-	case "full":
-		return styleBadgeFull.Render(IconTierFull + " " + label)
-	case "candidate":
-		return styleBadgeCandidate.Render(IconTierCandidate + " " + label)
-	default:
-		return styleBadgeDetect.Render(IconTierDetect + " " + label)
-	}
-}

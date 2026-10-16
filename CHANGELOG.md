@@ -4,6 +4,126 @@ All notable changes to OpenBitdo are tracked here.
 
 ## Unreleased
 
+### Added
+
+- Retro 108: the Mapping tab edits the whole profile. Any of the 111 assignable keys can be set to
+  a key (with an optional modifier), a media key or a mouse action through a searchable list; the
+  Win, Alt+Tab and Alt+F4 locks and the volume level are settings; the profile can be renamed or
+  erased. Each write is read back, and what was written is put back if the keyboard did not keep
+  it.
+- Retro 108 macros: press `m` on a key to build a macro for it from key taps, holds, releases and
+  pauses, with a repeat count and a pause between repeats. A macro that would leave a key held is
+  refused. On a real keyboard this stays behind advanced mode until a macro write has been
+  confirmed on hardware.
+- Retro 108 macros can be recorded: `R` in the macro editor turns what you type into key taps,
+  holding Shift where a character needs it.
+- Profile and macro names are written the way the vendor's application writes them, so each
+  program can read names the other wrote.
+- A controller wired or in XInput mode enumerates under an ID several products share (0x310b).
+  It is now asked which product it is, and an Ultimate 2, Pro 3 or Ultimate 2 Bluetooth gets its
+  editor. Untested on hardware.
+- Arcade Controller: button map, macros and the choice of which direction wins when two opposite
+  ones are pressed together. Untested on hardware.
+- Retro 87 and Retro 68 keyboards: protocol and core support for their configuration record (keys,
+  locks, volume, sleep, lighting, macros). No editor yet; untested on hardware.
+- Retro Mechanical Keyboard (0x5200): its profile can be read.
+- Retro R8 and Riviera mice: protocol and core support (buttons, DPI stages, polling rate, wheel,
+  macros). No editor yet, and both stay detect-only, so nothing is sent to a real mouse.
+- Pro 3 and Ultimate 2 Bluetooth: the controller editor covers them too, using each model's own
+  record layout. Untested on hardware.
+- Ultimate 2 macros: each slot's four macros can be built in the editor (a trigger button, then
+  steps that hold buttons and stick directions for a time), saved, applied and removed.
+- Ultimate 2 motion and lights: the editor can steer a stick with the motion sensor (which stick,
+  the button that enables it, hold or toggle, sensitivity, dead zone) and set the stick-ring
+  lights (off, tracing, fire ring or a colour per light). Simulator-tested, like the rest of the
+  controller editor.
+- Profile files: `E` in either editor saves the draft (a keyboard profile, or one controller slot)
+  as a readable TOML file under the config directory's `profiles/`; `I` loads one back into the
+  draft. A file a device could not hold is refused with the reason.
+- Ultimate 2: the controller's real configuration protocol (a checksummed header over one
+  1592-byte record per platform, written by byte range and committed) replaces frames that no
+  controller ever answered. A profile editor covers three slots, the 22-input button map (back
+  paddles and extra buttons included), stick and trigger ranges, vibration strength and option
+  switches. It runs against a simulated controller in `--mock`; on real hardware it stays behind
+  advanced mode until the exchange has been confirmed on a controller.
+- A 2.4G receiver is asked whether its controller is connected. A receiver whose controller is
+  off is shown as "Controller off" rather than as a working device.
+
+### Fixed
+
+- Linux: devices could not be opened. OpenBitdo now talks to devices through the kernel's hidraw
+  nodes instead of a libusb-backed library. The old backend needed write access to the raw USB
+  device, which the shipped udev rule never granted (it was named `99-`, so its `uaccess` tag was
+  set after the step that applies it), and it could not tell a multi-interface device's
+  interfaces apart, so a Retro 108 was rejected as "ambiguous" before any open.
+- Linux: controller navigation looked up report descriptors under a path the old backend never
+  returned, so it could not start for any device.
+- The udev rule is now `70-openbitdo.rules` and matches hidraw nodes. Opening a device no longer
+  detaches the kernel's HID driver, so a keyboard keeps working while it is open.
+- A retried read never resent its request, so every retry waited on a reply that was not coming.
+- A stale reply to an earlier command could be validated as the reply to the next one.
+- JP108 mapping: a short table reply was padded with zeros and used as the pre-write backup, so
+  a rollback could write zeros back. A short reply is now an error, and a write is confirmed by
+  reading the table back.
+- TUI: `q`, `?` and `x` were handled before the device filter, so typing a name could quit the
+  app. The filter title printed a raw escape code. At 80x24 the device list was not shown.
+- TUI: a brick-risk dialog confirmed on enter as soon as it appeared; it now starts on Cancel.
+  The write probe's dialog no longer describes a firmware write.
+- TUI: after a failed rollback, a mouse click could still reach the mapping screen.
+- `--mock` no longer opens attached hardware for controller navigation.
+
+### Changed
+
+- The TUI is laid out differently. Devices are always listed down the left, each with a plain
+  verdict (working, limited, can't connect, no access). The right side shows the selected device
+  in three tabs: Overview, Checks and Mapping. This replaces the two-panel dashboard and its
+  `Status` / `Works now` / `Blocked` / `Next step` card.
+- There is one cursor, always in the right-hand pane. `tab` (or `1`-`3`, or `←` `→`) changes
+  section and `d` changes device from anywhere; there is no focus to move between panels.
+- Overview splits a device's actions into "You can" and "Not yet", with the reason beside each
+  thing that is not available. Only what can be done is selectable.
+- A device that answers checks but whose settings cannot be changed is "Limited", not
+  "Supported". A device with no configuration interface is "Can't connect", and nothing is
+  offered for it.
+- Device names replace registry IDs. Text wraps instead of being cut off at the edge.
+- The help overlay lists the keys for the current view; the footer only shows keys that work
+  where you are.
+- Checks names each check in plain words and explains unanswered ones. `enter` shows a check's
+  raw details, `v` opens the report (copy with `c`, save with `w`), `f` filters to unanswered
+  checks.
+- Firmware is listed under "Not yet" as `Deferred in 0.0.3` instead of as a disabled action.
+  Settings is a page opened with `s`, not a row in each device's action list.
+- A controller can reach everything: the d-pad changes section and its third button changes
+  device.
+- A device that works as a controller or keyboard but has no configuration interface is shown
+  as "Playing" or "Typing", with the settings limitation stated separately, instead of "Can't
+  connect".
+
+### Added
+
+- Retro 108 keyboards (`0x5209`) can be read and remapped. The keyboard's configuration interface
+  takes 33-byte commands on report `0x52`, not the 64-byte frames the registry had for it, so
+  until now nothing sent to it was answered. OpenBitdo now reads its profile name, feature flags
+  and the assignment of each of the ten dedicated buttons (A, B, K1-K8), and can assign a button
+  to a key or clear it. A write is checked by reading it back, and a profile name is written
+  first when the keyboard has none. The framing is recorded in
+  `docs/clean-room-evidence/dossiers/5209/jp108_hid.toml`. On a real keyboard the reads, the
+  name write and two assignments were acknowledged and read back, and the A and B buttons were
+  seen sending the assigned keys. A mapping is only used while the keyboard's Profile button is
+  on. F13-F24 are offered as targets by their HID usages (`0x68`-`0x73`).
+- A Buttons tab: press anything on a controller and its button number lights up. It only reads
+  what the controller already sends, and is how to find the number of a back button or extra
+  shoulder button, which have no standard one. Decoding is tested against the report
+  descriptor and reports of a real Ultimate 2 in gamepad mode (`0x6012`).
+
+### Hardware evidence
+
+- First Linux hardware run, recorded in
+  `docs/clean-room-evidence/hardware_run_linux_2026-10-08.md`. An Ultimate 2 (`0x6013`) answers 4
+  of the 12 safe reads over hidraw; the "wrote 64 bytes, read 0" result below does not reproduce
+  on Linux. A Retro 108 (`0x5209`) over USB did not answer the protocol documented at the time;
+  it does answer its own (see Added).
+
 ## v0.0.3
 
 ### Changed

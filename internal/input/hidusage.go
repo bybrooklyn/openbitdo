@@ -9,6 +9,8 @@ const (
 	UsagePageGenericDesktop uint16 = 0x01
 	UsagePageButton         uint16 = 0x09
 
+	UsageJoystick  uint16 = 0x04
+	UsageGamepad   uint16 = 0x05
 	UsageX         uint16 = 0x30
 	UsageY         uint16 = 0x31
 	UsageZ         uint16 = 0x32

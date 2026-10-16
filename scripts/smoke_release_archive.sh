@@ -55,7 +55,7 @@ required=(
   share/zsh/site-functions/_openbitdo
 )
 if [[ "$platform" == "linux" ]]; then
-  required+=(share/udev/rules.d/99-openbitdo.rules)
+  required+=(share/udev/rules.d/70-openbitdo.rules)
 fi
 
 for relative in "${required[@]}"; do

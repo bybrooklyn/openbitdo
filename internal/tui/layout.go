@@ -75,7 +75,9 @@ func renderBoundedPanelWithStyle(style lipgloss.Style, width, height int, conten
 	limit := max(1, width-2)
 	lines := strings.Split(content, "\n")
 	if len(lines) > height {
+		// Say so instead of dropping the rest without a trace.
 		lines = lines[:height]
+		lines[height-1] = styleFaint.Render("⋯ more below; enlarge the window")
 	}
 	for i, line := range lines {
 		lines[i] = ansi.Cut(line, 0, limit)
@@ -125,6 +127,9 @@ func modalGeometry(m modal, width, height int) (box, confirm, cancel rect) {
 	}
 	confirmText := "[ " + m.confirmLabel + " ]"
 	cancelText := "[ " + m.cancelLabel + " ]"
+	if m.cancelLabel == "" {
+		cancelText = "\x00" // no cancel button to find
+	}
 	for row, line := range strings.Split(ansi.Strip(rendered), "\n") {
 		if idx := strings.Index(line, confirmText); idx >= 0 {
 			confirm = rect{x: box.x + lipgloss.Width(line[:idx]), y: box.y + row, w: lipgloss.Width(confirmText), h: 1}
@@ -134,4 +139,68 @@ func modalGeometry(m modal, width, height int) (box, confirm, cancel rect) {
 		}
 	}
 	return box, confirm, cancel
+}
+
+// truncate shortens plain text to width cells, ending in an ellipsis when
+// anything was cut.
+func truncate(s string, width int) string {
+	if width <= 0 {
+		return ""
+	}
+	if ansi.StringWidth(s) <= width {
+		return s
+	}
+	return ansi.Truncate(s, width, "…")
+}
+
+// wrapText word-wraps plain text to width cells. It breaks only at spaces:
+// a library wrapper would also break at hyphens, splitting "--mock" and
+// file names in two. A single word longer than the width (a path) is broken
+// hard rather than left to run past the edge. Leading spaces on a line are
+// kept, so indented lines stay indented; existing newlines are kept.
+func wrapText(s string, width int) []string {
+	if width < 1 {
+		width = 1
+	}
+	var out []string
+	for _, paragraph := range strings.Split(s, "\n") {
+		indent := paragraph[:len(paragraph)-len(strings.TrimLeft(paragraph, " "))]
+		line := indent
+		lineWidth := ansi.StringWidth(indent)
+		empty := true
+		for _, word := range strings.Fields(paragraph) {
+			wordWidth := ansi.StringWidth(word)
+			if !empty && lineWidth+1+wordWidth <= width {
+				line += " " + word
+				lineWidth += 1 + wordWidth
+				continue
+			}
+			if !empty {
+				out = append(out, line)
+				line, lineWidth = "", 0
+			}
+			for lineWidth+wordWidth > width && wordWidth > 0 {
+				head := ansi.Truncate(word, max(1, width-lineWidth), "")
+				out = append(out, line+head)
+				word = word[len(head):]
+				wordWidth = ansi.StringWidth(word)
+				line, lineWidth = "", 0
+			}
+			line += word
+			lineWidth += wordWidth
+			empty = false
+		}
+		out = append(out, line)
+	}
+	return out
+}
+
+// wrapStyled word-wraps plain text and applies style to each resulting line,
+// so a style's reset code never lands in the middle of a wrapped line.
+func wrapStyled(style lipgloss.Style, s string, width int) string {
+	lines := wrapText(s, width)
+	for i, line := range lines {
+		lines[i] = style.Render(line)
+	}
+	return strings.Join(lines, "\n")
 }

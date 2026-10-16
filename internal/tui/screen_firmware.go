@@ -218,7 +218,7 @@ func (m Model) viewFirmware(height int) string {
 	case fwStagePreflighting:
 		b.WriteString(styleFaint.Render("Checking safety gates and computing transfer plan…"))
 	case fwStageDenied:
-		b.WriteString(styleDangerBlock.Render(styleDanger.Render(IconFail+" Blocked: ") + m.fw.deniedMsg))
+		b.WriteString(wrapStyled(styleDanger, IconFail+" Blocked: "+m.fw.deniedMsg, max(1, m.width-4)))
 	case fwStageError:
 		b.WriteString(styleDangerBlock.Render(styleDanger.Render(fmt.Sprintf(IconFail+" Error: %v", m.fw.err))))
 	case fwStageReadyToConfirm:

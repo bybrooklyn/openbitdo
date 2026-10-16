@@ -50,3 +50,11 @@ func (t *loggingTransport) Read(ctx context.Context, length int, timeoutMs uint6
 		length, timeoutMs, time.Since(start), hex.EncodeToString(buf), err)
 	return buf, err
 }
+
+// DrainInput forwards to the wrapped transport when it can discard queued
+// reports, so wrapping a transport for logging does not turn that off.
+func (t *loggingTransport) DrainInput() {
+	if drainer, ok := t.inner.(interface{ DrainInput() }); ok {
+		drainer.DrainInput()
+	}
+}

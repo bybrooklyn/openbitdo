@@ -123,44 +123,41 @@ func TestWave2CandidateStandardPidAllowsSafeReadsOnly(t *testing.T) {
 	mustErrCode(t, err, CodeUnsupportedForPid)
 }
 
-func TestCandidateUltimate2AllowsSlotReadAndConditionalWrite(t *testing.T) {
+func TestCandidateUltimate2AllowsReadsAndConditionalWrite(t *testing.T) {
 	pid := uint16(0x3105)
-	transport := &MockTransport{}
-	r1 := make([]byte, 64)
-	r1[0], r1[1], r1[5] = 0x02, 0x05, 1
-	transport.PushReadData(r1)
-	r2 := make([]byte, 64)
-	r2[0], r2[1], r2[5], r2[6], r2[7] = 0x02, 0x05, 1, 128, 128
-	transport.PushReadData(r2)
-
-	session := openSession(t, transport, pid, cfgWith(func(c *SessionConfig) { c.Experimental = true }))
+	pad := &U2Simulator{Physical: U2PlatformXInput}
+	session := openSession(t, pad, pid, cfgWith(func(c *SessionConfig) { c.Experimental = true }))
 	ctx := context.Background()
 
-	slot, err := session.U2GetCurrentSlot(ctx)
+	connected, err := session.U2Connected(ctx)
 	if err != nil {
-		t.Fatalf("u2_get_current_slot allowed: %v", err)
+		t.Fatalf("u2 connected read allowed: %v", err)
 	}
-	if slot != 1 {
-		t.Fatalf("expected slot 1, got %d", slot)
+	if !connected {
+		t.Fatal("expected the controller to be reported connected")
 	}
-	config, err := session.U2ReadConfigSlot(ctx, slot)
+	platform, err := session.U2PhysicalPlatform(ctx)
 	if err != nil {
-		t.Fatalf("u2_read_config_slot allowed: %v", err)
+		t.Fatalf("u2 mode switch read allowed: %v", err)
 	}
-	if len(config) == 0 {
-		t.Fatal("expected non-empty config")
+	if platform != U2PlatformXInput {
+		t.Fatalf("expected the XInput platform, got %d", platform)
 	}
 
-	err = session.U2WriteConfigSlot(ctx, slot, config)
+	written := len(pad.Frames)
+	err = session.U2Commit(ctx)
 	mustErrCode(t, err, CodeUnsupportedForPid)
+	if len(pad.Frames) != written || pad.Commits != 0 {
+		t.Fatal("a refused write must not reach the controller")
+	}
 
-	transportUnlocked := &MockTransport{}
-	ru := make([]byte, 64)
-	ru[0] = 0x02
-	transportUnlocked.PushReadData(ru)
-	sessionUnlocked := openSession(t, transportUnlocked, pid, cfgWith(func(c *SessionConfig) { c.Experimental = true; c.CandidateWriteUnlock = true }))
+	unlockedPad := &U2Simulator{Physical: U2PlatformXInput}
+	sessionUnlocked := openSession(t, unlockedPad, pid, cfgWith(func(c *SessionConfig) { c.Experimental = true; c.CandidateWriteUnlock = true }))
 
-	if err := sessionUnlocked.U2WriteConfigSlot(ctx, slot, config); err != nil {
-		t.Fatalf("u2_write_config_slot allowed with write unlock: %v", err)
+	if err := sessionUnlocked.U2Commit(ctx); err != nil {
+		t.Fatalf("u2 commit allowed with write unlock: %v", err)
+	}
+	if unlockedPad.Commits != 1 {
+		t.Fatalf("expected 1 commit to reach the controller, got %d", unlockedPad.Commits)
 	}
 }

@@ -158,7 +158,15 @@ func TestManualUltimate2ReleaseGateNavigation(t *testing.T) {
 // with the release-gate evidence.
 func TestManualUltimate2ReleaseGateInterfaces(t *testing.T) {
 	pid := manualExpectedPID(t)
-	infos := hid.Enumerate(bitdoVID, pid)
+	// The same enumeration the app uses: on Linux the generic library
+	// reports every interface's usage as 0/0, which would fail this gate
+	// for a device whose vendor interface is in fact present.
+	var infos []hid.DeviceInfo
+	for _, info := range enumerateNavDevices() {
+		if info.ProductID == pid {
+			infos = append(infos, info)
+		}
+	}
 	if len(infos) == 0 {
 		t.Fatalf("no interfaces enumerated for %#04x:%#04x", bitdoVID, pid)
 	}

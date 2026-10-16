@@ -2,11 +2,14 @@ package tui
 
 import (
 	"context"
+	"io"
+	"os"
 
 	"github.com/bybrooklyn/openbitdo/internal/core"
 	"github.com/bybrooklyn/openbitdo/internal/input"
 	"github.com/bybrooklyn/openbitdo/internal/protocol"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // Every command below wraps one internal/core (or internal/input) call as a
@@ -54,41 +57,6 @@ func cmdAutoDiagnose(ctx context.Context, c *core.OpenBitdoCore, device core.App
 	return func() tea.Msg {
 		entry, err := c.DiagProbeCached(ctx, device)
 		return autoDiagResultMsg{device: device, result: entry.Result, ranAt: entry.RanAt, err: err}
-	}
-}
-
-func cmdJP108ReadMapping(ctx context.Context, c *core.OpenBitdoCore, target protocol.VidPid) tea.Cmd {
-	return func() tea.Msg {
-		mappings, err := c.JP108ReadDedicatedMapping(ctx, target)
-		return jp108MappingLoadedMsg{mappings: mappings, err: err}
-	}
-}
-
-func cmdJP108Apply(ctx context.Context, c *core.OpenBitdoCore, target protocol.VidPid, changes []core.DedicatedButtonMapping) tea.Cmd {
-	return func() tea.Msg {
-		report, err := c.JP108ApplyDedicatedMappingWithRecovery(ctx, target, changes, true)
-		return jp108ApplyResultMsg{report: report, err: err}
-	}
-}
-
-func cmdU2ReadProfile(ctx context.Context, c *core.OpenBitdoCore, target protocol.VidPid, slot core.U2SlotID) tea.Cmd {
-	return func() tea.Msg {
-		profile, err := c.U2ReadCoreProfile(ctx, target, slot)
-		return u2ProfileLoadedMsg{profile: profile, err: err}
-	}
-}
-
-func cmdU2PreviewSlot(ctx context.Context, c *core.OpenBitdoCore, target protocol.VidPid, slot core.U2SlotID) tea.Cmd {
-	return func() tea.Msg {
-		profile, err := c.U2PreviewSlot(ctx, target, slot)
-		return u2SlotPreviewMsg{slot: slot, profile: profile, err: err}
-	}
-}
-
-func cmdU2Apply(ctx context.Context, c *core.OpenBitdoCore, target protocol.VidPid, slot core.U2SlotID, mode byte, changes []core.U2ButtonMapping, l2, r2 float32) tea.Cmd {
-	return func() tea.Msg {
-		report, err := c.U2ApplyCoreProfileWithRecovery(ctx, target, slot, mode, changes, l2, r2, true)
-		return u2ApplyResultMsg{report: report, err: err}
 	}
 }
 
@@ -179,5 +147,21 @@ func cmdSaveReport(mode ReportSaveMode, settingsPath, operation string, device *
 	return func() tea.Msg {
 		path, err := persistSupportReport(mode, settingsPath, operation, device, status, message, diag, firmware, runtimeUnlock)
 		return reportSavedMsg{path: path, err: err}
+	}
+}
+
+// clipboardOut is where the clipboard escape sequence is written: the
+// terminal. A variable so tests can capture it.
+var clipboardOut io.Writer = os.Stdout
+
+// cmdCopyToClipboard asks the terminal to put text on the system clipboard
+// (OSC 52). It works over SSH and needs no clipboard tool, but a terminal
+// may ignore it, and nothing reports back either way. The sequence is one
+// write, so it cannot be split by a frame being drawn at the same time;
+// tea.Printf is no use here, since it prints nothing on the alternate screen.
+func cmdCopyToClipboard(text string) tea.Cmd {
+	return func() tea.Msg {
+		_, _ = io.WriteString(clipboardOut, ansi.SetSystemClipboard(text))
+		return clipboardCopiedMsg{}
 	}
 }

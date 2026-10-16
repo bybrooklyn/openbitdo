@@ -10,8 +10,11 @@ import (
 // AppDevice is a discovered or targeted 8BitDo device with its resolved
 // support profile.
 type AppDevice struct {
-	VidPid         protocol.VidPid
+	VidPid protocol.VidPid
+	// Name is the registry's canonical ID (e.g. "PID_108JP"); DisplayName
+	// is what a person should be shown.
 	Name           string
+	DisplayName    string
 	SupportLevel   protocol.SupportLevel
 	SupportTier    protocol.SupportTier
 	ProtocolFamily protocol.ProtocolFamily
@@ -19,6 +22,62 @@ type AppDevice struct {
 	Evidence       protocol.SupportEvidence
 	Serial         string
 	Connected      bool
+	// ConfigChannel says whether the connected device exposes the HID
+	// interface configuration commands travel over.
+	ConfigChannel ChannelState
+	// WorksAs is what the device is doing for the computer right now,
+	// independent of whether OpenBitdo can configure it.
+	WorksAs DeviceRole
+	// Product is the product this device said it is, when it enumerates
+	// under an id several products share; zero otherwise.
+	Product protocol.VidPid
+}
+
+// DeviceRole is the kind of input device the operating system sees.
+type DeviceRole int
+
+const (
+	RoleUnknown DeviceRole = iota
+	RoleGamepad
+	RoleKeyboard
+)
+
+// ChannelState is whether a device's configuration interface was found.
+type ChannelState int
+
+const (
+	// ChannelUnknown: the platform could not describe the device's
+	// interfaces, so only opening it will tell.
+	ChannelUnknown ChannelState = iota
+	ChannelPresent
+	// ChannelAbsent: every interface is known and none is the configuration
+	// interface. Diagnostics and mapping cannot reach this device.
+	ChannelAbsent
+)
+
+// friendlyDeviceName picks the name to show for a device: what the device
+// calls itself, else the catalog's name, else the registry ID without its
+// "PID_" prefix.
+func friendlyDeviceName(product string, profile protocol.DeviceProfile) string {
+	if name := cleanProductName(product); name != "" {
+		return name
+	}
+	if profile.DisplayName != "" {
+		return profile.DisplayName
+	}
+	return strings.TrimPrefix(profile.Name, "PID_")
+}
+
+// cleanProductName tidies an OS-reported product string by dropping the
+// vendor prefix, which some devices even repeat ("8BitDo 8BitDo Retro 108
+// Keyboard"). Every device listed is an 8BitDo one, so the prefix only
+// costs room; this also matches how the catalog names devices.
+func cleanProductName(product string) string {
+	fields := strings.Fields(product)
+	for len(fields) > 1 && strings.EqualFold(fields[0], "8BitDo") {
+		fields = fields[1:]
+	}
+	return strings.Join(fields, " ")
 }
 
 // Scorecard computes this device's support scorecard.
@@ -30,7 +89,8 @@ func (d AppDevice) SupportStatus() UserSupportStatus { return SupportStatusForTi
 func appDeviceFromProfile(vidPid protocol.VidPid, serial string, connected bool) AppDevice {
 	p := protocol.DeviceProfileFor(vidPid)
 	return AppDevice{
-		VidPid: vidPid, Name: p.Name, SupportLevel: p.SupportLevel, SupportTier: p.SupportTier,
+		VidPid: vidPid, Name: p.Name, DisplayName: friendlyDeviceName("", p),
+		SupportLevel: p.SupportLevel, SupportTier: p.SupportTier,
 		ProtocolFamily: p.ProtocolFamily, Capability: p.Capability, Evidence: p.Evidence,
 		Serial: serial, Connected: connected,
 	}
@@ -72,44 +132,6 @@ type DedicatedButtonMapping struct {
 	TargetHIDUsage uint16
 }
 
-// U2ButtonMapping is one Ultimate2 button -> function mapping. Target is a
-// single-bit function bitmask from the shared U2Function catalog (confirmed
-// wire encoding — see docs/clean-room-evidence/dossiers/6012/u2_core.toml),
-// not a raw HID usage code.
-type U2ButtonMapping struct {
-	Button U2ButtonID
-	Target U2Function
-}
-
-// U2PaddleMapping is one Ultimate2 back-paddle -> function mapping, the
-// paddle-side counterpart to U2ButtonMapping. See U2PaddleID/U2Function in
-// paddles.go.
-type U2PaddleMapping struct {
-	Paddle U2PaddleID
-	Target U2Function
-}
-
-// U2CoreProfile is the readable Ultimate2 core state and the editable mock
-// preview state. Real-device writes are deferred until button-map framing is
-// hardware-confirmed.
-type U2CoreProfile struct {
-	Slot                 U2SlotID
-	Mode                 byte
-	FirmwareVersion      string
-	L2Analog             float32
-	R2Analog             float32
-	SupportsTriggerWrite bool
-	Mappings             []U2ButtonMapping
-	PaddleMappings       []U2PaddleMapping
-	// MappingsUnavailable is non-empty when Mappings/PaddleMappings could
-	// not be read from real hardware — currently always the case for a real
-	// (non-mock) device, since the button-map wire chunking scheme isn't
-	// yet confirmed (see internal/protocol's U2ReadButtonMap). Empty for
-	// mock-mode profiles, where Mappings/PaddleMappings are always
-	// populated with synthetic defaults.
-	MappingsUnavailable string
-}
-
 // GuidedButtonTestResult is the outcome of a guided button-test walkthrough.
 type GuidedButtonTestResult struct {
 	DeviceKind     DeviceKind
@@ -127,19 +149,28 @@ type configBackup struct {
 	payload   configBackupPayload
 }
 
-// configBackupPayload holds exactly one of the two backup shapes.
+// configBackupPayload holds exactly one backup shape, selected by kind.
 type configBackupPayload struct {
 	kind          deviceKind
 	jp108Mappings []DedicatedButtonMapping
-	u2Profile     U2CoreProfile
-	u2ConfigBlob  []byte
+	keyboard      KeyboardProfile
+	padRecord     []byte
+	padMacros     [PadSlots][PadMacros]PadMacro
+	padProduct    protocol.VidPid
+	// recordKeyboard is a record keyboard's profile as it was read.
+	recordKeyboard RecordKeyboardProfile
+	// mouse is a mouse's profile as it was read.
+	mouse MouseProfile
 }
 
 type deviceKind int
 
 const (
 	backupJP108 deviceKind = iota
-	backupU2
+	backupKeyboard
+	backupPad
+	backupRecordKeyboard
+	backupMouse
 )
 
 // WriteRecoveryReport describes the outcome of a backup-then-write-then-

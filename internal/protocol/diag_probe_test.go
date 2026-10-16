@@ -19,15 +19,14 @@ func TestDiagProbeExpandsToSafeReadCommandsAndParsedFacts(t *testing.T) {
 	transport.PushReadData(idleResponse())
 	transport.PushReadData(versionResponse(42, 1))
 	transport.PushReadData(okReadResponse())
-	transport.PushReadData(slotResponse(2))
-	transport.PushReadData(okReadResponse())
-	transport.PushReadData(okReadResponse())
+	transport.PushReadData(u2Reply(u2CmdConnected, 1))
+	transport.PushReadData(u2Reply(u2CmdPhysicalMode, 1))
 
 	session := openSession(t, transport, 0x6012, cfgWith(func(c *SessionConfig) { c.Experimental = true }))
 	diag := session.DiagProbe(context.Background())
 
-	if len(diag.CommandChecks) != 12 {
-		t.Fatalf("expected 12 checks, got %d", len(diag.CommandChecks))
+	if len(diag.CommandChecks) != 11 {
+		t.Fatalf("expected 11 checks, got %d", len(diag.CommandChecks))
 	}
 	if !diag.TransportReady {
 		t.Fatal("expected transport ready")
@@ -47,10 +46,6 @@ func TestDiagProbeExpandsToSafeReadCommandsAndParsedFacts(t *testing.T) {
 		}
 		t.Fatalf("check %s not found", id)
 		return DiagCommandStatus{}
-	}
-
-	if find(CommandU2GetCurrentSlot).Command != CommandU2GetCurrentSlot {
-		t.Fatal("expected U2GetCurrentSlot check present")
 	}
 
 	pidCheck := find(CommandGetPid)
@@ -74,9 +69,25 @@ func TestDiagProbeExpandsToSafeReadCommandsAndParsedFacts(t *testing.T) {
 		t.Fatalf("expected beta=1, got %v", versionCheck.ParsedFacts["beta"])
 	}
 
-	slotCheck := find(CommandU2GetCurrentSlot)
-	if slotCheck.ParsedFacts["slot"] != 2 {
-		t.Fatalf("expected slot=2, got %v", slotCheck.ParsedFacts["slot"])
+	connectedCheck := find(CommandU2GetConnected)
+	if !connectedCheck.OK || connectedCheck.ParsedFacts["connected"] != 1 {
+		t.Fatalf("expected connected=1, got ok=%v facts=%v", connectedCheck.OK, connectedCheck.ParsedFacts)
+	}
+	if connectedCheck.Detail != "controller connected" {
+		t.Fatalf("unexpected connected detail %q", connectedCheck.Detail)
+	}
+
+	switchCheck := find(CommandU2GetPhysicalMode)
+	if !switchCheck.OK || switchCheck.ParsedFacts["xinput"] != 1 {
+		t.Fatalf("expected xinput=1, got ok=%v facts=%v", switchCheck.OK, switchCheck.ParsedFacts)
+	}
+
+	// Every check has an answer scripted above; one that failed would mean
+	// the probe sent something the script did not expect.
+	for _, check := range diag.CommandChecks {
+		if !check.OK {
+			t.Errorf("check %s failed: %s", check.Command, check.Detail)
+		}
 	}
 }
 
@@ -119,4 +130,14 @@ func TestDiagProbeGetModeFallsBackToGetModeAlt(t *testing.T) {
 	if modeCheck.ResponseStatus != StatusOk {
 		t.Fatalf("expected StatusOk, got %s", modeCheck.ResponseStatus)
 	}
+}
+
+// u2Reply is a controller reply to cmd carrying the given data bytes.
+func u2Reply(cmd uint16, data ...byte) []byte {
+	frame := make([]byte, 64)
+	frame[0], frame[1], frame[2] = 0x02, 0x04, 0x04
+	frame[4], frame[5] = byte(cmd), byte(cmd>>8)
+	frame[6] = byte(len(data))
+	copy(frame[u2DataOffset:], data)
+	return frame
 }

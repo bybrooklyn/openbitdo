@@ -21,7 +21,7 @@ package() {
   fi
 
   install -Dm755 "${extracted_dir}/bin/openbitdo" "${pkgdir}/usr/bin/openbitdo"
-  install -Dm644 "${extracted_dir}/share/udev/rules.d/99-openbitdo.rules" "${pkgdir}/usr/lib/udev/rules.d/99-openbitdo.rules"
+  install -Dm644 "${extracted_dir}/share/udev/rules.d/70-openbitdo.rules" "${pkgdir}/usr/lib/udev/rules.d/70-openbitdo.rules"
   install -Dm644 "${extracted_dir}/share/bash-completion/completions/openbitdo" "${pkgdir}/usr/share/bash-completion/completions/openbitdo"
   install -Dm644 "${extracted_dir}/share/fish/vendor_completions.d/openbitdo.fish" "${pkgdir}/usr/share/fish/vendor_completions.d/openbitdo.fish"
   install -Dm644 "${extracted_dir}/share/zsh/site-functions/_openbitdo" "${pkgdir}/usr/share/zsh/site-functions/_openbitdo"

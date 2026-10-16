@@ -77,26 +77,25 @@ func TestDiagProbeMarksInferredReadsAsExperimental(t *testing.T) {
 }
 
 func TestFullSupportPidScopedCommandsWorkWithoutExperimentalMode(t *testing.T) {
-	transport := &MockTransport{}
-	transport.PushReadData([]byte{0x02, 0x05, 0x00, 0x00, 0x00, 0x02})
-	transport.PushReadData([]byte{0x02, 0x00})
-
-	session := openSession(t, transport, 0x6012, DefaultSessionConfig())
+	// The mode-switch read and the commit are both inferred rows, which
+	// need experimental mode anywhere but on a fully supported PID they
+	// are scoped to.
+	pad := &U2Simulator{Physical: U2PlatformXInput}
+	session := openSession(t, pad, 0x6012, DefaultSessionConfig())
 	ctx := context.Background()
 
-	slot, err := session.U2GetCurrentSlot(ctx)
+	platform, err := session.U2PhysicalPlatform(ctx)
 	if err != nil {
 		t.Fatalf("pid-scoped read should be available: %v", err)
 	}
-	if slot != 2 {
-		t.Fatalf("expected slot 2, got %d", slot)
+	if platform != U2PlatformXInput {
+		t.Fatalf("expected the XInput platform, got %d", platform)
 	}
 
-	mode, err := session.U2SetMode(ctx, 3)
-	if err != nil {
+	if err := session.U2Commit(ctx); err != nil {
 		t.Fatalf("pid-scoped write should be available: %v", err)
 	}
-	if mode.Mode != 3 {
-		t.Fatalf("expected mode 3, got %d", mode.Mode)
+	if pad.Commits != 1 {
+		t.Fatalf("expected 1 commit to reach the controller, got %d", pad.Commits)
 	}
 }

@@ -1,0 +1,27 @@
+# udev rule granting the logged-in desktop user access to 8BitDo devices
+# without needing root or a specific group membership.
+#
+# Install:
+#   sudo cp packaging/linux/70-openbitdo.rules /etc/udev/rules.d/
+#   sudo udevadm control --reload-rules
+#   sudo udevadm trigger
+# Then unplug and reconnect the device (or reboot).
+#
+# openbitdo talks to 8BitDo devices through the kernel's hidraw nodes
+# (/dev/hidrawN), so the rules match the "hidraw" subsystem.
+#
+# TAG+="uaccess" is the systemd-logind mechanism: it grants access to
+# whichever user is logged in at the physical seat, with no group membership
+# needed. The tag is only turned into an ACL by 73-seat-late.rules, so this
+# file's name must sort before 73 -- a rule in a 99-*.rules file sets the tag
+# too late and silently grants nothing.
+
+# USB
+KERNEL=="hidraw*", SUBSYSTEM=="hidraw", ATTRS{idVendor}=="2dc8", TAG+="uaccess"
+# Bluetooth (the HID device id is bus:vendor:product, e.g. 0005:2DC8:6012)
+KERNEL=="hidraw*", SUBSYSTEM=="hidraw", KERNELS=="*:2DC8:*", TAG+="uaccess"
+
+# Fallback for setups without systemd-logind, where uaccess is unavailable:
+# opens the device to any local user. Broader than uaccess, but independent of
+# rule ordering. Uncomment if the rules above don't fix the permission error.
+# KERNEL=="hidraw*", SUBSYSTEM=="hidraw", ATTRS{idVendor}=="2dc8", MODE="0666"

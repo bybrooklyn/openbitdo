@@ -26,7 +26,7 @@ func (s *DeviceSession) ensureCommandAllowed(command CommandID) (CommandRow, err
 		}
 	}
 
-	if !isCommandAllowedByFamily(s.profile.ProtocolFamily, command) ||
+	if !isCommandAllowedForDevice(s.target, s.profile.ProtocolFamily, command) ||
 		!isCommandAllowedByCapability(s.profile.Capability, command) ||
 		!CommandAppliesToPID(row, s.target.PID) {
 		return CommandRow{}, errUnsupportedForPid(command, s.target.PID)
@@ -73,12 +73,35 @@ func (s *DeviceSession) allowPidScopedFullSupportPath(row CommandRow) bool {
 var candidateUnlockableWrites = map[CommandID]bool{
 	CommandSetModeDInput:              true,
 	CommandWriteProfile:               true,
-	CommandU2WriteButtonMap:           true,
-	CommandU2WriteConfigSlot:          true,
-	CommandU2SetMode:                  true,
+	CommandU2RecordWrite:              true,
+	CommandU2Commit:                   true,
+	CommandU2SetLightEffect:           true,
+	CommandU2MacroWrite:               true,
+	CommandU2MacroErase:               true,
+	CommandArcadeProSetSync:           true,
 	CommandJp108WriteDedicatedMapping: true,
 	CommandJp108WriteFeatureFlags:     true,
 	CommandJp108WriteVoice:            true,
+	CommandJp108WriteMacroName:        true,
+	CommandJp108WriteMacroValue:       true,
+	CommandJp108ClearMacro:            true,
+	CommandKbRecordWrite:              true,
+	CommandKbRecordMacroErase:         true,
+	CommandKbRecordMacroWrite:         true,
+	CommandKbRecordLightsBegin:        true,
+	CommandKbRecordLightsWrite:        true,
+	CommandMouseWriteProfileName:      true,
+	CommandMouseClearProfile:          true,
+	CommandMouseWriteButton:           true,
+	CommandMouseWriteLeftHanded:       true,
+	CommandMouseWriteLiftOff:          true,
+	CommandMouseWriteWheelSpeed:       true,
+	CommandMouseWriteWheelDirection:   true,
+	CommandMouseWriteDpi:              true,
+	CommandMouseWriteDpiStage:         true,
+	CommandMouseWritePollingRate:      true,
+	CommandMouseWriteMacro:            true,
+	CommandMouseRecordWrite:           true,
 }
 
 func (s *DeviceSession) allowCandidateRuntimeWritePath(command CommandID, safety SafetyClass) bool {

@@ -179,7 +179,7 @@ README.md
 bin/openbitdo
 share/bash-completion/completions/openbitdo
 share/fish/vendor_completions.d/openbitdo.fish
-share/udev/rules.d/99-openbitdo.rules
+share/udev/rules.d/70-openbitdo.rules
 share/zsh/site-functions/_openbitdo
 EOF
 assert_archive_files "$LINUX_DIST/$LINUX_BASE.tar.gz" "$TMP/linux-expected.txt"

@@ -46,7 +46,13 @@ and does not touch the clean-room evidence boundary.
    feeding the same platform-agnostic parser above:
    - **Linux** (`descriptor_linux.go`): the kernel exposes it directly as a
      file, `/sys/class/hidraw/<N>/device/report_descriptor`, derived from
-     `info.Path` (karalabe/hid gives `/dev/hidrawN` paths on Linux).
+     `info.Path`. Devices are enumerated from hidraw (`internal/hidraw`,
+     via `navdevice_linux.go`), so `Path` is a `/dev/hidrawN` node.
+     karalabe/hid's libusb backend is not used on Linux: its paths have the
+     form `bus:address:interface`, which never matched this lookup. Only an
+     interface whose descriptor declares a Generic Desktop joystick or
+     gamepad collection is opened; a keyboard's mouse interface also
+     reports buttons and X/Y and must not be read as a gamepad.
    - **macOS** (`descriptor_darwin.go`): reads it via IOKit's `IOHIDManager`
      — re-enumerates devices independently (`IOHIDManagerCreate` /
      `SetDeviceMatching` / `Open` / `CopyDevices`) and matches by

@@ -1,0 +1,107 @@
+# Sanitized static dirty-room dossier
+
+dossier_id = "DOS-2028-KB-RECORD"
+pid_hex = "0x2028"
+operation_group = "RecordKeyboard"
+command_id = ["KbRecordSetReportMode", "KbRecordRead", "KbRecordWrite", "KbRecordMacroRead", "KbRecordMacroErase", "KbRecordMacroWrite", "KbRecordLightsRead", "KbRecordLightsBegin", "KbRecordLightsWrite"]
+request_shape = "64-byte output report 0x81: 81 04, then an 8-byte header (cmd u8, sub u8, len u8, sum u8, offset u32), then up to 53 data bytes"
+response_shape = "64-byte input report 0x02: 02 04, then 03, the cmd echoed, len u8, five more bytes, then data from byte 10"
+validator_rules = ["byte0 == 0x02", "byte1 == 0x04", "byte2 == 0x03", "a read: low four bits of byte3 equal the request's cmd", "an acknowledgement: byte3 equals the request's cmd"]
+retry_behavior = "the vendor flow repeats a chunk, reads and writes alike, up to 30 times, polling for the reply up to 10 times each; a write chunk is acknowledged with the number of bytes accepted in byte 4"
+failure_signatures = ["timeout", "reply to a different cmd", "02 04 c0: the request is refused"]
+evidence_source = "static"
+confidence = "inferred"
+requirement_ids = ["REQ-DR-001", "REQ-DR-002", "REQ-PROM-001", "REQ-PROM-002"]
+class_family = "Record keyboards: Retro 87 Xbox edition, Retro 87 UK, Retro 68, Riviera keyboard"
+notes = "Static only. Nothing here has been exchanged with hardware; every command below is hardware = no."
+
+# How this was obtained. Framing, command numbers and the record layout were
+# worked out from static analysis of the vendor's Windows application (V1.37)
+# in a scratch directory outside this repository. No vendor code is
+# reproduced here; this file records wire facts only.
+
+[transport]
+interface = "the HID interface with usage page 0xffa0, usage 0x0001"
+sum = "the low byte of the sum of the data bytes; 0 when there are none"
+chunk = "at most 53 data bytes per report; a report is zero-padded to 64 bytes"
+offset = "sent as a u32 of which the vendor flow only ever fills the low 16 bits"
+total = "the vendor flow computes a total length for each transfer but does not send it"
+pids = "0x2028 Retro 87 Xbox edition (2.4G receiver 0x202e); 0x3026 Retro 87 UK (receiver 0x3027); 0x203a Retro 68 (receiver 0x2049); 0x205a Riviera keyboard"
+shared_adapter = "reached through the 0x2060 adapter, the second request byte is 0x84 for the Riviera keyboard (0x44 for the mouse that shares the adapter) instead of 0x04; not implemented"
+commit = "none: a write is not followed by any commit command"
+pacing = "the vendor flow waits 10 ms before a prepare command (cmd 5, cmd 0x0d) and 100 ms before every report of macro data (cmd 6) and colour data (cmd 0x0e)"
+
+[commands.report_mode]
+request = "cmd 0x08, sub 0 or 1, no data"
+reply = "none read"
+notes = "sub 0 is sent before every read and write; sub 1 starts live key reports on this interface, which the vendor's key-capture screens use."
+hardware = "no"
+
+[commands.record_read]
+request = "cmd 0x02, len = bytes wanted (at most 53), offset"
+reply = "byte 4 = bytes returned, data from byte 10"
+notes = "The whole record is 0x5fc bytes. Single fields are also read on their own: 1 byte at 0x24, 2 bytes at 0x26, 1 byte at 0x5c9, 1 byte at 0x5ca."
+hardware = "no"
+
+[commands.record_write]
+request = "cmd 0x01, len, sum, offset, data"
+reply = "byte 4 = bytes accepted"
+notes = "Ranges the vendor flow writes: the whole record; one 12-byte key entry; the 32-byte name at 4; one byte at 0x26, 0x27, 0x5c8, 0x5c9, 0x5ca, 0x5f9, 0x5fa; four bytes at 0x5cc; one theme's settings. The one-byte write at 0x5ca is sent without waiting for its acknowledgement."
+hardware = "no"
+
+[commands.macro_storage]
+area = "slots of 4096 bytes (ten of them) on 0x2028 and 0x3026; slots of 1024 bytes (eight used) on 0x203a and 0x205a. A slot is addressed by its byte offset: slot x slot size."
+read = "cmd 0x07, len (at most 53), offset; reply carries the bytes"
+prepare = "cmd 0x05, no data, offset = the slot's offset; acknowledged. Sent once before a macro is written. What it does to the slot is not known."
+write = "cmd 0x06, data with sum, offset; acknowledged. The 48-byte header is written at the slot's offset, then the steps at the slot's offset + 64."
+header = "48 bytes: mark u32 (0x20200902); u8 at 4 = table index of the key that plays it (116 when none); name 32 bytes at 5 (UTF-16 big-endian); step count u16 at 38; interval between repeats in ms u16 at 40; repeat count u8 at 42 (0 = until stopped, else 1-99); play mode u8 at 43 (0x203a and 0x205a only: 0 press to start and stop, 1 while held, 2 once, 3 press to start over); u16 at 44 and u16 at 46 written as zero"
+step = "four bytes: action u8 (1 press, 2 release, 3 wait), key HID usage u8, duration ms u16 (0-60000, used by a wait)"
+limits = "1008 steps per slot on 0x2028 and 0x3026; 240 fit a slot on 0x203a and 0x205a, of which the vendor flow records at most 200"
+reference = "a key plays a macro when its entry has kind 4 and target = the slot's offset. Taking a macro off a key rewrites only the key's entry; the slot is left as it is."
+hardware = "no"
+
+[commands.per_key_lights]
+size = "283 bytes on 0x2028 (91 lights), 286 on 0x3026 (92), 226 on 0x203a and 0x205a (72)"
+read = "cmd 0x0f, len (at most 53), offset"
+prepare = "cmd 0x0d, no data, offset 0; acknowledged. Sent once before the block is written."
+write = "cmd 0x0e, data with sum, offset; reply byte 4 = bytes accepted. The block is always written whole."
+layout = "brightness u8; a u8 written as 1; effect u8 (0 off, 1 steady, 2 breathing, 3 starlight); speed u8 (stored as 11 minus the 1-10 setting); light count u8 (5-100); four bytes not used; then R, G, B for each light; a final u8 written as 1"
+light_order = "which key each light is under is not established. The vendor screen has one button per key (87, 88 or 68 of them) and gives the button at position 3 the five lights 3 to 7, shifting every later button's light by four."
+hardware = "no"
+
+[record]
+size = "0x5fc bytes, little-endian, one profile"
+layout = "0x000 mark u32; 0x004 name 32 bytes (UTF-16 big-endian, zero-terminated unless full); 0x024 profile switch u8; 0x025 u8 kept as read; 0x026 sleep minutes u8 and 0x027 lights-off minutes u8 (0x203a and 0x205a only); 0x028 key table 120 x 12; 0x5c8 lock bits u8; 0x5c9 volume u8; 0x5ca theme in use u8; 0x5cc light idle time u32 (300 in a new profile); 0x5d0 single theme 5; 0x5d5 loop theme 2; 0x5d7 colour ripple theme 3; 0x5da breathing theme 6; 0x5e0 ripple theme 6; 0x5e6 key resonance theme 9; 0x5ef starlight theme 10; 0x5f9 per-key lights switch u8; 0x5fa Windows dynamic lighting switch u8; 0x5fb unused"
+valid_flag = "0x20200902 marks the record as holding a profile; the vendor flow shows defaults for any other value and creates a profile by writing the whole record"
+profile_switch = "1 at 0x24 when the profile is switched on with the keyboard's Profile button; read after every write, never written on its own"
+lock_bits = "bit 0 Windows key off, bit 1 Alt+Tab off, bit 2 Alt+F4 off"
+volume = "1 to 5; 2 in a new profile"
+timers = "0x203a and 0x205a: sleep 5-30 minutes in steps of 5; lights off 5-30 in steps of 5 and no later than sleep"
+new_profile = "mark; name; key table with every key as itself; volume 2; theme 1; light idle 300; every theme at brightness 255, stored speed 3, light count 5, the 1 byte set, colour 255/165/0 (the ripple theme's background, the others' colour, with key resonance and starlight backgrounds black). Bytes 0x24 to 0x27 are carried over, and on 0x203a and 0x205a the volume too."
+
+[key_table]
+entry = "12 bytes: the key's own code u8, three unused bytes, target u32, kind u32"
+index = "0-7 the modifiers (codes 0xe0-0xe7); 9 and 10 the A and B buttons; 12-107 except 58 the keys with code = index - 8; 108-115 the port buttons K1-K8. On 0x3026 108 is the extra ISO key (code 0x64) and K1-K8 are 109-116. 8, 11, 58 and the rest are not keys."
+own_code = "the HID usage of the key's legend on a US layout; 243 for the A, B and K buttons. On a French 0x3026 the table holds the AZERTY legend's code instead (the entry at 12 holds Q's), so a key's stored code is kept rather than derived from its index."
+kinds = "0 the key as itself (target = its own code); 1 keyboard; 2 consumer control; 3 mouse; 4 macro; 5 and 6 never produced"
+keyboard_target = "a HID keyboard usage (a modifier 0xe0-0xe7 counts); 242 Fn; 243 does nothing; or key usage << 8 | modifier usage for a key with one modifier held"
+consumer_target = "consumer-page usage: 234 volume down, 233 volume up, 226 mute, 205 play/pause, 182 previous, 181 next, 394 mail, 402 calculator, 547 browser, 112 brightness down, 111 brightness up"
+mouse_target = "232 left, 233 middle, 234 right, 235 button 5, 236 button 4, 237 double click, 238 scroll up, 239 scroll down, 240 scroll left, 241 scroll right"
+macro_target = "the macro slot's byte offset"
+
+[themes]
+numbering = "0 off, 1 key resonance, 2 starlight, 3 single, 4 loop, 5 colour ripple, 6 breathing, 7 ripple. On 0x205a: 0 off, 1 key resonance, 2 starlight, 3 single, 4 breathing, 5 ripple; loop and colour ripple are not offered."
+single = "brightness, a 1, R G B"
+loop = "brightness, speed"
+colour_ripple = "brightness, speed, direction (0 across, 1 across reversed, 2 down, 3 down reversed, 4 outwards, 5 inwards)"
+breathing = "brightness, speed, a 1, R G B"
+ripple = "brightness, speed, a 1, background R G B"
+key_resonance = "brightness, speed, a 1, background R G B, colour R G B"
+starlight = "brightness, speed, light count, a 1, background R G B, colour R G B"
+encodings = "brightness 0-255; speed stored as 11 minus the 1-10 setting; light count 5-100"
+
+[not_modelled]
+paired_buttons = "0x203a and 0x205a also keep eight 64-byte records for paired wireless buttons, each with four key entries, exchanged with commands this dossier does not cover. A macro such a button plays lives in the same macro slots."
+receiver_state = "whether a receiver (0x202e, 0x3027, 0x2049) answers while its keyboard is off, and how it says so, is not established"
+layout_variant = "which national layout a 0x3026 is comes from a byte of the firmware version reply that is not read here"
+hardware = "no"

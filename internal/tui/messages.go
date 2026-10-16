@@ -31,32 +31,6 @@ type autoDiagResultMsg struct {
 	err    error
 }
 
-type jp108MappingLoadedMsg struct {
-	mappings []core.DedicatedButtonMapping
-	err      error
-}
-
-type jp108ApplyResultMsg struct {
-	report core.WriteRecoveryReport
-	err    error
-}
-
-type u2ProfileLoadedMsg struct {
-	profile core.U2CoreProfile
-	err     error
-}
-
-type u2ApplyResultMsg struct {
-	report core.WriteRecoveryReport
-	err    error
-}
-
-type u2SlotPreviewMsg struct {
-	slot    core.U2SlotID
-	profile core.U2CoreProfile
-	err     error
-}
-
 type candidateProbeResultMsg struct {
 	device core.AppDevice
 	report core.RuntimeUnlockReport
@@ -127,3 +101,7 @@ type settingsSavedMsg struct {
 type noticeExpiredMsg struct {
 	id int
 }
+
+// clipboardCopiedMsg reports that a copy request was sent to the terminal.
+// Whether the terminal honoured it cannot be known.
+type clipboardCopiedMsg struct{}

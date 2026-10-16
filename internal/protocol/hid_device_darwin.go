@@ -15,3 +15,10 @@ import (
 func openHidDevice(info hid.DeviceInfo) (hidDevice, error) {
 	return machid.Open(int(info.VendorID), int(info.ProductID), int(info.UsagePage), int(info.Usage))
 }
+
+// enumerateHID lists HID interfaces the karalabe/hid way.
+func enumerateHID(vendorID, productID uint16) []hid.DeviceInfo {
+	return hid.Enumerate(vendorID, productID)
+}
+
+func isReadTimeout(error) bool { return false }
